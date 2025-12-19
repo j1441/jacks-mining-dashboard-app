@@ -1,0 +1,64 @@
+manifestVersion: 1
+id: jack-antminer-dashboard
+name: Jack’s Antminer Dashboard
+tagline: Monitor and control your home heating miner
+icon: https://raw.githubusercontent.com/getumbrel/umbrel-apps/master/electrs/icon.svg
+category: automation
+version: “1.0.0”
+port: 3456
+description: >-
+Monitor your Antminer running Braiins OS with a clean, modern web interface.
+Perfect for home heating applications with real-time statistics and power control.
+
+Features:
+
+• Real-time hashrate, temperature, and performance monitoring
+
+• Power profile control (Low/Medium/High) for optimal home heating
+
+• Pool statistics and connection status
+
+• Temperature tracking for all boards and chips
+
+• Fan speed monitoring
+
+• WebSocket-based live updates every 5 seconds
+
+• Clean, responsive dark theme interface
+
+• Works with Tailscale for remote access
+
+Requirements:
+
+• Antminer running Braiins OS
+
+• Network access to miner’s CGMiner API (port 4028)
+
+• Miner must be on same network as Umbrel or accessible via routing
+developer: Jack
+website: https://github.com/yourusername/jack-antminer-dashboard
+dependencies: []
+repo: https://github.com/yourusername/jack-antminer-dashboard
+support: https://github.com/yourusername/jack-antminer-dashboard/issues
+gallery:
+
+- https://i.imgur.com/placeholder1.png
+- https://i.imgur.com/placeholder2.png
+  releaseNotes: >-
+  Initial release v1.0.0
+
+• Single miner monitoring support
+
+• Real-time statistics via WebSocket
+
+• Power profile control (Low/Medium/High)
+
+• Temperature and fan monitoring
+
+• Pool statistics tracking
+
+• Persistent configuration storage
+
+• Modern responsive UI
+submitter: Jack
+submission: https://github.com/getumbrel/umbrel-apps
