@@ -1,0 +1,37 @@
+{
+  "name": "jack-antminer-dashboard",
+  "version": "1.0.0",
+  "description": "Home heating miner dashboard for monitoring Antminer with Braiins OS on Umbrel",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "dev": "NODE_ENV=development node server.js"
+  },
+  "keywords": [
+    "antminer",
+    "braiins",
+    "mining",
+    "dashboard",
+    "umbrel",
+    "bitcoin",
+    "monitoring"
+  ],
+  "author": "Jack",
+  "license": "MIT",
+  "dependencies": {
+    "express": "^4.18.2",
+    "ws": "^8.14.2"
+  },
+  "engines": {
+    "node": ">=18.0.0",
+    "npm": ">=9.0.0"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/yourusername/jack-antminer-dashboard.git"
+  },
+  "bugs": {
+    "url": "https://github.com/yourusername/jack-antminer-dashboard/issues"
+  },
+  "homepage": "https://github.com/yourusername/jack-antminer-dashboard#readme"
+}
