@@ -1,4 +1,4 @@
-# Jack’s Antminer Dashboard for Umbrel
+# Antminer Dashboard for Umbrel
 
 A web-based dashboard for monitoring and controlling Antminer miners running Braiins OS, designed specifically for home heating applications.
 
