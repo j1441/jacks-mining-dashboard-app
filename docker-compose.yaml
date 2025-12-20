@@ -1,31 +1,18 @@
-version: “3.7”
+version: "3.7"
 
 services:
-  app:
-    image: jack-antminer-dashboard:v1.0.0
-    build:
-      context: .
-      dockerfile: Dockerfile
-    container_name: jack-antminer-dashboard
-    restart: unless-stopped
-    ports:
-      - “3456:3456”
+  app_proxy:
     environment:
-      - NODE_ENV=production
-      - PORT=3456
-      - DATA_DIR=/app/data
-    volumes:
-      - ${APP_DATA_DIR:-./data}:/app/data
-    networks:
-      - default
-    healthcheck:
-      test: [“CMD”, “node”, “-e”, “require(‘http’).get(‘http://localhost:3456/health’, (r) => {process.exit(r.statusCode === 200 ? 0 : 1)})”]
-      interval: 30s
-      timeout: 10s
-      retries: 3
-      start_period: 10s
+      APP_HOST: jack-antminer-dashboard_web_1
+      APP_PORT: 3456
 
-networks:
-  default:
-    name: umbrel_main_network
-    external: true
+  web:
+    image: j1441/jack-antminer-dashboard:v1.0.0@sha256:<DIGEST_PLACEHOLDER>
+    restart: on-failure
+    stop_grace_period: 1m
+    volumes:
+      - ${APP_DATA_DIR}/data:/app/data
+    environment:
+      NODE_ENV: production
+      PORT: 3456
+      DATA_DIR: /app/data
