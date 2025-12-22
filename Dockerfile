@@ -10,7 +10,7 @@ COPY package*.json ./
 
 # Install production dependencies only
 
-RUN npm ci –only=production
+RUN npm ci --only=production
 
 # Copy application files
 
