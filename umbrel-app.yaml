@@ -2,7 +2,7 @@ manifestVersion: 1
 id: jacks-mining-dashboard-app
 name: Mining Dashboard
 tagline: Monitor and control your home heating miner
-icon: https://raw.githubusercontent.com/getumbrel/umbrel-apps/master/electrs/icon.svg
+icon: https://github.com/j1441/mining-dashboard-app/blob/main/icon.svg
 category: automation
 version: “1.0.0”
 port: 3456
@@ -36,10 +36,10 @@ Requirements:
 
 • Miner must be on same network as Umbrel or accessible via routing
 developer: j1441
-website: https://github.com/j1441/mining-dashboard-app
+website: https://github.com/j1441/jacks-mining-dashboard-app
 dependencies: []
-repo: https://github.com/j1441/mining-dashboard-app
-support: https://github.com/j1441/mining-dashboard-app/issues
+repo: https://github.com/j1441/jacks-mining-dashboard-app
+support: https://github.com/j1441/jacks-mining-dashboard-app/issues
 gallery:
 
 - https://i.imgur.com/placeholder1.png
@@ -61,4 +61,4 @@ gallery:
 
 • Modern responsive UI
 submitter: j1441
-submission: https://github.com/getumbrel/umbrel-apps
+submission: https://github.com/j1441/jacks-mining-dashboard-app
