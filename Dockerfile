@@ -18,8 +18,9 @@ COPY server.js .
 COPY public ./public
 
 # Create data directory with proper permissions
-
-RUN mkdir -p /app/data && chown -R 1000:1000 /app/data
+COPY entrypoint.sh /entrypoint.sh
+RUN chmod +x /entrypoint.sh
+ # RUN mkdir -p /app/data && chown -R 1000:1000 /app/data
 
 # Expose port
 
@@ -32,7 +33,9 @@ HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 CMD node 
 
 # Run as non-root user for security
 
-USER 1000
+USER root
+ENTRYPOINT ["/entrypoint.sh"]
+USER node
 
 # Start the application
 
