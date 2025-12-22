@@ -19,7 +19,7 @@ COPY public ./public
 
 # Create data directory with proper permissions
 
-RUN mkdir -p /app/data && chmod 777 /app/data
+RUN mkdir -p /app/data && chown -R node:node /app/data
 
 # Expose port
 
