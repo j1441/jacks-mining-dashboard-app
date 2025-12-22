@@ -7,7 +7,7 @@ services:
       APP_PORT: 3456
 
   web:
-    image: j1441/mining-dashboard-app:v1.0.0@sha256:c286a6f0fb28a63aff1b87cfd42c48e435c8f53cbba81dab41a3462b4c1b3631
+    image: j1441/jacks-mining-dashboard-app:v1.0.0@sha256:c286a6f0fb28a63aff1b87cfd42c48e435c8f53cbba81dab41a3462b4c1b3631
     restart: on-failure
     stop_grace_period: 1m
     volumes:
