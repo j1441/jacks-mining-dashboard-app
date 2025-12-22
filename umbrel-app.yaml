@@ -1,6 +1,6 @@
 manifestVersion: 1
-id: jack-antminer-dashboard
-name: Jack’s Antminer Dashboard
+id: mining-dashboard-app
+name: Mining Dashboard
 tagline: Monitor and control your home heating miner
 icon: https://raw.githubusercontent.com/getumbrel/umbrel-apps/master/electrs/icon.svg
 category: automation
@@ -35,11 +35,11 @@ Requirements:
 • Network access to miner’s CGMiner API (port 4028)
 
 • Miner must be on same network as Umbrel or accessible via routing
-developer: Jack
-website: https://github.com/yourusername/jack-antminer-dashboard
+developer: j1441
+website: https://github.com/j1441/mining-dashboard-app
 dependencies: []
-repo: https://github.com/yourusername/jack-antminer-dashboard
-support: https://github.com/yourusername/jack-antminer-dashboard/issues
+repo: https://github.com/j1441/mining-dashboard-app
+support: https://github.com/j1441/mining-dashboard-app/issues
 gallery:
 
 - https://i.imgur.com/placeholder1.png
@@ -60,5 +60,5 @@ gallery:
 • Persistent configuration storage
 
 • Modern responsive UI
-submitter: Jack
+submitter: j1441
 submission: https://github.com/getumbrel/umbrel-apps
