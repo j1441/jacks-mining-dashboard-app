@@ -6,7 +6,7 @@ const fs = require('fs').promises;
 
 const app = express();
 const PORT = process.env.PORT || 3456;
-const DATA_DIR = process.env.DATA_DIR || '/app/data';
+const DATA_DIR = process.env.DATA_DIR || '/data';
 const CONFIG_FILE = path.join(DATA_DIR, 'config.json');
 
 // Middleware
