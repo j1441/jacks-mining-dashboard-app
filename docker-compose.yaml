@@ -3,7 +3,7 @@ version: "3.7"
 services:
   app_proxy:
     environment:
-      APP_HOST: jacks-mining-dashboard-app_web_1
+      APP_HOST: mining-dashboard-app_web_1
       APP_PORT: 3456
 
   web:
