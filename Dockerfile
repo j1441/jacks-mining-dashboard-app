@@ -32,7 +32,7 @@ HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 CMD node 
 
 # Run as non-root user for security
 
-USER node
+USER 1000
 
 # Start the application
 
