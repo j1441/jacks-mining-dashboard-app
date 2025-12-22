@@ -1,5 +1,5 @@
 {
-  "name": "mining-dashboard-app",
+  "name": "jacks-mining-dashboard-app",
   "version": "1.0.0",
   "description": "Home heating miner dashboard for monitoring Antminer with Braiins OS on Umbrel",
   "main": "server.js",
@@ -28,10 +28,10 @@
   },
   "repository": {
     "type": "git",
-    "url": "https://github.com/j1441/mining-dashboard-app.git"
+    "url": "https://github.com/j1441/jacks-mining-dashboard-app.git"
   },
   "bugs": {
-    "url": "https://github.com/j1441/mining-dashboard-app/issues"
+    "url": "https://github.com/j1441/jacks-mining-dashboard-app/issues"
   },
-  "homepage": "https://github.com/j1441/mining-dashboard-app#readme"
+  "homepage": "https://github.com/j1441/jacks-mining-dashboard-app#readme"
 }
