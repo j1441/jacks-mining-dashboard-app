@@ -33,7 +33,7 @@ HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 CMD node 
 
 # Run as non-root user for security
 
-USER root
+# USER root
 # ENTRYPOINT ["/entrypoint.sh"]
 USER node
 
