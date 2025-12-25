@@ -33,6 +33,7 @@ async function sendCGMinerCommand(ip, command) {
   return new Promise((resolve, reject) => {
     const client = net.connect(4028, ip, () => {
       const request = JSON.stringify(command);
+      console.log(`Sending to ${ip}:4028:`, request);
       client.write(request);
     });
 
@@ -46,6 +47,7 @@ async function sendCGMinerCommand(ip, command) {
       try {
         // CGMiner returns null-terminated JSON
         const cleaned = data.replace(/\0/g, '');
+        console.log(`Response from ${ip}:`, cleaned.substring(0, 200) + '...');
         const parsed = JSON.parse(cleaned);
         resolve(parsed);
       } catch (err) {
@@ -54,12 +56,13 @@ async function sendCGMinerCommand(ip, command) {
     });
 
     client.on('error', (err) => {
+      console.error(`Connection error to ${ip}:4028:`, err.message);
       reject(new Error('Connection error: ' + err.message));
     });
 
-    client.setTimeout(5000, () => {
+    client.setTimeout(10000, () => {
       client.destroy();
-      reject(new Error('Connection timeout'));
+      reject(new Error('Connection timeout - miner not responding on port 4028'));
     });
   });
 }
@@ -71,6 +74,8 @@ async function sendCGMinerCommand(ip, command) {
  */
 async function getMinerStats(ip) {
   try {
+    console.log(`Getting stats from miner at ${ip}`);
+    
     // Query all necessary data from miner
     const [summary, stats, pools] = await Promise.all([
       sendCGMinerCommand(ip, { command: 'summary' }),
@@ -88,29 +93,21 @@ async function getMinerStats(ip) {
     const poolData = pools.POOLS?.[0] || {};
 
     // Calculate hashrate in TH/s
-    const ghs5s = summaryData['GHS 5s'] || summaryData['MHS 5s'] / 1000 || 0;
-    const hashrate = (ghs5s / 1000).toFixed(2);
+    const ghs5s = summaryData['GHS 5s'] || (summaryData['MHS 5s'] ? summaryData['MHS 5s'] / 1000 : 0);
+    const hashrate = ghs5s / 1000;
 
     // Extract temperatures (format varies by miner model)
-    const temps = {
-      board1: statsData.temp1 || statsData.temp2_1 || 0,
-      board2: statsData.temp2 || statsData.temp2_2 || 0,
-      board3: statsData.temp3 || statsData.temp2_3 || 0,
-      chip: statsData.temp || Math.max(
-        statsData.temp1 || 0,
-        statsData.temp2 || 0,
-        statsData.temp3 || 0
-      )
-    };
+    const temp1 = statsData.temp1 || statsData.temp2_1 || 0;
+    const temp2 = statsData.temp2 || statsData.temp2_2 || 0;
+    const temp3 = statsData.temp3 || statsData.temp2_3 || 0;
+    const chipTemp = statsData.temp || Math.max(temp1, temp2, temp3);
 
     // Extract fan speeds
-    const fans = {
-      speed1: statsData.fan1 || statsData['fan_num'] || 0,
-      speed2: statsData.fan2 || statsData.fan3 || 0
-    };
+    const fan1 = statsData.fan1 || 0;
+    const fan2 = statsData.fan2 || statsData.fan3 || 0;
 
-    // Estimate power consumption (approximately 34W per TH/s for modern miners)
-    const power = statsData.power || parseInt(hashrate * 34) || 3250;
+    // Get power from stats or estimate
+    const power = statsData.Power || statsData.power || Math.round(hashrate * 34) || 3250;
 
     // Load saved power profile
     let powerProfile = 'medium';
@@ -121,19 +118,30 @@ async function getMinerStats(ip) {
       // Use default if config doesn't exist
     }
 
+    // Calculate reject rate
+    const accepted = poolData.Accepted || 0;
+    const rejected = poolData.Rejected || 0;
+    const rejectRate = accepted > 0 ? (rejected / (accepted + rejected)) * 100 : 0;
+
     return {
-      hashrate: parseFloat(hashrate),
-      hashrateUnit: 'TH/s',
-      temperature: temps,
-      fan: fans,
-      power: power,
+      hashrate: hashrate,
+      temperature: chipTemp,
+      powerDraw: power,
       uptime: summaryData.Elapsed || 0,
-      pool: {
-        status: poolData.Status === 'Alive' ? 'connected' : 'disconnected',
-        url: poolData.URL || 'Not connected',
-        accepted: poolData.Accepted || 0,
-        rejected: poolData.Rejected || 0
+      boards: [
+        { temp: temp1 },
+        { temp: temp2 },
+        { temp: temp3 }
+      ],
+      fans: {
+        speed1: fan1,
+        speed2: fan2
       },
+      poolStatus: poolData.Status === 'Alive' ? 'Connected' : 'Disconnected',
+      poolUrl: poolData.URL || 'Not connected',
+      acceptedShares: accepted,
+      rejectedShares: rejected,
+      rejectRate: rejectRate,
       powerProfile: powerProfile
     };
   } catch (err) {
@@ -159,7 +167,6 @@ async function setPowerProfile(ip, profile) {
   
   try {
     // For Braiins OS, use ascset command to adjust power
-    // Note: Actual implementation may vary by Braiins OS version
     const response = await sendCGMinerCommand(ip, {
       command: 'ascset',
       parameter: `0,power,${targetPower}`
@@ -169,8 +176,6 @@ async function setPowerProfile(ip, profile) {
     return { success: true, profile, power: targetPower };
   } catch (err) {
     console.error('setPowerProfile error:', err);
-    // Some miners may not support this command, but we'll return success anyway
-    // as the command was sent
     return { 
       success: true, 
       profile, 
@@ -190,8 +195,7 @@ async function loadConfig() {
     return JSON.parse(data);
   } catch (err) {
     if (err.code === 'ENOENT') {
-      // Config file doesn't exist yet
-      return { minerIp: null, currentProfile: 'medium' };
+      return { minerIP: null, currentProfile: 'medium' };
     }
     throw err;
   }
@@ -203,7 +207,7 @@ async function loadConfig() {
  */
 async function saveConfig(config) {
   await fs.writeFile(CONFIG_FILE, JSON.stringify(config, null, 2));
-  console.log('Configuration saved');
+  console.log('Configuration saved:', config);
 }
 
 // ============================================================================
@@ -223,7 +227,7 @@ app.get('/health', (req, res) => {
 app.get('/api/miner/stats', async (req, res) => {
   try {
     const config = await loadConfig();
-    const ip = req.query.ip || config.minerIp;
+    const ip = req.query.ip || config.minerIP;
     
     if (!ip) {
       return res.status(400).json({ error: 'No miner IP configured' });
@@ -243,7 +247,7 @@ app.get('/api/miner/stats', async (req, res) => {
 app.post('/api/miner/power', async (req, res) => {
   try {
     const config = await loadConfig();
-    const ip = req.body.ip || config.minerIp;
+    const ip = req.body.ip || config.minerIP;
     const profile = req.body.profile;
 
     if (!ip) {
@@ -272,16 +276,20 @@ app.post('/api/miner/power', async (req, res) => {
  */
 app.post('/api/config', async (req, res) => {
   try {
+    console.log('Received config POST:', req.body);
     const existingConfig = await loadConfig();
     
+    // Accept both minerIP and minerIp for compatibility
+    const newIP = req.body.minerIP || req.body.minerIp;
+    
     const config = {
-      minerIp: req.body.minerIp || existingConfig.minerIp,
+      minerIP: newIP || existingConfig.minerIP,
       currentProfile: req.body.currentProfile || existingConfig.currentProfile || 'medium',
       updatedAt: new Date().toISOString()
     };
 
     await saveConfig(config);
-    res.json({ success: true });
+    res.json({ success: true, config });
   } catch (err) {
     console.error('API config save error:', err);
     res.status(500).json({ error: err.message });
@@ -298,6 +306,36 @@ app.get('/api/config', async (req, res) => {
   } catch (err) {
     console.error('API config load error:', err);
     res.status(500).json({ error: err.message });
+  }
+});
+
+/**
+ * Test connection to miner
+ */
+app.post('/api/miner/test', async (req, res) => {
+  try {
+    const ip = req.body.minerIP || req.body.minerIp || req.body.ip;
+    
+    if (!ip) {
+      return res.status(400).json({ error: 'No miner IP provided' });
+    }
+
+    console.log(`Testing connection to miner at ${ip}`);
+    
+    // Try to get summary from miner
+    const summary = await sendCGMinerCommand(ip, { command: 'summary' });
+    
+    res.json({ 
+      success: true, 
+      message: `Successfully connected to miner at ${ip}`,
+      summary: summary.SUMMARY?.[0] || {}
+    });
+  } catch (err) {
+    console.error('Miner test error:', err);
+    res.status(500).json({ 
+      error: err.message,
+      hint: 'Make sure the miner is running Braiins OS and port 4028 is accessible'
+    });
   }
 });
 
@@ -334,42 +372,38 @@ async function start() {
     console.log('🔌 WebSocket client connected');
     let interval;
     
-    try {
-      const config = await loadConfig();
-      const ip = config.minerIp;
+    const sendStats = async () => {
+      try {
+        const config = await loadConfig();
+        const ip = config.minerIP;
 
-      if (ip) {
-        // Send initial data immediately
-        try {
-          const stats = await getMinerStats(ip);
-          ws.send(JSON.stringify({ type: 'stats', data: stats }));
-        } catch (err) {
-          ws.send(JSON.stringify({ type: 'error', message: err.message }));
+        if (!ip) {
+          ws.send(JSON.stringify({ 
+            error: 'No miner configured. Please enter miner IP address.' 
+          }));
+          return;
         }
 
-        // Set up periodic updates every 5 seconds
-        interval = setInterval(async () => {
-          if (ws.readyState === WebSocket.OPEN) {
-            try {
-              const stats = await getMinerStats(ip);
-              ws.send(JSON.stringify({ type: 'stats', data: stats }));
-            } catch (err) {
-              ws.send(JSON.stringify({ type: 'error', message: err.message }));
-            }
-          } else {
-            clearInterval(interval);
-          }
-        }, 5000);
-      } else {
-        ws.send(JSON.stringify({ 
-          type: 'error', 
-          message: 'No miner configured. Please configure miner IP in settings.' 
-        }));
+        const stats = await getMinerStats(ip);
+        // Send stats directly (not wrapped in {type, data})
+        ws.send(JSON.stringify(stats));
+      } catch (err) {
+        console.error('WebSocket stats error:', err);
+        ws.send(JSON.stringify({ error: err.message }));
       }
-    } catch (err) {
-      console.error('WebSocket initialization error:', err);
-      ws.send(JSON.stringify({ type: 'error', message: err.message }));
-    }
+    };
+
+    // Send initial data immediately
+    await sendStats();
+
+    // Set up periodic updates every 5 seconds
+    interval = setInterval(async () => {
+      if (ws.readyState === WebSocket.OPEN) {
+        await sendStats();
+      } else {
+        clearInterval(interval);
+      }
+    }, 5000);
 
     ws.on('close', () => {
       console.log('🔌 WebSocket client disconnected');
@@ -407,4 +441,4 @@ async function start() {
 start().catch(err => {
   console.error('❌ Failed to start server:', err);
   process.exit(1);
-});// server.js file content provided by user.
+});

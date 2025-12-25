@@ -7,8 +7,10 @@
     <script crossorigin src="https://cdnjs.cloudflare.com/ajax/libs/react/18.2.0/umd/react.production.min.js"></script>
     <script crossorigin src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.2.0/umd/react-dom.production.min.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/babel-standalone/7.23.5/babel.min.js"></script>
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/tailwindcss/2.2.19/tailwind.min.js"></script>
     <style>
+        * {
+            box-sizing: border-box;
+        }
         body {
             margin: 0;
             font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', 'Oxygen', 'Ubuntu', 'Cantarell', 'Fira Sans', 'Droid Sans', 'Helvetica Neue', sans-serif;
@@ -34,6 +36,7 @@
         .power-btn {
             transition: all 0.3s ease;
             border: 2px solid transparent;
+            cursor: pointer;
         }
         .power-btn:hover {
             transform: scale(1.05);
@@ -65,13 +68,46 @@
             0% { transform: rotate(0deg); }
             100% { transform: rotate(360deg); }
         }
+        .grid {
+            display: grid;
+            gap: 1.5rem;
+        }
+        .grid-cols-1 { grid-template-columns: repeat(1, 1fr); }
+        @media (min-width: 768px) {
+            .md-grid-cols-2 { grid-template-columns: repeat(2, 1fr); }
+            .md-grid-cols-3 { grid-template-columns: repeat(3, 1fr); }
+        }
+        @media (min-width: 1024px) {
+            .lg-grid-cols-2 { grid-template-columns: repeat(2, 1fr); }
+            .lg-grid-cols-4 { grid-template-columns: repeat(4, 1fr); }
+        }
+        .text-blue-400 { color: #60a5fa; }
+        .text-orange-400 { color: #fb923c; }
+        .text-green-400 { color: #4ade80; }
+        .text-purple-400 { color: #c084fc; }
+        .text-red-400 { color: #f87171; }
+        .text-gray-400 { color: #9ca3af; }
+        .bg-blue-600 { background-color: #2563eb; }
+        .bg-blue-600:hover { background-color: #1d4ed8; }
+        .bg-gray-800 { background-color: #1f2937; }
+        .border-gray-700 { border-color: #374151; }
+        .bg-blue-900-30 { background-color: rgba(30, 58, 138, 0.3); }
+        .bg-green-900-30 { background-color: rgba(20, 83, 45, 0.3); }
+        .bg-red-900-30 { background-color: rgba(127, 29, 29, 0.3); }
+        .bg-red-900-50 { background-color: rgba(127, 29, 29, 0.5); }
+        .border-red-500 { border-color: #ef4444; }
+        .text-red-200 { color: #fecaca; }
+        input:focus {
+            outline: none;
+            border-color: #3b82f6;
+        }
     </style>
 </head>
 <body>
     <div id="root"></div>
 
     <script type="text/babel">
-        const { useState, useEffect } = React;
+        const { useState, useEffect, useCallback } = React;
 
         function Dashboard() {
             const [minerIP, setMinerIP] = useState('');
@@ -79,6 +115,7 @@
             const [stats, setStats] = useState(null);
             const [error, setError] = useState(null);
             const [loading, setLoading] = useState(false);
+            const [testing, setTesting] = useState(false);
             const [ws, setWs] = useState(null);
 
             useEffect(() => {
@@ -89,11 +126,46 @@
                 try {
                     const response = await fetch('/api/config');
                     const data = await response.json();
+                    console.log('Loaded config:', data);
                     if (data.minerIP) {
                         setMinerIP(data.minerIP);
+                        // Auto-connect if we have a saved IP
+                        setConnected(true);
+                        setupWebSocket();
                     }
                 } catch (err) {
                     console.error('Failed to load config:', err);
+                }
+            };
+
+            const testConnection = async () => {
+                if (!minerIP) {
+                    setError('Please enter a miner IP address');
+                    return;
+                }
+
+                setTesting(true);
+                setError(null);
+
+                try {
+                    const response = await fetch('/api/miner/test', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ minerIP })
+                    });
+
+                    const data = await response.json();
+                    
+                    if (response.ok) {
+                        setError(null);
+                        alert(`✅ Connection successful!\n\nMiner responded with GHS 5s: ${data.summary?.['GHS 5s'] || 'N/A'}`);
+                    } else {
+                        setError(data.error + (data.hint ? `\n${data.hint}` : ''));
+                    }
+                } catch (err) {
+                    setError('Failed to test connection: ' + err.message);
+                } finally {
+                    setTesting(false);
                 }
             };
 
@@ -107,17 +179,21 @@
                 setError(null);
 
                 try {
+                    // Save the config first
                     const response = await fetch('/api/config', {
                         method: 'POST',
                         headers: { 'Content-Type': 'application/json' },
                         body: JSON.stringify({ minerIP })
                     });
 
+                    const data = await response.json();
+                    console.log('Config saved:', data);
+
                     if (response.ok) {
                         setConnected(true);
                         setupWebSocket();
                     } else {
-                        throw new Error('Failed to connect to miner');
+                        throw new Error(data.error || 'Failed to save config');
                     }
                 } catch (err) {
                     setError(err.message);
@@ -126,32 +202,50 @@
                 }
             };
 
-            const setupWebSocket = () => {
+            const setupWebSocket = useCallback(() => {
                 const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
                 const wsUrl = `${protocol}//${window.location.host}`;
+                console.log('Connecting to WebSocket:', wsUrl);
+                
                 const websocket = new WebSocket(wsUrl);
 
+                websocket.onopen = () => {
+                    console.log('WebSocket connected');
+                };
+
                 websocket.onmessage = (event) => {
-                    const data = JSON.parse(event.data);
-                    if (data.error) {
-                        setError(data.error);
-                        setStats(null);
-                    } else {
-                        setStats(data);
-                        setError(null);
+                    try {
+                        const data = JSON.parse(event.data);
+                        console.log('WebSocket data:', data);
+                        
+                        if (data.error) {
+                            setError(data.error);
+                            setStats(null);
+                        } else {
+                            setStats(data);
+                            setError(null);
+                        }
+                    } catch (err) {
+                        console.error('Failed to parse WebSocket message:', err);
                     }
                 };
 
-                websocket.onerror = () => {
+                websocket.onerror = (err) => {
+                    console.error('WebSocket error:', err);
                     setError('WebSocket connection error');
                 };
 
                 websocket.onclose = () => {
-                    setTimeout(setupWebSocket, 5000);
+                    console.log('WebSocket closed, reconnecting in 5s...');
+                    setTimeout(() => {
+                        if (connected) {
+                            setupWebSocket();
+                        }
+                    }, 5000);
                 };
 
                 setWs(websocket);
-            };
+            }, [connected]);
 
             const setPowerProfile = async (profile) => {
                 try {
@@ -162,51 +256,124 @@
                     });
 
                     if (!response.ok) {
-                        throw new Error('Failed to set power profile');
+                        const data = await response.json();
+                        throw new Error(data.error || 'Failed to set power profile');
                     }
                 } catch (err) {
                     setError(err.message);
                 }
             };
 
+            const disconnect = () => {
+                if (ws) {
+                    ws.close();
+                }
+                setConnected(false);
+                setStats(null);
+                setError(null);
+            };
+
             const formatHashrate = (ths) => {
-                return ths ? `${ths.toFixed(2)} TH/s` : 'N/A';
+                if (ths === undefined || ths === null) return 'N/A';
+                return `${ths.toFixed(2)} TH/s`;
             };
 
             const formatUptime = (seconds) => {
                 if (!seconds) return 'N/A';
-                const hours = Math.floor(seconds / 3600);
+                const days = Math.floor(seconds / 86400);
+                const hours = Math.floor((seconds % 86400) / 3600);
                 const minutes = Math.floor((seconds % 3600) / 60);
+                if (days > 0) {
+                    return `${days}d ${hours}h ${minutes}m`;
+                }
                 return `${hours}h ${minutes}m`;
             };
 
             if (!connected) {
                 return (
-                    <div className="min-h-screen flex items-center justify-center p-4">
-                        <div className="stat-card max-w-md w-full">
-                            <h1 className="text-3xl font-bold mb-6 text-center">
-                                Jack's Antminer Dashboard
+                    <div style={{ minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '1rem' }}>
+                        <div className="stat-card" style={{ maxWidth: '28rem', width: '100%' }}>
+                            <h1 style={{ fontSize: '1.875rem', fontWeight: 'bold', marginBottom: '1.5rem', textAlign: 'center' }}>
+                                ⛏️ Jack's Mining Dashboard
                             </h1>
-                            <div className="space-y-4">
-                                <input
-                                    type="text"
-                                    placeholder="Miner IP Address (e.g., 192.168.1.100)"
-                                    value={minerIP}
-                                    onChange={(e) => setMinerIP(e.target.value)}
-                                    className="w-full px-4 py-3 bg-gray-800 border border-gray-700 rounded-lg focus:outline-none focus:border-blue-500 text-white"
-                                />
-                                <button
-                                    onClick={connectToMiner}
-                                    disabled={loading}
-                                    className="w-full px-6 py-3 bg-blue-600 hover:bg-blue-700 rounded-lg font-semibold transition-colors disabled:opacity-50"
-                                >
-                                    {loading ? 'Connecting...' : 'Connect to Miner'}
-                                </button>
+                            <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
+                                <div>
+                                    <label style={{ display: 'block', marginBottom: '0.5rem', color: '#9ca3af', fontSize: '0.875rem' }}>
+                                        Miner IP Address
+                                    </label>
+                                    <input
+                                        type="text"
+                                        placeholder="e.g., 192.168.1.100"
+                                        value={minerIP}
+                                        onChange={(e) => setMinerIP(e.target.value)}
+                                        onKeyPress={(e) => e.key === 'Enter' && connectToMiner()}
+                                        style={{
+                                            width: '100%',
+                                            padding: '0.75rem 1rem',
+                                            backgroundColor: '#1f2937',
+                                            border: '1px solid #374151',
+                                            borderRadius: '0.5rem',
+                                            color: 'white',
+                                            fontSize: '1rem'
+                                        }}
+                                    />
+                                </div>
+                                <div style={{ display: 'flex', gap: '0.5rem' }}>
+                                    <button
+                                        onClick={testConnection}
+                                        disabled={testing || loading}
+                                        style={{
+                                            flex: 1,
+                                            padding: '0.75rem 1.5rem',
+                                            backgroundColor: '#374151',
+                                            borderRadius: '0.5rem',
+                                            fontWeight: '600',
+                                            border: 'none',
+                                            color: 'white',
+                                            cursor: testing ? 'not-allowed' : 'pointer',
+                                            opacity: testing ? 0.5 : 1
+                                        }}
+                                    >
+                                        {testing ? 'Testing...' : 'Test Connection'}
+                                    </button>
+                                    <button
+                                        onClick={connectToMiner}
+                                        disabled={loading || testing}
+                                        style={{
+                                            flex: 1,
+                                            padding: '0.75rem 1.5rem',
+                                            backgroundColor: '#2563eb',
+                                            borderRadius: '0.5rem',
+                                            fontWeight: '600',
+                                            border: 'none',
+                                            color: 'white',
+                                            cursor: loading ? 'not-allowed' : 'pointer',
+                                            opacity: loading ? 0.5 : 1
+                                        }}
+                                    >
+                                        {loading ? 'Connecting...' : 'Connect'}
+                                    </button>
+                                </div>
                                 {error && (
-                                    <div className="p-3 bg-red-900/50 border border-red-500 rounded-lg text-red-200">
+                                    <div style={{
+                                        padding: '0.75rem',
+                                        backgroundColor: 'rgba(127, 29, 29, 0.5)',
+                                        border: '1px solid #ef4444',
+                                        borderRadius: '0.5rem',
+                                        color: '#fecaca',
+                                        whiteSpace: 'pre-wrap'
+                                    }}>
                                         {error}
                                     </div>
                                 )}
+                                <div style={{ fontSize: '0.75rem', color: '#6b7280', marginTop: '0.5rem' }}>
+                                    <strong>Requirements:</strong>
+                                    <ul style={{ margin: '0.5rem 0', paddingLeft: '1.25rem' }}>
+                                        <li>Miner must be running Braiins OS</li>
+                                        <li>CGMiner API port 4028 must be accessible</li>
+                                        <li>Miner must be on same network or routable</li>
+                                    </ul>
+                                </div>
                             </div>
                         </div>
                     </div>
@@ -214,120 +381,186 @@
             }
 
             return (
-                <div className="min-h-screen p-6">
-                    <div className="max-w-7xl mx-auto">
-                        <div className="flex justify-between items-center mb-8">
-                            <h1 className="text-4xl font-bold">Antminer Dashboard</h1>
-                            <div className="flex items-center gap-2">
-                                <span className={`status-dot ${stats ? 'bg-green-500' : 'bg-red-500'}`}></span>
-                                <span className="text-sm">{stats ? 'Connected' : 'Disconnected'}</span>
+                <div style={{ minHeight: '100vh', padding: '1.5rem' }}>
+                    <div style={{ maxWidth: '80rem', margin: '0 auto' }}>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '2rem', flexWrap: 'wrap', gap: '1rem' }}>
+                            <h1 style={{ fontSize: '2rem', fontWeight: 'bold' }}>⛏️ Mining Dashboard</h1>
+                            <div style={{ display: 'flex', alignItems: 'center', gap: '1rem' }}>
+                                <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                                    <span className={`status-dot`} style={{ backgroundColor: stats ? '#22c55e' : '#ef4444' }}></span>
+                                    <span style={{ fontSize: '0.875rem' }}>{stats ? 'Connected' : 'Connecting...'}</span>
+                                </div>
+                                <span style={{ fontSize: '0.875rem', color: '#9ca3af' }}>{minerIP}</span>
+                                <button
+                                    onClick={disconnect}
+                                    style={{
+                                        padding: '0.5rem 1rem',
+                                        backgroundColor: '#374151',
+                                        borderRadius: '0.5rem',
+                                        border: 'none',
+                                        color: 'white',
+                                        cursor: 'pointer',
+                                        fontSize: '0.875rem'
+                                    }}
+                                >
+                                    Disconnect
+                                </button>
                             </div>
                         </div>
 
                         {error && (
-                            <div className="mb-6 p-4 bg-red-900/50 border border-red-500 rounded-lg text-red-200">
+                            <div style={{
+                                marginBottom: '1.5rem',
+                                padding: '1rem',
+                                backgroundColor: 'rgba(127, 29, 29, 0.5)',
+                                border: '1px solid #ef4444',
+                                borderRadius: '0.5rem',
+                                color: '#fecaca'
+                            }}>
                                 {error}
                             </div>
                         )}
 
                         {!stats && !error && (
-                            <div className="flex justify-center items-center h-64">
+                            <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '16rem' }}>
                                 <div className="loading-spinner"></div>
                             </div>
                         )}
 
                         {stats && (
                             <>
-                                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-8">
+                                <div className="grid grid-cols-1 md-grid-cols-2 lg-grid-cols-4" style={{ marginBottom: '2rem' }}>
                                     <div className="stat-card">
-                                        <div className="text-gray-400 text-sm mb-2">Hashrate</div>
-                                        <div className="text-3xl font-bold text-blue-400">
+                                        <div style={{ color: '#9ca3af', fontSize: '0.875rem', marginBottom: '0.5rem' }}>Hashrate</div>
+                                        <div style={{ fontSize: '1.875rem', fontWeight: 'bold', color: '#60a5fa' }}>
                                             {formatHashrate(stats.hashrate)}
                                         </div>
                                     </div>
                                     <div className="stat-card">
-                                        <div className="text-gray-400 text-sm mb-2">Temperature</div>
-                                        <div className="text-3xl font-bold text-orange-400">
+                                        <div style={{ color: '#9ca3af', fontSize: '0.875rem', marginBottom: '0.5rem' }}>Temperature</div>
+                                        <div style={{ fontSize: '1.875rem', fontWeight: 'bold', color: '#fb923c' }}>
                                             {stats.temperature ? `${stats.temperature}°C` : 'N/A'}
                                         </div>
                                     </div>
                                     <div className="stat-card">
-                                        <div className="text-gray-400 text-sm mb-2">Power Draw</div>
-                                        <div className="text-3xl font-bold text-green-400">
+                                        <div style={{ color: '#9ca3af', fontSize: '0.875rem', marginBottom: '0.5rem' }}>Power Draw</div>
+                                        <div style={{ fontSize: '1.875rem', fontWeight: 'bold', color: '#4ade80' }}>
                                             {stats.powerDraw ? `${stats.powerDraw}W` : 'N/A'}
                                         </div>
                                     </div>
                                     <div className="stat-card">
-                                        <div className="text-gray-400 text-sm mb-2">Uptime</div>
-                                        <div className="text-3xl font-bold text-purple-400">
+                                        <div style={{ color: '#9ca3af', fontSize: '0.875rem', marginBottom: '0.5rem' }}>Uptime</div>
+                                        <div style={{ fontSize: '1.875rem', fontWeight: 'bold', color: '#c084fc' }}>
                                             {formatUptime(stats.uptime)}
                                         </div>
                                     </div>
                                 </div>
 
-                                <div className="stat-card mb-8">
-                                    <h2 className="text-xl font-bold mb-4">Power Profiles</h2>
-                                    <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                                <div className="stat-card" style={{ marginBottom: '2rem' }}>
+                                    <h2 style={{ fontSize: '1.25rem', fontWeight: 'bold', marginBottom: '1rem' }}>Power Profiles</h2>
+                                    <div className="grid grid-cols-1 md-grid-cols-3">
                                         <button
                                             onClick={() => setPowerProfile('low')}
-                                            className={`power-btn p-4 rounded-lg bg-blue-900/30 hover:bg-blue-900/50 ${stats.powerProfile === 'low' ? 'active' : ''}`}
+                                            className={`power-btn ${stats.powerProfile === 'low' ? 'active' : ''}`}
+                                            style={{
+                                                padding: '1rem',
+                                                borderRadius: '0.5rem',
+                                                backgroundColor: 'rgba(30, 58, 138, 0.3)',
+                                                border: stats.powerProfile === 'low' ? '2px solid #10b981' : '2px solid transparent',
+                                                color: 'white',
+                                                textAlign: 'center'
+                                            }}
                                         >
-                                            <div className="text-lg font-semibold">Low</div>
-                                            <div className="text-sm text-gray-400">~2000W</div>
+                                            <div style={{ fontSize: '1.125rem', fontWeight: '600' }}>🔋 Low</div>
+                                            <div style={{ fontSize: '0.875rem', color: '#9ca3af' }}>~2000W</div>
                                         </button>
                                         <button
                                             onClick={() => setPowerProfile('medium')}
-                                            className={`power-btn p-4 rounded-lg bg-green-900/30 hover:bg-green-900/50 ${stats.powerProfile === 'medium' ? 'active' : ''}`}
+                                            className={`power-btn ${stats.powerProfile === 'medium' ? 'active' : ''}`}
+                                            style={{
+                                                padding: '1rem',
+                                                borderRadius: '0.5rem',
+                                                backgroundColor: 'rgba(20, 83, 45, 0.3)',
+                                                border: stats.powerProfile === 'medium' ? '2px solid #10b981' : '2px solid transparent',
+                                                color: 'white',
+                                                textAlign: 'center'
+                                            }}
                                         >
-                                            <div className="text-lg font-semibold">Medium</div>
-                                            <div className="text-sm text-gray-400">~3250W</div>
+                                            <div style={{ fontSize: '1.125rem', fontWeight: '600' }}>⚡ Medium</div>
+                                            <div style={{ fontSize: '0.875rem', color: '#9ca3af' }}>~3250W</div>
                                         </button>
                                         <button
                                             onClick={() => setPowerProfile('high')}
-                                            className={`power-btn p-4 rounded-lg bg-red-900/30 hover:bg-red-900/50 ${stats.powerProfile === 'high' ? 'active' : ''}`}
+                                            className={`power-btn ${stats.powerProfile === 'high' ? 'active' : ''}`}
+                                            style={{
+                                                padding: '1rem',
+                                                borderRadius: '0.5rem',
+                                                backgroundColor: 'rgba(127, 29, 29, 0.3)',
+                                                border: stats.powerProfile === 'high' ? '2px solid #10b981' : '2px solid transparent',
+                                                color: 'white',
+                                                textAlign: 'center'
+                                            }}
                                         >
-                                            <div className="text-lg font-semibold">High</div>
-                                            <div className="text-sm text-gray-400">~3500W</div>
+                                            <div style={{ fontSize: '1.125rem', fontWeight: '600' }}>🔥 High</div>
+                                            <div style={{ fontSize: '0.875rem', color: '#9ca3af' }}>~3500W</div>
                                         </button>
                                     </div>
                                 </div>
 
-                                <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                                <div className="grid grid-cols-1 lg-grid-cols-2">
                                     <div className="stat-card">
-                                        <h2 className="text-xl font-bold mb-4">Board Temperatures</h2>
-                                        <div className="space-y-3">
+                                        <h2 style={{ fontSize: '1.25rem', fontWeight: 'bold', marginBottom: '1rem' }}>Board Temperatures</h2>
+                                        <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
                                             {stats.boards && stats.boards.map((board, idx) => (
-                                                <div key={idx} className="flex justify-between items-center">
+                                                <div key={idx} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                                                     <span>Board {idx + 1}</span>
-                                                    <span className="font-semibold text-orange-400">
-                                                        {board.temp}°C
+                                                    <span style={{ fontWeight: '600', color: '#fb923c' }}>
+                                                        {board.temp ? `${board.temp}°C` : 'N/A'}
                                                     </span>
                                                 </div>
                                             ))}
+                                            {stats.fans && (
+                                                <>
+                                                    <div style={{ borderTop: '1px solid rgba(255,255,255,0.1)', paddingTop: '0.75rem', marginTop: '0.5rem' }}>
+                                                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                                                            <span>Fan 1</span>
+                                                            <span style={{ fontWeight: '600', color: '#60a5fa' }}>
+                                                                {stats.fans.speed1 ? `${stats.fans.speed1} RPM` : 'N/A'}
+                                                            </span>
+                                                        </div>
+                                                    </div>
+                                                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                                                        <span>Fan 2</span>
+                                                        <span style={{ fontWeight: '600', color: '#60a5fa' }}>
+                                                            {stats.fans.speed2 ? `${stats.fans.speed2} RPM` : 'N/A'}
+                                                        </span>
+                                                    </div>
+                                                </>
+                                            )}
                                         </div>
                                     </div>
 
                                     <div className="stat-card">
-                                        <h2 className="text-xl font-bold mb-4">Pool Statistics</h2>
-                                        <div className="space-y-3">
-                                            <div className="flex justify-between">
+                                        <h2 style={{ fontSize: '1.25rem', fontWeight: 'bold', marginBottom: '1rem' }}>Pool Statistics</h2>
+                                        <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
+                                            <div style={{ display: 'flex', justifyContent: 'space-between' }}>
                                                 <span>Status</span>
-                                                <span className="font-semibold text-green-400">
-                                                    {stats.poolStatus || 'Connected'}
+                                                <span style={{ fontWeight: '600', color: stats.poolStatus === 'Connected' ? '#4ade80' : '#f87171' }}>
+                                                    {stats.poolStatus || 'Unknown'}
                                                 </span>
                                             </div>
-                                            <div className="flex justify-between">
+                                            <div style={{ display: 'flex', justifyContent: 'space-between' }}>
                                                 <span>Accepted Shares</span>
-                                                <span className="font-semibold">{stats.acceptedShares || 0}</span>
+                                                <span style={{ fontWeight: '600' }}>{stats.acceptedShares?.toLocaleString() || 0}</span>
                                             </div>
-                                            <div className="flex justify-between">
+                                            <div style={{ display: 'flex', justifyContent: 'space-between' }}>
                                                 <span>Rejected Shares</span>
-                                                <span className="font-semibold text-red-400">{stats.rejectedShares || 0}</span>
+                                                <span style={{ fontWeight: '600', color: '#f87171' }}>{stats.rejectedShares?.toLocaleString() || 0}</span>
                                             </div>
-                                            <div className="flex justify-between">
+                                            <div style={{ display: 'flex', justifyContent: 'space-between' }}>
                                                 <span>Reject Rate</span>
-                                                <span className="font-semibold">
-                                                    {stats.rejectRate ? `${stats.rejectRate.toFixed(2)}%` : '0%'}
+                                                <span style={{ fontWeight: '600' }}>
+                                                    {stats.rejectRate !== undefined ? `${stats.rejectRate.toFixed(2)}%` : '0%'}
                                                 </span>
                                             </div>
                                         </div>

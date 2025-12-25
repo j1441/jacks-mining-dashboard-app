@@ -2,63 +2,62 @@ manifestVersion: 1
 id: jacks-mining-dashboard-app
 name: Mining Dashboard
 tagline: Monitor and control your home heating miner
-icon: https://raw.githubusercontent.com/j1441/jacks-mining-dashboard-app/e1424543a5b83fba6620658e73e4f9ec62459c03/icon.svg
+icon: https://raw.githubusercontent.com/j1441/jacks-mining-dashboard-app/main/icon.svg
 category: automation
-version: “1.0.2'”
+version: "1.0.3"
 port: 3456
 description: >-
-Monitor your Antminer running Braiins OS with a clean, modern web interface.
-Perfect for home heating applications with real-time statistics and power control.
+  Monitor your Antminer running Braiins OS with a clean, modern web interface.
+  Perfect for home heating applications with real-time statistics and power control.
 
-Features:
 
-• Real-time hashrate, temperature, and performance monitoring
+  Features:
 
-• Power profile control (Low/Medium/High) for optimal home heating
+  • Real-time hashrate, temperature, and performance monitoring
 
-• Pool statistics and connection status
+  • Power profile control (Low/Medium/High) for optimal home heating
 
-• Temperature tracking for all boards and chips
+  • Pool statistics and connection status
 
-• Fan speed monitoring
+  • Temperature tracking for all boards and chips
 
-• WebSocket-based live updates every 5 seconds
+  • Fan speed monitoring
 
-• Clean, responsive dark theme interface
+  • WebSocket-based live updates every 5 seconds
 
-• Works with Tailscale for remote access
+  • Clean, responsive dark theme interface
 
-Requirements:
+  • Works with Tailscale for remote access
 
-• Antminer running Braiins OS
 
-• Network access to miner’s CGMiner API (port 4028)
+  Requirements:
 
-• Miner must be on same network as Umbrel or accessible via routing
+  • Antminer running Braiins OS
+
+  • Network access to miner's CGMiner API (port 4028)
+
+  • Miner must be on same network as Umbrel or accessible via routing
 developer: j1441
 website: https://github.com/j1441/jacks-mining-dashboard-app
 dependencies: []
 repo: https://github.com/j1441/jacks-mining-dashboard-app
 support: https://github.com/j1441/jacks-mining-dashboard-app/issues
 gallery:
+  - https://i.imgur.com/placeholder1.png
+  - https://i.imgur.com/placeholder2.png
+releaseNotes: >-
+  v1.0.3 - Bug fixes
 
-- https://i.imgur.com/placeholder1.png
-- https://i.imgur.com/placeholder2.png
-  releaseNotes: >-
-  Initial release v1.0.0
+  • Fixed miner connection issues
 
-• Single miner monitoring support
+  • Fixed WebSocket data format
 
-• Real-time statistics via WebSocket
+  • Added connection test button
 
-• Power profile control (Low/Medium/High)
+  • Improved error messages
 
-• Temperature and fan monitoring
+  • Added disconnect button
 
-• Pool statistics tracking
-
-• Persistent configuration storage
-
-• Modern responsive UI
+  • Better logging for debugging
 submitter: j1441
 submission: https://github.com/j1441/jacks-mining-dashboard-app
