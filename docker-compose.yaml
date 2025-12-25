@@ -8,6 +8,7 @@ services:
 
   web:
     image: j73642/mining-dashboard-app:v1.0.10@sha256:9a3bccf0c178d1774ff92b40232c1f255c2b0dfc7a9e7bd2aa0e0d501724de61
+    user: "1000:1000"
     restart: on-failure
     stop_grace_period: 1m
     volumes:

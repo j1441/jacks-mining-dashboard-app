@@ -35,7 +35,7 @@ HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 CMD node 
 
 # USER root
 # ENTRYPOINT ["/entrypoint.sh"]
-USER node
+USER 1000
 
 # Start the application
 
