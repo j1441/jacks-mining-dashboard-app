@@ -89,8 +89,8 @@
                 try {
                     const response = await fetch('/api/config');
                     const data = await response.json();
-                    if (data.minerIP) {
-                        setMinerIP(data.minerIP);
+                    if (data.minerIp) {
+                        setMinerIP(data.minerIp);
                     }
                 } catch (err) {
                     console.error('Failed to load config:', err);
@@ -110,7 +110,7 @@
                     const response = await fetch('/api/config', {
                         method: 'POST',
                         headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({ minerIP })
+                        body: JSON.stringify({ minerIp: minerIP })
                     });
 
                     if (response.ok) {
@@ -132,12 +132,12 @@
                 const websocket = new WebSocket(wsUrl);
 
                 websocket.onmessage = (event) => {
-                    const data = JSON.parse(event.data);
-                    if (data.error) {
-                        setError(data.error);
+                    const message = JSON.parse(event.data);
+                    if (message.type === 'error') {
+                        setError(message.message);
                         setStats(null);
-                    } else {
-                        setStats(data);
+                    } else if (message.type === 'stats') {
+                        setStats(message.data);
                         setError(null);
                     }
                 };

@@ -121,12 +121,33 @@ async function getMinerStats(ip) {
       // Use default if config doesn't exist
     }
 
+    // Calculate reject rate
+    const accepted = poolData.Accepted || 0;
+    const rejected = poolData.Rejected || 0;
+    const total = accepted + rejected;
+    const rejectRate = total > 0 ? (rejected / total) * 100 : 0;
+
+    // Calculate average temperature from all boards
+    const avgTemp = Math.round(
+      (temps.board1 + temps.board2 + temps.board3) / 3
+    );
+
+    // Create boards array for frontend
+    const boards = [
+      { temp: temps.board1 },
+      { temp: temps.board2 },
+      { temp: temps.board3 }
+    ];
+
     return {
       hashrate: parseFloat(hashrate),
       hashrateUnit: 'TH/s',
-      temperature: temps,
+      temperature: avgTemp,
+      temperatureDetails: temps,
+      boards: boards,
       fan: fans,
       power: power,
+      powerDraw: power,
       uptime: summaryData.Elapsed || 0,
       pool: {
         status: poolData.Status === 'Alive' ? 'connected' : 'disconnected',
@@ -134,6 +155,10 @@ async function getMinerStats(ip) {
         accepted: poolData.Accepted || 0,
         rejected: poolData.Rejected || 0
       },
+      poolStatus: poolData.Status === 'Alive' ? 'Connected' : 'Disconnected',
+      acceptedShares: accepted,
+      rejectedShares: rejected,
+      rejectRate: rejectRate,
       powerProfile: powerProfile
     };
   } catch (err) {
