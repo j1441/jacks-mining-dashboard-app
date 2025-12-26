@@ -251,7 +251,7 @@ async function fetchBraiinsGraphQL(ip) {
   
   const bosminerInfoSchema = await graphqlRequest(ip, bosminerInfoIntrospection);
   if (bosminerInfoSchema?.data?.__type?.fields) {
-    console.log('BosminerInfo fields:', bosminerInfoSchema.data.__type.fields.map(f => f.name));
+    console.log('BosminerInfo fields:', bosminerInfoSchema.data.__type.fields.map(f => `${f.name}(${f.type?.name || f.type?.kind})`));
   }
   
   // Introspect Fan type to see exact fields
@@ -272,9 +272,9 @@ async function fetchBraiinsGraphQL(ip) {
     console.log('Fan type fields:', fanSchema.data.__type.fields.map(f => f.name));
   }
   
-  // Introspect TempCtrl type
+  // Introspect TempCtrlInfo type (NOT TempCtrl - based on error message!)
   const tempCtrlIntrospection = `{
-    __type(name: "TempCtrl") {
+    __type(name: "TempCtrlInfo") {
       fields {
         name
         type {
@@ -287,12 +287,12 @@ async function fetchBraiinsGraphQL(ip) {
   
   const tempCtrlSchema = await graphqlRequest(ip, tempCtrlIntrospection);
   if (tempCtrlSchema?.data?.__type?.fields) {
-    console.log('TempCtrl type fields:', tempCtrlSchema.data.__type.fields.map(f => f.name));
+    console.log('TempCtrlInfo type fields:', tempCtrlSchema.data.__type.fields.map(f => f.name));
   }
   
-  // Also try TemperatureCtrl or TempControl
-  const tempCtrl2Introspection = `{
-    __type(name: "TemperatureCtrl") {
+  // Also introspect WorkSolverInfo to find temperature data
+  const workSolverIntrospection = `{
+    __type(name: "WorkSolverInfo") {
       fields {
         name
         type {
@@ -303,49 +303,48 @@ async function fetchBraiinsGraphQL(ip) {
     }
   }`;
   
-  const tempCtrl2Schema = await graphqlRequest(ip, tempCtrl2Introspection);
-  if (tempCtrl2Schema?.data?.__type?.fields) {
-    console.log('TemperatureCtrl type fields:', tempCtrl2Schema.data.__type.fields.map(f => f.name));
+  const workSolverSchema = await graphqlRequest(ip, workSolverIntrospection);
+  if (workSolverSchema?.data?.__type?.fields) {
+    console.log('WorkSolverInfo type fields:', workSolverSchema.data.__type.fields.map(f => f.name));
   }
   
   // Build queries dynamically based on discovered fields
   const queries = [];
   
-  // CORRECT QUERY: Based on discovered BosminerInfo fields: fans, tempCtrl
+  // Query 1: Get fans with just rpm (most common field)
   queries.push(`{
     bosminer {
       info {
         fans {
           rpm
-        }
-        tempCtrl {
-          mode
-          target
         }
       }
     }
   }`);
   
-  // Try with more fan/temp fields
+  // Query 2: Try workSolver which might have hashboard temperatures
   queries.push(`{
     bosminer {
       info {
-        modelName
-        fans {
-          name
-          rpm
-          speed
+        workSolver {
+          hashboards {
+            id
+            temperature
+          }
         }
-        tempCtrl {
-          mode
-          target
-          hot
-          dangerous
-        }
+      }
+    }
+  }`);
+  
+  // Query 3: Try workSolver with different structure
+  queries.push(`{
+    bosminer {
+      info {
         workSolver {
           realHashrate {
-            mhs1M
-            mhs5M
+            mhs15M
+          }
+          nominalHashrate {
             mhs15M
           }
         }
@@ -353,27 +352,18 @@ async function fetchBraiinsGraphQL(ip) {
     }
   }`);
   
-  // Try simpler query with just fans
+  // Query 4: Try summary which might have overall temp
   queries.push(`{
     bosminer {
       info {
-        fans {
-          rpm
+        summary {
+          temperature
         }
       }
     }
   }`);
   
-  // Try bos.manager which might have temperature/performance data
-  queries.push(`{
-    bos {
-      manager {
-        status
-      }
-    }
-  }`);
-  
-  // Try just getting basic bos info that might be public
+  // Query 5: Just hostname to confirm auth works
   queries.push(`{
     bos {
       hostname
