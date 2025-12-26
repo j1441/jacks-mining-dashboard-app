@@ -4,12 +4,10 @@ on:
   push:
     branches:
       - main
-    tags:
-      - 'v*'
   workflow_dispatch:
     inputs:
       version:
-        description: 'Version tag (e.g., 1.0.1)'
+        description: 'Version tag (e.g., 1.0.1) - leave empty to auto-increment patch'
         required: false
         type: string
 
@@ -30,16 +28,45 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
+      - name: Checkout app store to get current version
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ env.APP_STORE_REPO }}
+          token: ${{ secrets.APP_STORE_PAT }}
+          path: app-store
+
       - name: Determine version
         id: version
         run: |
+          # If manual version provided, use it
           if [[ "${{ github.event_name }}" == "workflow_dispatch" && -n "${{ inputs.version }}" ]]; then
             echo "version=${{ inputs.version }}" >> $GITHUB_OUTPUT
-          elif [[ "${{ github.ref }}" == refs/tags/v* ]]; then
-            echo "version=${GITHUB_REF#refs/tags/v}" >> $GITHUB_OUTPUT
+            echo "Using manually specified version: ${{ inputs.version }}"
+            exit 0
+          fi
+          
+          # Otherwise, read current version from umbrel-app.yml and increment patch
+          CURRENT_VERSION=$(grep '^version:' app-store/${{ env.APP_FOLDER }}/umbrel-app.yml | sed 's/version:[[:space:]]*"\?\([^"]*\)"\?/\1/' | tr -d ' ')
+          
+          echo "Current version in umbrel-app.yml: $CURRENT_VERSION"
+          
+          # Parse version components
+          if [[ "$CURRENT_VERSION" =~ ^([0-9]+)\.([0-9]+)\.([0-9]+)(.*)$ ]]; then
+            MAJOR="${BASH_REMATCH[1]}"
+            MINOR="${BASH_REMATCH[2]}"
+            PATCH="${BASH_REMATCH[3]}"
+            SUFFIX="${BASH_REMATCH[4]}"
+            
+            # Increment patch version
+            NEW_PATCH=$((PATCH + 1))
+            NEW_VERSION="${MAJOR}.${MINOR}.${NEW_PATCH}${SUFFIX}"
+            
+            echo "Incrementing patch: $CURRENT_VERSION -> $NEW_VERSION"
+            echo "version=$NEW_VERSION" >> $GITHUB_OUTPUT
           else
-            # Use short SHA for non-tagged commits
-            echo "version=$(git rev-parse --short HEAD)" >> $GITHUB_OUTPUT
+            # Fallback if version format is unexpected
+            echo "Warning: Could not parse version '$CURRENT_VERSION', using 1.0.0"
+            echo "version=1.0.0" >> $GITHUB_OUTPUT
           fi
 
       - name: Set up Docker Buildx
@@ -80,8 +107,6 @@ jobs:
   update-app-store:
     needs: build-and-push
     runs-on: ubuntu-latest
-    # Only run on main branch pushes or tags, not PRs
-    if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
     
     steps:
       - name: Checkout app store repository
@@ -101,7 +126,6 @@ jobs:
           echo "Updating image to: $NEW_IMAGE"
           
           # Update the image line in docker-compose.yml
-          # This handles various formats: image: user/repo:tag or image: user/repo:tag@sha256:...
           sed -i "s|image:.*${{ env.IMAGE_NAME }}.*|image: $NEW_IMAGE|g" docker-compose.yml
           
           echo "Updated docker-compose.yml:"
@@ -113,14 +137,13 @@ jobs:
           
           VERSION="${{ needs.build-and-push.outputs.version }}"
           
-          # Only update version if it looks like a semantic version
-          if [[ "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+ ]]; then
-            # Update the version field
-            sed -i "s/^version:.*/version: \"$VERSION\"/" umbrel-app.yml
-            echo "Updated umbrel-app.yml version to: $VERSION"
-          else
-            echo "Skipping version update (not a semantic version): $VERSION"
-          fi
+          echo "Updating umbrel-app.yml version to: $VERSION"
+          
+          # Update the version field (handles both quoted and unquoted versions)
+          sed -i "s/^version:.*/version: \"$VERSION\"/" umbrel-app.yml
+          
+          echo "Updated umbrel-app.yml:"
+          cat umbrel-app.yml
 
       - name: Commit and push changes
         run: |

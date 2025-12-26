@@ -106,29 +106,140 @@ function httpsGet(url) {
  * This is more reliable than CGMiner API for temperature data
  */
 async function fetchBraiinsGraphQL(ip) {
-  return new Promise((resolve, reject) => {
-    const query = `{
-      bosminer {
-        info {
-          workSolver {
-            realHashrate {
-              mhs1M
-              mhs5M
-              mhs15M
-            }
-          }
+  // First, try to discover the schema with introspection
+  const introspectionQuery = `{
+    __schema {
+      queryType {
+        fields {
+          name
         }
+      }
+    }
+  }`;
+  
+  // Try multiple query formats - different Braiins OS versions use different schemas
+  const queries = [
+    // Schema 1: bosminer with nested hashChains (common in Braiins OS+)
+    `{
+      bosminer {
+        hashChains {
+          id
+          temperature {
+            chip
+            board
+          }
+          fanRpm
+        }
+        fans {
+          rpm
+        }
+      }
+    }`,
+    // Schema 2: Direct temperatures/fans (some versions)
+    `{
+      temperatures {
+        name
+        celsius
       }
       fans {
         name
         rpm
       }
-      temperatures {
-        name
-        celsius
+    }`,
+    // Schema 3: miner object with temps
+    `{
+      miner {
+        hashboards {
+          temperature
+          chipTemperature
+        }
+        fans {
+          rpm
+        }
       }
-    }`;
+    }`,
+    // Schema 4: BOSer specific format
+    `{
+      bosminer {
+        info {
+          workSolver {
+            tuner {
+              chainTunerState {
+                temperature
+              }
+            }
+          }
+        }
+        hashChains {
+          id
+        }
+      }
+    }`,
+    // Schema 5: Simple bosminer stats
+    `{
+      bosminer {
+        hashboards {
+          id
+          stats {
+            temp
+          }
+        }
+      }
+    }`
+  ];
+  
+  // First, run introspection to see what fields are available
+  console.log('Running GraphQL introspection...');
+  let availableFields = [];
+  const schemaResult = await graphqlRequest(ip, introspectionQuery);
+  if (schemaResult?.data?.__schema?.queryType?.fields) {
+    availableFields = schemaResult.data.__schema.queryType.fields.map(f => f.name);
+    console.log('Available GraphQL root fields:', availableFields);
+  } else if (schemaResult?.errors) {
+    console.log('GraphQL introspection failed:', schemaResult.errors[0]?.message);
+  }
+  
+  // Try each query format until one works
+  for (let i = 0; i < queries.length; i++) {
+    console.log(`Trying GraphQL query format ${i + 1}...`);
+    const result = await graphqlRequest(ip, queries[i]);
     
+    if (result?.data && !result.errors) {
+      console.log(`GraphQL query format ${i + 1} succeeded:`, JSON.stringify(result.data, null, 2).substring(0, 1000));
+      // Return both the data and the available fields
+      result._availableFields = availableFields;
+      return result;
+    } else if (result?.errors) {
+      console.log(`GraphQL query format ${i + 1} failed:`, result.errors[0]?.message);
+    }
+  }
+  
+  // If all queries failed, try a broad query to see what's available
+  console.log('All predefined queries failed. Trying broad discovery query...');
+  const discoveryQuery = `{
+    bosminer {
+      info {
+        workSolver
+      }
+    }
+  }`;
+  const discoveryResult = await graphqlRequest(ip, discoveryQuery);
+  if (discoveryResult) {
+    console.log('Discovery query result:', JSON.stringify(discoveryResult, null, 2).substring(0, 2000));
+    // Even if this fails, return the available fields for debugging
+    discoveryResult._availableFields = availableFields;
+    return discoveryResult;
+  }
+  
+  // Return an object with just the available fields for debugging
+  return { _availableFields: availableFields, data: null };
+}
+
+/**
+ * Helper function to make GraphQL requests
+ */
+function graphqlRequest(ip, query) {
+  return new Promise((resolve, reject) => {
     const postData = JSON.stringify({ query });
     
     const options = {
@@ -149,7 +260,6 @@ async function fetchBraiinsGraphQL(ip) {
       res.on('end', () => {
         try {
           const parsed = JSON.parse(data);
-          console.log('GraphQL response:', JSON.stringify(parsed, null, 2).substring(0, 1000));
           resolve(parsed);
         } catch (err) {
           console.error('Failed to parse GraphQL response:', err.message);
@@ -160,7 +270,7 @@ async function fetchBraiinsGraphQL(ip) {
     
     req.on('error', (err) => {
       console.error('GraphQL request error:', err.message);
-      resolve(null); // Don't reject, just return null so we can fall back
+      resolve(null);
     });
     
     req.on('timeout', () => {
@@ -757,14 +867,47 @@ async function getMinerStats(ip, config = {}) {
     
     // Try GraphQL data first (most reliable for Braiins OS)
     if (graphqlData?.data) {
-      console.log('=== USING GRAPHQL DATA ===');
+      console.log('=== PROCESSING GRAPHQL DATA ===');
       
-      // Extract temperatures from GraphQL
+      // Handle multiple possible GraphQL response formats
+      
+      // Format 1: bosminer.hashChains with temperature objects
+      if (graphqlData.data.bosminer?.hashChains) {
+        console.log('Found bosminer.hashChains format');
+        const chains = graphqlData.data.bosminer.hashChains;
+        chains.forEach((chain, idx) => {
+          if (chain.temperature) {
+            if (chain.temperature.board !== undefined) {
+              temps[`board${idx + 1}`] = chain.temperature.board;
+            }
+            if (chain.temperature.chip !== undefined) {
+              if (temps.chip === null || chain.temperature.chip > temps.chip) {
+                temps.chip = chain.temperature.chip;
+              }
+            }
+          }
+          if (typeof chain.temperature === 'number') {
+            temps[`board${idx + 1}`] = chain.temperature;
+          }
+          if (chain.fanRpm !== undefined) {
+            fans[`speed${idx + 1}`] = chain.fanRpm;
+          }
+        });
+        // Also check for fans array in bosminer
+        if (graphqlData.data.bosminer.fans) {
+          graphqlData.data.bosminer.fans.forEach((f, idx) => {
+            if (f.rpm !== undefined) {
+              fans[`speed${idx + 1}`] = f.rpm;
+            }
+          });
+        }
+      }
+      
+      // Format 2: Direct temperatures/fans arrays
       if (graphqlData.data.temperatures && Array.isArray(graphqlData.data.temperatures)) {
-        console.log('GraphQL temperatures:', graphqlData.data.temperatures);
+        console.log('Found temperatures array format');
         graphqlData.data.temperatures.forEach((t, idx) => {
           if (t.celsius !== undefined && t.celsius !== null) {
-            // Map by name or index
             const name = (t.name || '').toLowerCase();
             if (name.includes('board') || name.includes('pcb') || name.includes('hashboard')) {
               const boardNum = name.match(/\d+/)?.[0] || (idx + 1);
@@ -772,26 +915,75 @@ async function getMinerStats(ip, config = {}) {
             } else if (name.includes('chip')) {
               temps.chip = t.celsius;
             } else {
-              // Assign by index
               if (idx < 3) temps[`board${idx + 1}`] = t.celsius;
             }
           }
         });
-        // Set chip temp to max board temp if not explicitly provided
-        if (temps.chip === null) {
-          temps.chip = Math.max(temps.board1 || 0, temps.board2 || 0, temps.board3 || 0) || null;
-        }
       }
       
-      // Extract fans from GraphQL
       if (graphqlData.data.fans && Array.isArray(graphqlData.data.fans)) {
-        console.log('GraphQL fans:', graphqlData.data.fans);
+        console.log('Found fans array format');
         graphqlData.data.fans.forEach((f, idx) => {
           if (f.rpm !== undefined && f.rpm !== null) {
             fans[`speed${idx + 1}`] = f.rpm;
           }
         });
       }
+      
+      // Format 3: miner.hashboards
+      if (graphqlData.data.miner?.hashboards) {
+        console.log('Found miner.hashboards format');
+        graphqlData.data.miner.hashboards.forEach((board, idx) => {
+          if (board.temperature !== undefined) {
+            temps[`board${idx + 1}`] = board.temperature;
+          }
+          if (board.chipTemperature !== undefined) {
+            if (temps.chip === null || board.chipTemperature > temps.chip) {
+              temps.chip = board.chipTemperature;
+            }
+          }
+        });
+        if (graphqlData.data.miner.fans) {
+          graphqlData.data.miner.fans.forEach((f, idx) => {
+            if (f.rpm !== undefined) {
+              fans[`speed${idx + 1}`] = f.rpm;
+            }
+          });
+        }
+      }
+      
+      // Format 4: Tuner chain state
+      if (graphqlData.data.bosminer?.info?.workSolver?.tuner?.chainTunerState) {
+        console.log('Found tuner chainTunerState format');
+        const states = graphqlData.data.bosminer.info.workSolver.tuner.chainTunerState;
+        if (Array.isArray(states)) {
+          states.forEach((state, idx) => {
+            if (state.temperature !== undefined) {
+              temps[`board${idx + 1}`] = state.temperature;
+            }
+          });
+        }
+      }
+      
+      // Format 5: bosminer.hashboards with stats
+      if (graphqlData.data.bosminer?.hashboards) {
+        console.log('Found bosminer.hashboards format');
+        graphqlData.data.bosminer.hashboards.forEach((board, idx) => {
+          if (board.stats?.temp !== undefined) {
+            temps[`board${idx + 1}`] = board.stats.temp;
+          }
+        });
+      }
+      
+      // Set chip temp to max board temp if not explicitly provided
+      if (temps.chip === null) {
+        const boardTemps = [temps.board1, temps.board2, temps.board3].filter(t => t !== null);
+        if (boardTemps.length > 0) {
+          temps.chip = Math.max(...boardTemps);
+        }
+      }
+      
+      console.log('Extracted from GraphQL - temps:', temps, 'fans:', fans);
     }
     
     // Try HTTP API data if GraphQL didn't work
@@ -918,8 +1110,10 @@ async function getMinerStats(ip, config = {}) {
       // Debug info (remove in production)
       _debug: {
         graphqlAvailable: graphqlData?.data ? true : false,
-        graphqlTemps: graphqlData?.data?.temperatures || [],
-        graphqlFans: graphqlData?.data?.fans || [],
+        graphqlRootFields: graphqlData?._availableFields || [],
+        graphqlTemps: graphqlData?.data?.temperatures || graphqlData?.data?.bosminer?.hashChains || [],
+        graphqlFans: graphqlData?.data?.fans || graphqlData?.data?.bosminer?.fans || [],
+        graphqlRawData: graphqlData?.data ? JSON.stringify(graphqlData.data).substring(0, 500) : null,
         httpApiAvailable: httpApiData ? true : false,
         statsEntryCount: stats.STATS?.length || 0,
         allNumericFields: Object.entries(allStatsData)

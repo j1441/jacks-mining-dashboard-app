@@ -1001,15 +1001,24 @@
                                         
                                         {/* Debug info - can be removed in production */}
                                         {stats._debug && (
-                                            <div style={{ marginTop: '1rem', padding: '0.5rem', background: 'rgba(0,0,0,0.3)', borderRadius: '0.5rem', fontSize: '0.625rem', color: '#6b7280', maxHeight: '250px', overflow: 'auto' }}>
+                                            <div style={{ marginTop: '1rem', padding: '0.5rem', background: 'rgba(0,0,0,0.3)', borderRadius: '0.5rem', fontSize: '0.625rem', color: '#6b7280', maxHeight: '300px', overflow: 'auto' }}>
                                                 <div><strong>Debug Info:</strong></div>
                                                 <div style={{ color: stats._debug.graphqlAvailable ? '#4ade80' : '#f87171' }}>
                                                     GraphQL API: {stats._debug.graphqlAvailable ? '✓ Available' : '✗ Not available'}
                                                 </div>
+                                                {stats._debug.graphqlRootFields?.length > 0 && (
+                                                    <div style={{ marginTop: '0.25rem' }}>
+                                                        <strong>GraphQL Root Fields:</strong> {stats._debug.graphqlRootFields.join(', ')}
+                                                    </div>
+                                                )}
                                                 {stats._debug.graphqlAvailable && (
                                                     <>
-                                                        <div>GraphQL Temps: {JSON.stringify(stats._debug.graphqlTemps)}</div>
-                                                        <div>GraphQL Fans: {JSON.stringify(stats._debug.graphqlFans)}</div>
+                                                        <div style={{ marginTop: '0.25rem' }}>
+                                                            <strong>GraphQL Data:</strong>
+                                                            <div style={{ wordBreak: 'break-all', fontSize: '0.5rem' }}>
+                                                                {stats._debug.graphqlRawData || 'none'}
+                                                            </div>
+                                                        </div>
                                                     </>
                                                 )}
                                                 <div style={{ marginTop: '0.25rem' }}>Stats entries: {stats._debug.statsEntryCount}</div>
