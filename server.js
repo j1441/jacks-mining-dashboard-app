@@ -106,98 +106,181 @@ function httpsGet(url) {
  * This is more reliable than CGMiner API for temperature data
  */
 async function fetchBraiinsGraphQL(ip) {
-  // First, try to discover the schema with introspection
+  // Detailed introspection to discover the schema
   const introspectionQuery = `{
     __schema {
       queryType {
         fields {
           name
+          type {
+            name
+            kind
+            fields {
+              name
+              type {
+                name
+                kind
+              }
+            }
+          }
         }
       }
     }
   }`;
   
-  // Try multiple query formats - different Braiins OS versions use different schemas
-  const queries = [
-    // Schema 1: bosminer with nested hashChains (common in Braiins OS+)
-    `{
-      bosminer {
-        hashChains {
-          id
-          temperature {
-            chip
-            board
+  // First, run introspection to see what fields are available
+  console.log('Running GraphQL introspection...');
+  let availableFields = [];
+  let bosminerFields = [];
+  const schemaResult = await graphqlRequest(ip, introspectionQuery);
+  
+  if (schemaResult?.data?.__schema?.queryType?.fields) {
+    const fields = schemaResult.data.__schema.queryType.fields;
+    availableFields = fields.map(f => f.name);
+    console.log('Available GraphQL root fields:', availableFields);
+    
+    // Find bosminer fields specifically
+    const bosminerType = fields.find(f => f.name === 'bosminer');
+    if (bosminerType?.type?.fields) {
+      bosminerFields = bosminerType.type.fields.map(f => `${f.name}(${f.type?.name || f.type?.kind})`);
+      console.log('Bosminer fields:', bosminerFields);
+    }
+    
+    // Also check 'bos' type
+    const bosType = fields.find(f => f.name === 'bos');
+    if (bosType?.type?.fields) {
+      const bosFields = bosType.type.fields.map(f => `${f.name}(${f.type?.name || f.type?.kind})`);
+      console.log('BOS fields:', bosFields);
+    }
+  } else if (schemaResult?.errors) {
+    console.log('GraphQL introspection failed:', schemaResult.errors[0]?.message);
+  }
+  
+  // Try deeper introspection on bosminer
+  const bosminerIntrospection = `{
+    __type(name: "BosminerQuery") {
+      fields {
+        name
+        type {
+          name
+          kind
+          ofType {
+            name
+            kind
           }
-          fanRpm
-        }
-        fans {
-          rpm
         }
       }
-    }`,
-    // Schema 2: Direct temperatures/fans (some versions)
-    `{
-      temperatures {
+    }
+  }`;
+  
+  const bosminerSchema = await graphqlRequest(ip, bosminerIntrospection);
+  if (bosminerSchema?.data?.__type?.fields) {
+    const fields = bosminerSchema.data.__type.fields;
+    console.log('BosminerQuery fields (detailed):', fields.map(f => f.name));
+    bosminerFields = fields.map(f => f.name);
+  }
+  
+  // Also introspect BosQuery if it exists
+  const bosIntrospection = `{
+    __type(name: "BosQuery") {
+      fields {
         name
-        celsius
-      }
-      fans {
-        name
-        rpm
-      }
-    }`,
-    // Schema 3: miner object with temps
-    `{
-      miner {
-        hashboards {
-          temperature
-          chipTemperature
-        }
-        fans {
-          rpm
+        type {
+          name
+          kind
         }
       }
-    }`,
-    // Schema 4: BOSer specific format
-    `{
+    }
+  }`;
+  
+  const bosSchema = await graphqlRequest(ip, bosIntrospection);
+  if (bosSchema?.data?.__type?.fields) {
+    console.log('BosQuery fields:', bosSchema.data.__type.fields.map(f => f.name));
+  }
+  
+  // Build queries dynamically based on discovered fields
+  const queries = [];
+  
+  // If we found bosminer fields, try to query them
+  if (bosminerFields.includes('info')) {
+    queries.push(`{
       bosminer {
         info {
           workSolver {
-            tuner {
-              chainTunerState {
-                temperature
+            realHashrate {
+              mhs1M
+            }
+          }
+        }
+      }
+    }`);
+  }
+  
+  // Try various known patterns based on BOSer versions
+  queries.push(
+    // Pattern for BOSer with tuner
+    `{
+      bosminer {
+        info {
+          tuner {
+            chains {
+              id
+              temperature {
+                chip
+                board
               }
             }
           }
         }
-        hashChains {
-          id
-        }
       }
     }`,
-    // Schema 5: Simple bosminer stats
+    // Pattern with cooling
     `{
-      bosminer {
-        hashboards {
-          id
-          stats {
-            temp
+      bos {
+        cooling {
+          fans {
+            rpm
+          }
+        }
+        info {
+          system {
+            hostname
           }
         }
       }
+    }`,
+    // Pattern with miner info
+    `{
+      bos {
+        miner {
+          temperature {
+            board
+            chip
+          }
+          fans {
+            rpm
+          }
+        }
+      }
+    }`,
+    // Simple bosminer info
+    `{
+      bosminer {
+        info {
+          hostname
+          platform
+        }
+      }
+    }`,
+    // Try bos.info
+    `{
+      bos {
+        info {
+          hostname
+        }
+      }
     }`
-  ];
-  
-  // First, run introspection to see what fields are available
-  console.log('Running GraphQL introspection...');
-  let availableFields = [];
-  const schemaResult = await graphqlRequest(ip, introspectionQuery);
-  if (schemaResult?.data?.__schema?.queryType?.fields) {
-    availableFields = schemaResult.data.__schema.queryType.fields.map(f => f.name);
-    console.log('Available GraphQL root fields:', availableFields);
-  } else if (schemaResult?.errors) {
-    console.log('GraphQL introspection failed:', schemaResult.errors[0]?.message);
-  }
+  );
   
   // Try each query format until one works
   for (let i = 0; i < queries.length; i++) {
@@ -205,34 +288,21 @@ async function fetchBraiinsGraphQL(ip) {
     const result = await graphqlRequest(ip, queries[i]);
     
     if (result?.data && !result.errors) {
-      console.log(`GraphQL query format ${i + 1} succeeded:`, JSON.stringify(result.data, null, 2).substring(0, 1000));
-      // Return both the data and the available fields
+      console.log(`GraphQL query format ${i + 1} succeeded:`, JSON.stringify(result.data, null, 2).substring(0, 1500));
       result._availableFields = availableFields;
+      result._bosminerFields = bosminerFields;
       return result;
     } else if (result?.errors) {
       console.log(`GraphQL query format ${i + 1} failed:`, result.errors[0]?.message);
     }
   }
   
-  // If all queries failed, try a broad query to see what's available
-  console.log('All predefined queries failed. Trying broad discovery query...');
-  const discoveryQuery = `{
-    bosminer {
-      info {
-        workSolver
-      }
-    }
-  }`;
-  const discoveryResult = await graphqlRequest(ip, discoveryQuery);
-  if (discoveryResult) {
-    console.log('Discovery query result:', JSON.stringify(discoveryResult, null, 2).substring(0, 2000));
-    // Even if this fails, return the available fields for debugging
-    discoveryResult._availableFields = availableFields;
-    return discoveryResult;
-  }
-  
   // Return an object with just the available fields for debugging
-  return { _availableFields: availableFields, data: null };
+  return { 
+    _availableFields: availableFields, 
+    _bosminerFields: bosminerFields,
+    data: null 
+  };
 }
 
 /**
@@ -1111,6 +1181,7 @@ async function getMinerStats(ip, config = {}) {
       _debug: {
         graphqlAvailable: graphqlData?.data ? true : false,
         graphqlRootFields: graphqlData?._availableFields || [],
+        graphqlBosminerFields: graphqlData?._bosminerFields || [],
         graphqlTemps: graphqlData?.data?.temperatures || graphqlData?.data?.bosminer?.hashChains || [],
         graphqlFans: graphqlData?.data?.fans || graphqlData?.data?.bosminer?.fans || [],
         graphqlRawData: graphqlData?.data ? JSON.stringify(graphqlData.data).substring(0, 500) : null,
