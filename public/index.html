@@ -1001,26 +1001,29 @@
                                         
                                         {/* Debug info - can be removed in production */}
                                         {stats._debug && (
-                                            <div style={{ marginTop: '1rem', padding: '0.5rem', background: 'rgba(0,0,0,0.3)', borderRadius: '0.5rem', fontSize: '0.625rem', color: '#6b7280', maxHeight: '200px', overflow: 'auto' }}>
+                                            <div style={{ marginTop: '1rem', padding: '0.5rem', background: 'rgba(0,0,0,0.3)', borderRadius: '0.5rem', fontSize: '0.625rem', color: '#6b7280', maxHeight: '250px', overflow: 'auto' }}>
                                                 <div><strong>Debug Info:</strong></div>
-                                                <div>Stats entries: {stats._debug.statsEntryCount}</div>
+                                                <div style={{ color: stats._debug.graphqlAvailable ? '#4ade80' : '#f87171' }}>
+                                                    GraphQL API: {stats._debug.graphqlAvailable ? '✓ Available' : '✗ Not available'}
+                                                </div>
+                                                {stats._debug.graphqlAvailable && (
+                                                    <>
+                                                        <div>GraphQL Temps: {JSON.stringify(stats._debug.graphqlTemps)}</div>
+                                                        <div>GraphQL Fans: {JSON.stringify(stats._debug.graphqlFans)}</div>
+                                                    </>
+                                                )}
+                                                <div style={{ marginTop: '0.25rem' }}>Stats entries: {stats._debug.statsEntryCount}</div>
                                                 <div style={{ marginTop: '0.25rem' }}>
-                                                    <strong>Temp fields found:</strong> {stats._debug.tempFields?.length > 0 ? stats._debug.tempFields.join(', ') : 'none'}
+                                                    <strong>CGMiner Temp fields:</strong> {stats._debug.tempFields?.length > 0 ? stats._debug.tempFields.join(', ') : 'none'}
                                                 </div>
                                                 <div style={{ marginTop: '0.25rem' }}>
-                                                    <strong>Fan fields found:</strong> {stats._debug.fanFields?.length > 0 ? stats._debug.fanFields.join(', ') : 'none'}
+                                                    <strong>CGMiner Fan fields:</strong> {stats._debug.fanFields?.length > 0 ? stats._debug.fanFields.join(', ') : 'none'}
                                                 </div>
-                                                <div style={{ marginTop: '0.25rem' }}>
-                                                    <strong>All numeric fields:</strong>
-                                                    <div style={{ wordBreak: 'break-all' }}>
-                                                        {stats._debug.allNumericFields?.join(', ') || 'none'}
-                                                    </div>
-                                                </div>
-                                                {stats._debug.devsNumericFields?.length > 0 && (
+                                                {!stats._debug.graphqlAvailable && (
                                                     <div style={{ marginTop: '0.25rem' }}>
-                                                        <strong>Devs fields:</strong>
+                                                        <strong>All numeric fields:</strong>
                                                         <div style={{ wordBreak: 'break-all' }}>
-                                                            {stats._debug.devsNumericFields.join(', ')}
+                                                            {stats._debug.allNumericFields?.join(', ') || 'none'}
                                                         </div>
                                                     </div>
                                                 )}

@@ -101,6 +101,122 @@ function httpsGet(url) {
   });
 }
 
+/**
+ * Fetch temperature and fan data from Braiins OS GraphQL API
+ * This is more reliable than CGMiner API for temperature data
+ */
+async function fetchBraiinsGraphQL(ip) {
+  return new Promise((resolve, reject) => {
+    const query = `{
+      bosminer {
+        info {
+          workSolver {
+            realHashrate {
+              mhs1M
+              mhs5M
+              mhs15M
+            }
+          }
+        }
+      }
+      fans {
+        name
+        rpm
+      }
+      temperatures {
+        name
+        celsius
+      }
+    }`;
+    
+    const postData = JSON.stringify({ query });
+    
+    const options = {
+      hostname: ip,
+      port: 80,
+      path: '/graphql',
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Content-Length': Buffer.byteLength(postData)
+      },
+      timeout: 10000
+    };
+    
+    const req = http.request(options, (res) => {
+      let data = '';
+      res.on('data', chunk => data += chunk);
+      res.on('end', () => {
+        try {
+          const parsed = JSON.parse(data);
+          console.log('GraphQL response:', JSON.stringify(parsed, null, 2).substring(0, 1000));
+          resolve(parsed);
+        } catch (err) {
+          console.error('Failed to parse GraphQL response:', err.message);
+          resolve(null);
+        }
+      });
+    });
+    
+    req.on('error', (err) => {
+      console.error('GraphQL request error:', err.message);
+      resolve(null); // Don't reject, just return null so we can fall back
+    });
+    
+    req.on('timeout', () => {
+      req.destroy();
+      console.error('GraphQL request timeout');
+      resolve(null);
+    });
+    
+    req.write(postData);
+    req.end();
+  });
+}
+
+/**
+ * Alternative: Fetch from Braiins OS HTTP API
+ */
+async function fetchBraiinsHTTPApi(ip) {
+  return new Promise((resolve, reject) => {
+    const options = {
+      hostname: ip,
+      port: 80,
+      path: '/cgi-bin/luci/admin/miner/api_status',
+      method: 'GET',
+      timeout: 10000
+    };
+    
+    const req = http.request(options, (res) => {
+      let data = '';
+      res.on('data', chunk => data += chunk);
+      res.on('end', () => {
+        try {
+          const parsed = JSON.parse(data);
+          console.log('HTTP API response:', JSON.stringify(parsed, null, 2).substring(0, 1000));
+          resolve(parsed);
+        } catch (err) {
+          console.error('Failed to parse HTTP API response:', err.message);
+          resolve(null);
+        }
+      });
+    });
+    
+    req.on('error', (err) => {
+      console.error('HTTP API request error:', err.message);
+      resolve(null);
+    });
+    
+    req.on('timeout', () => {
+      req.destroy();
+      console.error('HTTP API request timeout');
+      resolve(null);
+    });
+    
+    req.end();
+  });
+}
+
 // ============================================================================
 // External API Functions
 // ============================================================================
@@ -520,6 +636,25 @@ async function getMinerStats(ip, config = {}) {
   try {
     console.log(`Getting stats from miner at ${ip}`);
     
+    // Try to get data from Braiins OS GraphQL API (has temperature/fan data)
+    let graphqlData = null;
+    let httpApiData = null;
+    
+    try {
+      graphqlData = await fetchBraiinsGraphQL(ip);
+    } catch (e) {
+      console.log('GraphQL not available:', e.message);
+    }
+    
+    // Try HTTP API as fallback
+    if (!graphqlData) {
+      try {
+        httpApiData = await fetchBraiinsHTTPApi(ip);
+      } catch (e) {
+        console.log('HTTP API not available:', e.message);
+      }
+    }
+    
     // Try to get devs data too - sometimes has temperature info
     let devs = null;
     try {
@@ -616,11 +751,74 @@ async function getMinerStats(ip, config = {}) {
     const ghs5s = summaryData['GHS 5s'] || (summaryData['MHS 5s'] ? summaryData['MHS 5s'] / 1000 : 0);
     const hashrate = ghs5s / 1000;
 
-    // Extract temperatures using improved function - check both stats and devs
-    const temps = extractTemperatures(statsData, devsData, allStatsData);
-
-    // Extract fan speeds
-    const fans = extractFanSpeeds(statsData, devsData, allStatsData);
+    // Extract temperatures - prefer GraphQL data, fall back to CGMiner
+    let temps = { board1: null, board2: null, board3: null, chip: null };
+    let fans = { speed1: null, speed2: null, speed3: null, speed4: null };
+    
+    // Try GraphQL data first (most reliable for Braiins OS)
+    if (graphqlData?.data) {
+      console.log('=== USING GRAPHQL DATA ===');
+      
+      // Extract temperatures from GraphQL
+      if (graphqlData.data.temperatures && Array.isArray(graphqlData.data.temperatures)) {
+        console.log('GraphQL temperatures:', graphqlData.data.temperatures);
+        graphqlData.data.temperatures.forEach((t, idx) => {
+          if (t.celsius !== undefined && t.celsius !== null) {
+            // Map by name or index
+            const name = (t.name || '').toLowerCase();
+            if (name.includes('board') || name.includes('pcb') || name.includes('hashboard')) {
+              const boardNum = name.match(/\d+/)?.[0] || (idx + 1);
+              temps[`board${boardNum}`] = t.celsius;
+            } else if (name.includes('chip')) {
+              temps.chip = t.celsius;
+            } else {
+              // Assign by index
+              if (idx < 3) temps[`board${idx + 1}`] = t.celsius;
+            }
+          }
+        });
+        // Set chip temp to max board temp if not explicitly provided
+        if (temps.chip === null) {
+          temps.chip = Math.max(temps.board1 || 0, temps.board2 || 0, temps.board3 || 0) || null;
+        }
+      }
+      
+      // Extract fans from GraphQL
+      if (graphqlData.data.fans && Array.isArray(graphqlData.data.fans)) {
+        console.log('GraphQL fans:', graphqlData.data.fans);
+        graphqlData.data.fans.forEach((f, idx) => {
+          if (f.rpm !== undefined && f.rpm !== null) {
+            fans[`speed${idx + 1}`] = f.rpm;
+          }
+        });
+      }
+    }
+    
+    // Try HTTP API data if GraphQL didn't work
+    if (httpApiData && temps.chip === null) {
+      console.log('=== TRYING HTTP API DATA ===');
+      console.log('HTTP API data:', JSON.stringify(httpApiData, null, 2).substring(0, 1000));
+      
+      // Try to extract from various HTTP API response formats
+      if (httpApiData.temp) {
+        temps.chip = httpApiData.temp;
+      }
+      if (httpApiData.temp1) temps.board1 = httpApiData.temp1;
+      if (httpApiData.temp2) temps.board2 = httpApiData.temp2;
+      if (httpApiData.temp3) temps.board3 = httpApiData.temp3;
+      if (httpApiData.fan1) fans.speed1 = httpApiData.fan1;
+      if (httpApiData.fan2) fans.speed2 = httpApiData.fan2;
+    }
+    
+    // Fall back to CGMiner stats/devs data if GraphQL/HTTP API didn't provide temps
+    if (temps.chip === null || temps.chip === 0) {
+      console.log('=== FALLING BACK TO CGMINER DATA ===');
+      temps = extractTemperatures(statsData, devsData, allStatsData);
+      fans = extractFanSpeeds(statsData, devsData, allStatsData);
+    }
+    
+    console.log('Final temperatures:', temps);
+    console.log('Final fans:', fans);
 
     // Get power from stats or estimate
     const power = statsData.Power || statsData.power || statsData.power_limit || 
@@ -719,6 +917,10 @@ async function getMinerStats(ip, config = {}) {
       
       // Debug info (remove in production)
       _debug: {
+        graphqlAvailable: graphqlData?.data ? true : false,
+        graphqlTemps: graphqlData?.data?.temperatures || [],
+        graphqlFans: graphqlData?.data?.fans || [],
+        httpApiAvailable: httpApiData ? true : false,
         statsEntryCount: stats.STATS?.length || 0,
         allNumericFields: Object.entries(allStatsData)
           .filter(([k, v]) => typeof v === 'number')
