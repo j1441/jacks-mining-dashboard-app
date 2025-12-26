@@ -110,12 +110,12 @@ async function fetchBraiinsGraphQL(ip) {
   
   // First, authenticate with LuCI to get a session token
   console.log('Authenticating with LuCI...');
-  const sessionToken = await luciLogin(ip, 'root', 'root');
+  const sessionToken = await getSessionViaWebUI(ip, 'root', 'root');
   
   if (sessionToken) {
-    console.log('Got LuCI session token, will use for GraphQL requests');
+    console.log('Got session token, will use for GraphQL requests');
   } else {
-    console.log('No session token, will try Basic Auth fallback');
+    console.log('No session token obtained, will try Basic Auth fallback');
   }
   
   // First, get ALL types in the schema to find temp/fan related ones
@@ -476,6 +476,7 @@ async function fetchBraiinsGraphQL(ip) {
 /**
  * Authenticate with LuCI to get a session token
  * This is required for accessing bosminer data on BOSer
+ * Handles redirects to capture the session cookie
  */
 function luciLogin(ip, username = 'root', password = 'root') {
   return new Promise((resolve, reject) => {
@@ -484,7 +485,7 @@ function luciLogin(ip, username = 'root', password = 'root') {
     const options = {
       hostname: ip,
       port: 80,
-      path: '/cgi-bin/luci',
+      path: '/cgi-bin/luci/',
       method: 'POST',
       headers: {
         'Content-Type': 'application/x-www-form-urlencoded',
@@ -501,22 +502,41 @@ function luciLogin(ip, username = 'root', password = 'root') {
         const cookies = res.headers['set-cookie'];
         let sessionToken = null;
         
+        console.log(`LuCI login response: status=${res.statusCode}, cookies=${JSON.stringify(cookies)}`);
+        
         if (cookies) {
           for (const cookie of cookies) {
-            const match = cookie.match(/sysauth=([^;]+)/);
+            // Try sysauth (standard LuCI)
+            let match = cookie.match(/sysauth[^=]*=([^;]+)/);
             if (match) {
-              sessionToken = match[1];
+              sessionToken = match[0]; // Keep the full "sysauth=value" or "sysauth_http=value"
+              console.log('Found sysauth cookie:', sessionToken);
               break;
             }
           }
         }
         
+        // If we got a redirect (301, 302, 307, 308), follow it to get the cookie
+        if (!sessionToken && [301, 302, 307, 308].includes(res.statusCode)) {
+          const location = res.headers['location'];
+          console.log('Following redirect to:', location);
+          
+          if (location) {
+            // Build the cookie header from any cookies we got
+            const cookieHeader = cookies ? cookies.map(c => c.split(';')[0]).join('; ') : '';
+            
+            // Follow the redirect
+            followRedirect(ip, location, cookieHeader).then(result => {
+              resolve(result.sessionToken);
+            }).catch(() => resolve(null));
+            return;
+          }
+        }
+        
         if (sessionToken) {
-          console.log('LuCI login successful, got session token');
           resolve(sessionToken);
         } else {
-          console.log('LuCI login response:', res.statusCode, 'cookies:', cookies);
-          // Try to extract from redirect or other methods
+          console.log('No session token found in response');
           resolve(null);
         }
       });
@@ -539,10 +559,147 @@ function luciLogin(ip, username = 'root', password = 'root') {
 }
 
 /**
+ * Follow a redirect and capture any session cookies
+ */
+function followRedirect(ip, location, existingCookies = '') {
+  return new Promise((resolve, reject) => {
+    // Parse the location - it might be relative or absolute
+    let path = location;
+    if (location.startsWith('http')) {
+      try {
+        const url = new URL(location);
+        path = url.pathname + url.search;
+      } catch (e) {
+        path = location;
+      }
+    }
+    
+    const options = {
+      hostname: ip,
+      port: 80,
+      path: path,
+      method: 'GET',
+      headers: {},
+      timeout: 10000
+    };
+    
+    if (existingCookies) {
+      options.headers['Cookie'] = existingCookies;
+    }
+    
+    const req = http.request(options, (res) => {
+      let data = '';
+      res.on('data', chunk => data += chunk);
+      res.on('end', () => {
+        const cookies = res.headers['set-cookie'];
+        let sessionToken = null;
+        
+        console.log(`Redirect response: status=${res.statusCode}, cookies=${JSON.stringify(cookies)}`);
+        
+        // Combine existing cookies with new ones
+        let allCookies = existingCookies;
+        
+        if (cookies) {
+          for (const cookie of cookies) {
+            let match = cookie.match(/sysauth[^=]*=([^;]+)/);
+            if (match) {
+              sessionToken = match[0];
+              console.log('Found sysauth cookie after redirect:', sessionToken);
+            }
+          }
+          // Add new cookies
+          const newCookies = cookies.map(c => c.split(';')[0]).join('; ');
+          allCookies = allCookies ? `${allCookies}; ${newCookies}` : newCookies;
+        }
+        
+        // If still redirecting, follow again (max 3 redirects)
+        if (!sessionToken && [301, 302, 307, 308].includes(res.statusCode) && res.headers['location']) {
+          followRedirect(ip, res.headers['location'], allCookies).then(resolve).catch(reject);
+          return;
+        }
+        
+        // If no explicit sysauth, try using all cookies we collected
+        if (!sessionToken && allCookies) {
+          const sysauthMatch = allCookies.match(/sysauth[^=]*=[^;]+/);
+          if (sysauthMatch) {
+            sessionToken = sysauthMatch[0];
+          }
+        }
+        
+        resolve({ sessionToken, allCookies });
+      });
+    });
+    
+    req.on('error', (err) => {
+      console.error('Redirect follow error:', err.message);
+      reject(err);
+    });
+    
+    req.on('timeout', () => {
+      req.destroy();
+      reject(new Error('Redirect timeout'));
+    });
+    
+    req.end();
+  });
+}
+
+/**
+ * Alternative: Try to get a session by accessing the web UI first
+ */
+async function getSessionViaWebUI(ip, username = 'root', password = 'root') {
+  // Method 1: Try standard LuCI login
+  let session = await luciLogin(ip, username, password);
+  if (session) return session;
+  
+  // Method 2: Try /cgi-bin/luci/admin/status endpoint with basic auth
+  // This might establish a session
+  return new Promise((resolve) => {
+    const authHeader = 'Basic ' + Buffer.from(`${username}:${password}`).toString('base64');
+    
+    const options = {
+      hostname: ip,
+      port: 80,
+      path: '/cgi-bin/luci/admin/status/overview',
+      method: 'GET',
+      headers: {
+        'Authorization': authHeader
+      },
+      timeout: 10000
+    };
+    
+    const req = http.request(options, (res) => {
+      let data = '';
+      res.on('data', chunk => data += chunk);
+      res.on('end', () => {
+        const cookies = res.headers['set-cookie'];
+        console.log(`Web UI status response: ${res.statusCode}, cookies: ${JSON.stringify(cookies)}`);
+        
+        if (cookies) {
+          for (const cookie of cookies) {
+            const match = cookie.match(/sysauth[^=]*=([^;]+)/);
+            if (match) {
+              console.log('Got session from web UI:', match[0]);
+              resolve(match[0]);
+              return;
+            }
+          }
+        }
+        resolve(null);
+      });
+    });
+    
+    req.on('error', () => resolve(null));
+    req.on('timeout', () => { req.destroy(); resolve(null); });
+    req.end();
+  });
+}
+
+/**
  * Helper function to make GraphQL requests with authentication
  * Supports both Basic Auth and LuCI session auth
  */
-function graphqlRequest(ip, query, sessionToken = null) {
+function graphqlRequest(ip, query, sessionCookie = null) {
   return new Promise((resolve, reject) => {
     const postData = JSON.stringify({ query });
     
@@ -552,8 +709,10 @@ function graphqlRequest(ip, query, sessionToken = null) {
     };
     
     // Use session cookie if available, otherwise try Basic Auth
-    if (sessionToken) {
-      headers['Cookie'] = `sysauth=${sessionToken}`;
+    if (sessionCookie) {
+      // sessionCookie might be "sysauth=xxx" or "sysauth_http=xxx"
+      headers['Cookie'] = sessionCookie;
+      console.log('Using session cookie for GraphQL:', sessionCookie.substring(0, 30) + '...');
     } else {
       // Try Basic Auth as fallback
       headers['Authorization'] = 'Basic ' + Buffer.from('root:root').toString('base64');
@@ -576,7 +735,7 @@ function graphqlRequest(ip, query, sessionToken = null) {
           const parsed = JSON.parse(data);
           resolve(parsed);
         } catch (err) {
-          console.error('Failed to parse GraphQL response:', err.message);
+          console.error('Failed to parse GraphQL response:', err.message, 'Raw:', data.substring(0, 200));
           resolve(null);
         }
       });
