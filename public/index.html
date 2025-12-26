@@ -1001,7 +1001,7 @@
                                         
                                         {/* Debug info - can be removed in production */}
                                         {stats._debug && (
-                                            <div style={{ marginTop: '1rem', padding: '0.5rem', background: 'rgba(0,0,0,0.3)', borderRadius: '0.5rem', fontSize: '0.625rem', color: '#6b7280', maxHeight: '350px', overflow: 'auto' }}>
+                                            <div style={{ marginTop: '1rem', padding: '0.5rem', background: 'rgba(0,0,0,0.3)', borderRadius: '0.5rem', fontSize: '0.625rem', color: '#6b7280', maxHeight: '400px', overflow: 'auto' }}>
                                                 <div><strong>Debug Info:</strong></div>
                                                 <div style={{ color: stats._debug.graphqlAvailable ? '#4ade80' : '#f87171' }}>
                                                     GraphQL API: {stats._debug.graphqlAvailable ? '✓ Available' : '✗ Not available'}
@@ -1013,7 +1013,12 @@
                                                 )}
                                                 {stats._debug.graphqlBosminerFields?.length > 0 && (
                                                     <div style={{ marginTop: '0.25rem' }}>
-                                                        <strong>Bosminer Fields:</strong> {stats._debug.graphqlBosminerFields.join(', ')}
+                                                        <strong>Bosminer:</strong> {stats._debug.graphqlBosminerFields.join(', ')}
+                                                    </div>
+                                                )}
+                                                {stats._debug.graphqlBosFields?.length > 0 && (
+                                                    <div style={{ marginTop: '0.25rem' }}>
+                                                        <strong>Bos:</strong> {stats._debug.graphqlBosFields.join(', ')}
                                                     </div>
                                                 )}
                                                 {stats._debug.graphqlAvailable && (

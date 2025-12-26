@@ -132,6 +132,7 @@ async function fetchBraiinsGraphQL(ip) {
   console.log('Running GraphQL introspection...');
   let availableFields = [];
   let bosminerFields = [];
+  let bosFields = [];
   const schemaResult = await graphqlRequest(ip, introspectionQuery);
   
   if (schemaResult?.data?.__schema?.queryType?.fields) {
@@ -149,7 +150,7 @@ async function fetchBraiinsGraphQL(ip) {
     // Also check 'bos' type
     const bosType = fields.find(f => f.name === 'bos');
     if (bosType?.type?.fields) {
-      const bosFields = bosType.type.fields.map(f => `${f.name}(${f.type?.name || f.type?.kind})`);
+      bosFields = bosType.type.fields.map(f => f.name);
       console.log('BOS fields:', bosFields);
     }
   } else if (schemaResult?.errors) {
@@ -180,7 +181,7 @@ async function fetchBraiinsGraphQL(ip) {
     bosminerFields = fields.map(f => f.name);
   }
   
-  // Also introspect BosQuery if it exists
+  // Introspect BosQuery
   const bosIntrospection = `{
     __type(name: "BosQuery") {
       fields {
@@ -196,91 +197,113 @@ async function fetchBraiinsGraphQL(ip) {
   const bosSchema = await graphqlRequest(ip, bosIntrospection);
   if (bosSchema?.data?.__type?.fields) {
     console.log('BosQuery fields:', bosSchema.data.__type.fields.map(f => f.name));
+    bosFields = bosSchema.data.__type.fields.map(f => f.name);
+  }
+  
+  // Introspect BosInfo type to find temperature/fan fields
+  const bosInfoIntrospection = `{
+    __type(name: "BosInfo") {
+      fields {
+        name
+        type {
+          name
+          kind
+        }
+      }
+    }
+  }`;
+  
+  const bosInfoSchema = await graphqlRequest(ip, bosInfoIntrospection);
+  if (bosInfoSchema?.data?.__type?.fields) {
+    console.log('BosInfo fields:', bosInfoSchema.data.__type.fields.map(f => f.name));
+  }
+  
+  // Introspect Manager type
+  const managerIntrospection = `{
+    __type(name: "Manager") {
+      fields {
+        name
+        type {
+          name
+          kind
+        }
+      }
+    }
+  }`;
+  
+  const managerSchema = await graphqlRequest(ip, managerIntrospection);
+  if (managerSchema?.data?.__type?.fields) {
+    console.log('Manager fields:', managerSchema.data.__type.fields.map(f => f.name));
+  }
+  
+  // Introspect BosminerInfo type
+  const bosminerInfoIntrospection = `{
+    __type(name: "BosminerInfo") {
+      fields {
+        name
+        type {
+          name
+          kind
+        }
+      }
+    }
+  }`;
+  
+  const bosminerInfoSchema = await graphqlRequest(ip, bosminerInfoIntrospection);
+  if (bosminerInfoSchema?.data?.__type?.fields) {
+    console.log('BosminerInfo fields:', bosminerInfoSchema.data.__type.fields.map(f => f.name));
   }
   
   // Build queries dynamically based on discovered fields
   const queries = [];
   
-  // If we found bosminer fields, try to query them
-  if (bosminerFields.includes('info')) {
-    queries.push(`{
-      bosminer {
-        info {
-          workSolver {
-            realHashrate {
-              mhs1M
-            }
-          }
-        }
+  // Try bos.manager which might have temperature/performance data
+  queries.push(`{
+    bos {
+      manager {
+        status
       }
-    }`);
-  }
+    }
+  }`);
   
-  // Try various known patterns based on BOSer versions
-  queries.push(
-    // Pattern for BOSer with tuner
-    `{
-      bosminer {
-        info {
-          tuner {
-            chains {
-              id
-              temperature {
-                chip
-                board
-              }
-            }
+  // Try bos.info
+  queries.push(`{
+    bos {
+      info {
+        system
+      }
+    }
+  }`);
+  
+  // Try bosminer.info with workSolver
+  queries.push(`{
+    bosminer {
+      info {
+        workSolver {
+          realHashrate {
+            mhs1M
+            mhs5M
+            mhs15M
           }
         }
       }
-    }`,
-    // Pattern with cooling
-    `{
-      bos {
-        cooling {
-          fans {
-            rpm
-          }
-        }
-        info {
-          system {
-            hostname
-          }
-        }
-      }
-    }`,
-    // Pattern with miner info
-    `{
-      bos {
-        miner {
-          temperature {
-            board
-            chip
-          }
-          fans {
-            rpm
-          }
-        }
-      }
-    }`,
-    // Simple bosminer info
-    `{
-      bosminer {
-        info {
-          hostname
-          platform
-        }
-      }
-    }`,
-    // Try bos.info
-    `{
-      bos {
-        info {
-          hostname
-        }
-      }
-    }`
-  );
+    }
+  }`);
+  
+  // Try display which might have sensor data
+  queries.push(`{
+    display {
+      overview
+    }
+  }`);
+  
+  // Try just getting basic bos info that might be public
+  queries.push(`{
+    bos {
+      hostname
+      uptime
+    }
+  }`);
   
   // Try each query format until one works
   for (let i = 0; i < queries.length; i++) {
@@ -291,6 +314,7 @@ async function fetchBraiinsGraphQL(ip) {
       console.log(`GraphQL query format ${i + 1} succeeded:`, JSON.stringify(result.data, null, 2).substring(0, 1500));
       result._availableFields = availableFields;
       result._bosminerFields = bosminerFields;
+      result._bosFields = bosFields;
       return result;
     } else if (result?.errors) {
       console.log(`GraphQL query format ${i + 1} failed:`, result.errors[0]?.message);
@@ -301,16 +325,20 @@ async function fetchBraiinsGraphQL(ip) {
   return { 
     _availableFields: availableFields, 
     _bosminerFields: bosminerFields,
+    _bosFields: bosFields,
     data: null 
   };
 }
 
 /**
- * Helper function to make GraphQL requests
+ * Helper function to make GraphQL requests with authentication
  */
 function graphqlRequest(ip, query) {
   return new Promise((resolve, reject) => {
     const postData = JSON.stringify({ query });
+    
+    // Create Basic Auth header with root:root credentials (Braiins OS default)
+    const authHeader = 'Basic ' + Buffer.from('root:root').toString('base64');
     
     const options = {
       hostname: ip,
@@ -319,7 +347,8 @@ function graphqlRequest(ip, query) {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        'Content-Length': Buffer.byteLength(postData)
+        'Content-Length': Buffer.byteLength(postData),
+        'Authorization': authHeader
       },
       timeout: 10000
     };
@@ -359,11 +388,17 @@ function graphqlRequest(ip, query) {
  */
 async function fetchBraiinsHTTPApi(ip) {
   return new Promise((resolve, reject) => {
+    // Create Basic Auth header with root:root credentials (Braiins OS default)
+    const authHeader = 'Basic ' + Buffer.from('root:root').toString('base64');
+    
     const options = {
       hostname: ip,
       port: 80,
       path: '/cgi-bin/luci/admin/miner/api_status',
       method: 'GET',
+      headers: {
+        'Authorization': authHeader
+      },
       timeout: 10000
     };
     
@@ -1182,6 +1217,7 @@ async function getMinerStats(ip, config = {}) {
         graphqlAvailable: graphqlData?.data ? true : false,
         graphqlRootFields: graphqlData?._availableFields || [],
         graphqlBosminerFields: graphqlData?._bosminerFields || [],
+        graphqlBosFields: graphqlData?._bosFields || [],
         graphqlTemps: graphqlData?.data?.temperatures || graphqlData?.data?.bosminer?.hashChains || [],
         graphqlFans: graphqlData?.data?.fans || graphqlData?.data?.bosminer?.fans || [],
         graphqlRawData: graphqlData?.data ? JSON.stringify(graphqlData.data).substring(0, 500) : null,
