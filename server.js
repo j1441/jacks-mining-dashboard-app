@@ -324,12 +324,15 @@ async function sendCGMinerCommand(ip, command) {
 
 /**
  * Extract temperature from various possible field names in Braiins OS stats
+ * Checks multiple data sources: stats, devs, and all stats combined
  */
-function extractTemperatures(statsData) {
-  // Debug: Log all keys to help identify the correct field names
-  console.log('Stats data keys:', Object.keys(statsData));
+function extractTemperatures(statsData, devsData = {}, allStatsData = {}) {
+  // Merge all data sources for searching
+  const combinedData = { ...allStatsData, ...statsData, ...devsData };
   
-  // Try to find board temperatures - Braiins OS uses various naming conventions
+  // Debug: Log all keys to help identify the correct field names
+  console.log('Combined data keys for temp search:', Object.keys(combinedData).join(', '));
+  
   const temps = {
     board1: null,
     board2: null,
@@ -337,74 +340,98 @@ function extractTemperatures(statsData) {
     chip: null
   };
   
-  // Common Braiins OS field patterns for S19 series
-  // Pattern 1: temp_chip_X, temp_pcb_X
-  if (statsData.temp_chip_1 !== undefined) {
-    temps.board1 = statsData.temp_pcb_1 || statsData.temp_chip_1;
-    temps.board2 = statsData.temp_pcb_2 || statsData.temp_chip_2;
-    temps.board3 = statsData.temp_pcb_3 || statsData.temp_chip_3;
-    temps.chip = Math.max(
-      statsData.temp_chip_1 || 0,
-      statsData.temp_chip_2 || 0,
-      statsData.temp_chip_3 || 0
-    );
-  }
-  // Pattern 2: temp1, temp2, temp3 (older format)
-  else if (statsData.temp1 !== undefined) {
-    temps.board1 = statsData.temp1;
-    temps.board2 = statsData.temp2;
-    temps.board3 = statsData.temp3;
-    temps.chip = statsData.temp || Math.max(temps.board1 || 0, temps.board2 || 0, temps.board3 || 0);
-  }
-  // Pattern 3: temp2_1, temp2_2, temp2_3 (some Antminer models)
-  else if (statsData.temp2_1 !== undefined) {
-    temps.board1 = statsData.temp2_1;
-    temps.board2 = statsData.temp2_2;
-    temps.board3 = statsData.temp2_3;
-    temps.chip = Math.max(temps.board1 || 0, temps.board2 || 0, temps.board3 || 0);
-  }
-  // Pattern 4: Nested in chain data - check for chain_X or chains array
-  else if (statsData.chain1 !== undefined || statsData.chains !== undefined) {
-    const chains = statsData.chains || [statsData.chain1, statsData.chain2, statsData.chain3];
-    if (Array.isArray(chains)) {
-      chains.forEach((chain, idx) => {
-        if (chain && typeof chain === 'object') {
-          const key = `board${idx + 1}`;
-          temps[key] = chain.temp_pcb || chain.temp_chip || chain.temp || null;
-        }
-      });
+  // List all numeric fields for debugging
+  const numericFields = {};
+  for (const [key, value] of Object.entries(combinedData)) {
+    if (typeof value === 'number') {
+      numericFields[key] = value;
     }
   }
-  // Pattern 5: Look for Temperature field directly
-  else if (statsData.Temperature !== undefined) {
-    temps.chip = statsData.Temperature;
-  }
-  // Pattern 6: Braiins OS+ format with boards array
-  else if (statsData.boards !== undefined && Array.isArray(statsData.boards)) {
-    statsData.boards.forEach((board, idx) => {
-      const key = `board${idx + 1}`;
-      temps[key] = board.board_temp || board.chip_temp || board.temp || null;
-    });
+  console.log('All numeric fields:', JSON.stringify(numericFields, null, 2));
+  
+  // Common Braiins OS field patterns for S19 series
+  // Pattern 1: temp_chip_X, temp_pcb_X
+  if (combinedData.temp_chip_1 !== undefined) {
+    temps.board1 = combinedData.temp_pcb_1 || combinedData.temp_chip_1;
+    temps.board2 = combinedData.temp_pcb_2 || combinedData.temp_chip_2;
+    temps.board3 = combinedData.temp_pcb_3 || combinedData.temp_chip_3;
     temps.chip = Math.max(
-      ...statsData.boards.map(b => b.chip_temp || b.temp || 0)
+      combinedData.temp_chip_1 || 0,
+      combinedData.temp_chip_2 || 0,
+      combinedData.temp_chip_3 || 0
     );
+    console.log('Found temps using pattern: temp_chip_X');
+  }
+  // Pattern 2: temp1, temp2, temp3 (older format)
+  else if (combinedData.temp1 !== undefined) {
+    temps.board1 = combinedData.temp1;
+    temps.board2 = combinedData.temp2;
+    temps.board3 = combinedData.temp3;
+    temps.chip = combinedData.temp || Math.max(temps.board1 || 0, temps.board2 || 0, temps.board3 || 0);
+    console.log('Found temps using pattern: temp1/temp2/temp3');
+  }
+  // Pattern 3: temp2_1, temp2_2, temp2_3 (some Antminer models)
+  else if (combinedData.temp2_1 !== undefined) {
+    temps.board1 = combinedData.temp2_1;
+    temps.board2 = combinedData.temp2_2;
+    temps.board3 = combinedData.temp2_3;
+    temps.chip = Math.max(temps.board1 || 0, temps.board2 || 0, temps.board3 || 0);
+    console.log('Found temps using pattern: temp2_X');
+  }
+  // Pattern 4: Temperature field from devs
+  else if (combinedData.Temperature !== undefined) {
+    temps.chip = combinedData.Temperature;
+    console.log('Found temps using pattern: Temperature (devs)');
+  }
+  // Pattern 5: Check for chain_ prefixed fields
+  else if (Object.keys(combinedData).some(k => k.startsWith('chain_'))) {
+    for (let i = 1; i <= 3; i++) {
+      const tempKey = `chain_temp${i}` || `chain${i}_temp`;
+      if (combinedData[tempKey] !== undefined) {
+        temps[`board${i}`] = combinedData[tempKey];
+      }
+    }
+    console.log('Found temps using pattern: chain_tempX');
   }
   
-  // Pattern 7: Search for any field containing 'temp' (fallback)
+  // Pattern 6: Search for any field containing 'temp' (fallback)
   if (temps.chip === null) {
-    for (const [key, value] of Object.entries(statsData)) {
-      if (typeof value === 'number' && key.toLowerCase().includes('temp')) {
-        console.log(`Found temperature field: ${key} = ${value}`);
-        if (key.includes('chip') || key.includes('Chip')) {
+    const tempFields = [];
+    for (const [key, value] of Object.entries(combinedData)) {
+      if (typeof value === 'number' && key.toLowerCase().includes('temp') && value > 0 && value < 150) {
+        tempFields.push({ key, value });
+        console.log(`Found potential temperature field: ${key} = ${value}`);
+        
+        if (key.toLowerCase().includes('chip')) {
           temps.chip = value;
-        } else if (temps.board1 === null && (key.includes('1') || key.includes('pcb'))) {
+        } else if (key.includes('1') && temps.board1 === null) {
           temps.board1 = value;
-        } else if (temps.board2 === null && key.includes('2')) {
+        } else if (key.includes('2') && temps.board2 === null) {
           temps.board2 = value;
-        } else if (temps.board3 === null && key.includes('3')) {
+        } else if (key.includes('3') && temps.board3 === null) {
           temps.board3 = value;
         }
       }
+    }
+    if (tempFields.length > 0) {
+      console.log('Found temps using pattern: search for *temp*');
+    }
+  }
+  
+  // Pattern 7: Look for fields that might be temperatures by value range (20-100°C typical)
+  if (temps.chip === null) {
+    const potentialTemps = [];
+    for (const [key, value] of Object.entries(combinedData)) {
+      // Skip known non-temperature fields
+      const skipKeys = ['elapsed', 'uptime', 'accepted', 'rejected', 'hw', 'diff', 'power', 'watt', 'freq', 'rate', 'speed', 'rpm', 'ghs', 'mhs', 'ths'];
+      const keyLower = key.toLowerCase();
+      if (typeof value === 'number' && value >= 20 && value <= 100 && 
+          !skipKeys.some(skip => keyLower.includes(skip))) {
+        potentialTemps.push({ key, value });
+      }
+    }
+    if (potentialTemps.length > 0) {
+      console.log('Potential temperature fields by value range:', potentialTemps);
     }
   }
   
@@ -413,14 +440,16 @@ function extractTemperatures(statsData) {
     temps.chip = Math.max(temps.board1 || 0, temps.board2 || 0, temps.board3 || 0);
   }
   
-  console.log('Extracted temperatures:', temps);
+  console.log('Final extracted temperatures:', temps);
   return temps;
 }
 
 /**
  * Extract fan speeds from stats data
  */
-function extractFanSpeeds(statsData) {
+function extractFanSpeeds(statsData, devsData = {}, allStatsData = {}) {
+  const combinedData = { ...allStatsData, ...statsData, ...devsData };
+  
   const fans = {
     speed1: null,
     speed2: null,
@@ -429,40 +458,75 @@ function extractFanSpeeds(statsData) {
   };
   
   // Common patterns
-  if (statsData.fan1 !== undefined) {
-    fans.speed1 = statsData.fan1;
-    fans.speed2 = statsData.fan2;
-    fans.speed3 = statsData.fan3;
-    fans.speed4 = statsData.fan4;
-  } else if (statsData.fan_speed_in !== undefined) {
-    fans.speed1 = statsData.fan_speed_in;
-    fans.speed2 = statsData.fan_speed_out;
-  } else if (statsData.Fan1 !== undefined) {
-    fans.speed1 = statsData.Fan1;
-    fans.speed2 = statsData.Fan2;
-    fans.speed3 = statsData.Fan3;
-    fans.speed4 = statsData.Fan4;
+  if (combinedData.fan1 !== undefined) {
+    fans.speed1 = combinedData.fan1;
+    fans.speed2 = combinedData.fan2;
+    fans.speed3 = combinedData.fan3;
+    fans.speed4 = combinedData.fan4;
+    console.log('Found fans using pattern: fan1/fan2/fan3/fan4');
+  } else if (combinedData.fan_speed_in !== undefined) {
+    fans.speed1 = combinedData.fan_speed_in;
+    fans.speed2 = combinedData.fan_speed_out;
+    console.log('Found fans using pattern: fan_speed_in/out');
+  } else if (combinedData.Fan1 !== undefined) {
+    fans.speed1 = combinedData.Fan1;
+    fans.speed2 = combinedData.Fan2;
+    fans.speed3 = combinedData.Fan3;
+    fans.speed4 = combinedData.Fan4;
+    console.log('Found fans using pattern: Fan1/Fan2/Fan3/Fan4');
+  } else if (combinedData['Fan Speed In'] !== undefined) {
+    fans.speed1 = combinedData['Fan Speed In'];
+    fans.speed2 = combinedData['Fan Speed Out'];
+    console.log('Found fans using pattern: Fan Speed In/Out');
   }
   
-  // Search for fan fields
-  for (const [key, value] of Object.entries(statsData)) {
-    if (typeof value === 'number' && key.toLowerCase().includes('fan')) {
-      console.log(`Found fan field: ${key} = ${value}`);
-      if (fans.speed1 === null && (key.includes('1') || key.includes('in'))) {
-        fans.speed1 = value;
-      } else if (fans.speed2 === null && (key.includes('2') || key.includes('out'))) {
-        fans.speed2 = value;
+  // Search for fan fields if not found
+  if (fans.speed1 === null) {
+    for (const [key, value] of Object.entries(combinedData)) {
+      if (typeof value === 'number' && key.toLowerCase().includes('fan') && value > 0) {
+        console.log(`Found potential fan field: ${key} = ${value}`);
+        if (fans.speed1 === null && (key.includes('1') || key.toLowerCase().includes('in'))) {
+          fans.speed1 = value;
+        } else if (fans.speed2 === null && (key.includes('2') || key.toLowerCase().includes('out'))) {
+          fans.speed2 = value;
+        } else if (fans.speed3 === null && key.includes('3')) {
+          fans.speed3 = value;
+        } else if (fans.speed4 === null && key.includes('4')) {
+          fans.speed4 = value;
+        }
       }
     }
   }
   
-  console.log('Extracted fan speeds:', fans);
+  // Look for RPM values that might be fans (typically 1000-10000 range)
+  if (fans.speed1 === null) {
+    const potentialFans = [];
+    for (const [key, value] of Object.entries(combinedData)) {
+      if (typeof value === 'number' && value >= 500 && value <= 10000 && 
+          (key.toLowerCase().includes('rpm') || key.toLowerCase().includes('speed'))) {
+        potentialFans.push({ key, value });
+      }
+    }
+    if (potentialFans.length > 0) {
+      console.log('Potential fan fields by value range:', potentialFans);
+    }
+  }
+  
+  console.log('Final extracted fan speeds:', fans);
   return fans;
 }
 
 async function getMinerStats(ip, config = {}) {
   try {
     console.log(`Getting stats from miner at ${ip}`);
+    
+    // Try to get devs data too - sometimes has temperature info
+    let devs = null;
+    try {
+      devs = await sendCGMinerCommand(ip, { command: 'devs' });
+    } catch (e) {
+      console.log('devs command not available:', e.message);
+    }
     
     const [summary, stats, pools] = await Promise.all([
       sendCGMinerCommand(ip, { command: 'summary' }),
@@ -472,29 +536,79 @@ async function getMinerStats(ip, config = {}) {
 
     const summaryData = summary.SUMMARY?.[0] || {};
     
-    // Stats can be in different positions depending on miner
-    // Try STATS[1] first (common), then STATS[0], then look for the one with temperature data
+    // Log ALL stats entries for debugging
+    console.log('=== RAW STATS RESPONSE ===');
+    console.log('Number of STATS entries:', stats.STATS?.length || 0);
+    if (stats.STATS) {
+      stats.STATS.forEach((s, idx) => {
+        console.log(`\n--- STATS[${idx}] keys:`, Object.keys(s || {}).join(', '));
+        // Log all numeric values to help identify temp/fan fields
+        if (s && typeof s === 'object') {
+          const numericFields = Object.entries(s)
+            .filter(([k, v]) => typeof v === 'number')
+            .map(([k, v]) => `${k}=${v}`);
+          console.log(`  Numeric fields:`, numericFields.join(', '));
+        }
+      });
+    }
+    
+    // Also log devs response if available
+    if (devs?.DEVS) {
+      console.log('\n=== RAW DEVS RESPONSE ===');
+      devs.DEVS.forEach((d, idx) => {
+        console.log(`--- DEVS[${idx}]:`, JSON.stringify(d).substring(0, 500));
+      });
+    }
+    
+    // Collect ALL stats data from all STATS entries
+    let allStatsData = {};
     let statsData = {};
     if (stats.STATS) {
-      // Find the stats entry that has temperature or detailed data
+      // Merge all stats entries to find temperature data
       for (const s of stats.STATS) {
         if (s && typeof s === 'object') {
+          // Add all keys to allStatsData for debugging
+          Object.assign(allStatsData, s);
+          
           const hasTemp = Object.keys(s).some(k => k.toLowerCase().includes('temp'));
           const hasFan = Object.keys(s).some(k => k.toLowerCase().includes('fan'));
-          if (hasTemp || hasFan) {
-            statsData = s;
-            break;
+          const hasChain = Object.keys(s).some(k => k.toLowerCase().includes('chain'));
+          const hasBoard = Object.keys(s).some(k => k.toLowerCase().includes('board'));
+          
+          if (hasTemp || hasFan || hasChain || hasBoard) {
+            // Merge this entry into statsData
+            Object.assign(statsData, s);
           }
         }
       }
-      // Fallback to STATS[1] or STATS[0]
+      // If still empty, use the largest STATS entry (most keys)
       if (Object.keys(statsData).length === 0) {
-        statsData = stats.STATS[1] || stats.STATS[0] || {};
+        statsData = stats.STATS.reduce((best, current) => {
+          if (!current || typeof current !== 'object') return best;
+          return Object.keys(current).length > Object.keys(best).length ? current : best;
+        }, {});
       }
     }
     
-    // Log full stats for debugging
-    console.log('Full stats data:', JSON.stringify(statsData, null, 2).substring(0, 2000));
+    // Also check devs for temperature data
+    let devsData = {};
+    if (devs?.DEVS) {
+      for (const d of devs.DEVS) {
+        if (d && typeof d === 'object') {
+          Object.assign(devsData, d);
+        }
+      }
+    }
+    
+    // Log what we're working with
+    console.log('\n=== MERGED STATS DATA ===');
+    console.log('Keys:', Object.keys(statsData).join(', '));
+    console.log('Full data:', JSON.stringify(statsData, null, 2).substring(0, 3000));
+    
+    if (Object.keys(devsData).length > 0) {
+      console.log('\n=== MERGED DEVS DATA ===');
+      console.log('Keys:', Object.keys(devsData).join(', '));
+    }
     
     const poolData = pools.POOLS?.[0] || {};
 
@@ -502,11 +616,11 @@ async function getMinerStats(ip, config = {}) {
     const ghs5s = summaryData['GHS 5s'] || (summaryData['MHS 5s'] ? summaryData['MHS 5s'] / 1000 : 0);
     const hashrate = ghs5s / 1000;
 
-    // Extract temperatures using improved function
-    const temps = extractTemperatures(statsData);
+    // Extract temperatures using improved function - check both stats and devs
+    const temps = extractTemperatures(statsData, devsData, allStatsData);
 
     // Extract fan speeds
-    const fans = extractFanSpeeds(statsData);
+    const fans = extractFanSpeeds(statsData, devsData, allStatsData);
 
     // Get power from stats or estimate
     const power = statsData.Power || statsData.power || statsData.power_limit || 
@@ -605,11 +719,19 @@ async function getMinerStats(ip, config = {}) {
       
       // Debug info (remove in production)
       _debug: {
-        rawStatsKeys: Object.keys(statsData),
-        tempFields: Object.entries(statsData)
+        statsEntryCount: stats.STATS?.length || 0,
+        allNumericFields: Object.entries(allStatsData)
+          .filter(([k, v]) => typeof v === 'number')
+          .map(([k, v]) => `${k}=${v}`)
+          .slice(0, 30), // Limit to first 30
+        devsNumericFields: Object.entries(devsData)
+          .filter(([k, v]) => typeof v === 'number')
+          .map(([k, v]) => `${k}=${v}`)
+          .slice(0, 20),
+        tempFields: Object.entries({ ...allStatsData, ...devsData })
           .filter(([k, v]) => typeof v === 'number' && k.toLowerCase().includes('temp'))
           .map(([k, v]) => `${k}=${v}`),
-        fanFields: Object.entries(statsData)
+        fanFields: Object.entries({ ...allStatsData, ...devsData })
           .filter(([k, v]) => typeof v === 'number' && k.toLowerCase().includes('fan'))
           .map(([k, v]) => `${k}=${v}`)
       }

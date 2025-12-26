@@ -1001,10 +1001,29 @@
                                         
                                         {/* Debug info - can be removed in production */}
                                         {stats._debug && (
-                                            <div style={{ marginTop: '1rem', padding: '0.5rem', background: 'rgba(0,0,0,0.3)', borderRadius: '0.5rem', fontSize: '0.625rem', color: '#6b7280' }}>
-                                                <div><strong>Debug:</strong></div>
-                                                <div>Temp fields: {stats._debug.tempFields?.join(', ') || 'none found'}</div>
-                                                <div>Fan fields: {stats._debug.fanFields?.join(', ') || 'none found'}</div>
+                                            <div style={{ marginTop: '1rem', padding: '0.5rem', background: 'rgba(0,0,0,0.3)', borderRadius: '0.5rem', fontSize: '0.625rem', color: '#6b7280', maxHeight: '200px', overflow: 'auto' }}>
+                                                <div><strong>Debug Info:</strong></div>
+                                                <div>Stats entries: {stats._debug.statsEntryCount}</div>
+                                                <div style={{ marginTop: '0.25rem' }}>
+                                                    <strong>Temp fields found:</strong> {stats._debug.tempFields?.length > 0 ? stats._debug.tempFields.join(', ') : 'none'}
+                                                </div>
+                                                <div style={{ marginTop: '0.25rem' }}>
+                                                    <strong>Fan fields found:</strong> {stats._debug.fanFields?.length > 0 ? stats._debug.fanFields.join(', ') : 'none'}
+                                                </div>
+                                                <div style={{ marginTop: '0.25rem' }}>
+                                                    <strong>All numeric fields:</strong>
+                                                    <div style={{ wordBreak: 'break-all' }}>
+                                                        {stats._debug.allNumericFields?.join(', ') || 'none'}
+                                                    </div>
+                                                </div>
+                                                {stats._debug.devsNumericFields?.length > 0 && (
+                                                    <div style={{ marginTop: '0.25rem' }}>
+                                                        <strong>Devs fields:</strong>
+                                                        <div style={{ wordBreak: 'break-all' }}>
+                                                            {stats._debug.devsNumericFields.join(', ')}
+                                                        </div>
+                                                    </div>
+                                                )}
                                             </div>
                                         )}
                                     </div>
