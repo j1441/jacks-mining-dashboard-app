@@ -106,6 +106,46 @@ function httpsGet(url) {
  * This is more reliable than CGMiner API for temperature data
  */
 async function fetchBraiinsGraphQL(ip) {
+  console.log('=== STARTING GRAPHQL DISCOVERY ===');
+  
+  // First, get ALL types in the schema to find temp/fan related ones
+  const fullSchemaQuery = `{
+    __schema {
+      types {
+        name
+        kind
+        fields {
+          name
+          type {
+            name
+            kind
+          }
+        }
+      }
+    }
+  }`;
+  
+  const fullSchema = await graphqlRequest(ip, fullSchemaQuery);
+  if (fullSchema?.data?.__schema?.types) {
+    // Find relevant types (Fan, TempCtrl, etc.)
+    const relevantTypes = fullSchema.data.__schema.types.filter(t => 
+      t.name && !t.name.startsWith('__') && t.fields &&
+      (t.name.toLowerCase().includes('fan') || 
+       t.name.toLowerCase().includes('temp') || 
+       t.name.toLowerCase().includes('hash') ||
+       t.name.toLowerCase().includes('solver') ||
+       t.name.toLowerCase().includes('cooling') ||
+       t.name.toLowerCase().includes('board'))
+    );
+    
+    console.log('=== RELEVANT GRAPHQL TYPES WITH TEMP/FAN DATA ===');
+    relevantTypes.forEach(t => {
+      if (t.fields && t.fields.length > 0) {
+        console.log(`${t.name}: ${t.fields.map(f => f.name).join(', ')}`);
+      }
+    });
+  }
+  
   // Detailed introspection to discover the schema
   const introspectionQuery = `{
     __schema {
