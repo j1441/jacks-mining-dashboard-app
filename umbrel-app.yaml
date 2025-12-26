@@ -4,7 +4,7 @@ name: Mining Dashboard
 tagline: Monitor and control your home heating miner
 icon: https://raw.githubusercontent.com/j1441/jacks-mining-dashboard-app/main/icon.svg
 category: automation
-version: "1.0.3"
+version: "1.2.0"
 port: 3456
 description: >-
   Monitor your Antminer running Braiins OS with a clean, modern web interface.
@@ -16,6 +16,8 @@ description: >-
   • Real-time hashrate, temperature, and performance monitoring
 
   • Power profile control (Low/Medium/High) for optimal home heating
+
+  • Norgespris vs Spotpris toggle - choose between spot price only or total cost including grid fees
 
   • Pool statistics and connection status
 
@@ -46,18 +48,18 @@ gallery:
   - https://i.imgur.com/placeholder1.png
   - https://i.imgur.com/placeholder2.png
 releaseNotes: >-
-  v1.0.3 - Bug fixes
+  v1.2.0 - Norgespris & Temperature Fix
 
-  • Fixed miner connection issues
+  • Added Norgespris/Spotpris toggle in settings
 
-  • Fixed WebSocket data format
+  • Norgespris includes spot price + configurable grid fee (nettleie)
 
-  • Added connection test button
+  • Fixed temperature extraction for Braiins OS miners
 
-  • Improved error messages
+  • Added debug info for temperature fields to help troubleshoot
 
-  • Added disconnect button
+  • Improved logging of miner stats response
 
-  • Better logging for debugging
+  • Better handling of different Braiins OS versions
 submitter: j1441
 submission: https://github.com/j1441/jacks-mining-dashboard-app

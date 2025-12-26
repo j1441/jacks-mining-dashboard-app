@@ -138,6 +138,31 @@
             max-height: 90vh;
             overflow-y: auto;
         }
+        .toggle-container {
+            display: flex;
+            background: #374151;
+            border-radius: 0.5rem;
+            padding: 4px;
+        }
+        .toggle-btn {
+            flex: 1;
+            padding: 0.5rem 1rem;
+            border: none;
+            border-radius: 0.375rem;
+            cursor: pointer;
+            font-size: 0.875rem;
+            font-weight: 500;
+            transition: all 0.2s;
+            background: transparent;
+            color: #9ca3af;
+        }
+        .toggle-btn.active {
+            background: #2563eb;
+            color: white;
+        }
+        .toggle-btn:hover:not(.active) {
+            background: rgba(255,255,255,0.1);
+        }
     </style>
 </head>
 <body>
@@ -150,17 +175,26 @@
         function SettingsModal({ isOpen, onClose, config, zones, onSave }) {
             const [country, setCountry] = useState(config.country || 'norway');
             const [zone, setZone] = useState(config.electricityZone || 'NO5');
+            const [priceMode, setPriceMode] = useState(config.priceMode || 'norgespris');
+            const [gridFee, setGridFee] = useState(config.gridFeePerKwh || 0.50);
             const [saving, setSaving] = useState(false);
 
             useEffect(() => {
                 setCountry(config.country || 'norway');
                 setZone(config.electricityZone || 'NO5');
+                setPriceMode(config.priceMode || 'norgespris');
+                setGridFee(config.gridFeePerKwh || 0.50);
             }, [config]);
 
             const handleSave = async () => {
                 setSaving(true);
                 try {
-                    await onSave({ country, electricityZone: zone });
+                    await onSave({ 
+                        country, 
+                        electricityZone: zone,
+                        priceMode,
+                        gridFeePerKwh: parseFloat(gridFee)
+                    });
                     onClose();
                 } catch (err) {
                     console.error('Failed to save settings:', err);
@@ -177,6 +211,50 @@
                 <div className="modal-overlay" onClick={onClose}>
                     <div className="modal" onClick={e => e.stopPropagation()}>
                         <h2 style={{ marginTop: 0, marginBottom: '1.5rem' }}>⚙️ Innstillinger</h2>
+                        
+                        <div style={{ marginBottom: '1.5rem' }}>
+                            <label style={{ display: 'block', marginBottom: '0.5rem', color: '#9ca3af', fontSize: '0.875rem' }}>
+                                Prisvisning
+                            </label>
+                            <div className="toggle-container">
+                                <button 
+                                    className={`toggle-btn ${priceMode === 'spotpris' ? 'active' : ''}`}
+                                    onClick={() => setPriceMode('spotpris')}
+                                >
+                                    Spotpris
+                                </button>
+                                <button 
+                                    className={`toggle-btn ${priceMode === 'norgespris' ? 'active' : ''}`}
+                                    onClick={() => setPriceMode('norgespris')}
+                                >
+                                    Norgespris
+                                </button>
+                            </div>
+                            <div style={{ fontSize: '0.75rem', color: '#6b7280', marginTop: '0.5rem' }}>
+                                {priceMode === 'spotpris' 
+                                    ? 'Kun spotpris (strømpris fra børs inkl. MVA)' 
+                                    : 'Spotpris + nettleie (total strømkostnad)'}
+                            </div>
+                        </div>
+
+                        {priceMode === 'norgespris' && (
+                            <div style={{ marginBottom: '1.5rem' }}>
+                                <label style={{ display: 'block', marginBottom: '0.5rem', color: '#9ca3af', fontSize: '0.875rem' }}>
+                                    Nettleie (kr/kWh)
+                                </label>
+                                <input
+                                    type="number"
+                                    step="0.01"
+                                    min="0"
+                                    value={gridFee}
+                                    onChange={(e) => setGridFee(e.target.value)}
+                                    placeholder="0.50"
+                                />
+                                <div style={{ fontSize: '0.75rem', color: '#6b7280', marginTop: '0.5rem' }}>
+                                    Inkluderer nettleie, avgifter og påslag fra strømleverandør
+                                </div>
+                            </div>
+                        )}
                         
                         <div style={{ marginBottom: '1rem' }}>
                             <label style={{ display: 'block', marginBottom: '0.5rem', color: '#9ca3af', fontSize: '0.875rem' }}>
@@ -307,7 +385,7 @@
         function EfficiencyCard({ stats }) {
             if (!stats?.efficiency) return null;
             
-            const { efficiency } = stats;
+            const { efficiency, electricity } = stats;
             const currency = efficiency.currency || 'NOK';
             
             let efficiencyClass = 'efficiency-poor';
@@ -320,6 +398,8 @@
                 efficiencyLabel = 'Bra';
             }
             
+            const priceLabel = electricity?.priceMode === 'norgespris' ? 'Norgespris' : 'Spotpris';
+            
             return (
                 <div className="stat-card">
                     <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1rem' }}>
@@ -329,7 +409,7 @@
                     
                     <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1rem' }}>
                         <div>
-                            <div style={{ color: '#9ca3af', fontSize: '0.75rem' }}>Daglig kostnad</div>
+                            <div style={{ color: '#9ca3af', fontSize: '0.75rem' }}>Daglig kostnad ({priceLabel})</div>
                             <div style={{ fontSize: '1.25rem', fontWeight: '600', color: '#f87171' }}>
                                 {efficiency.dailyElectricityCost?.toFixed(0)} {currency}
                             </div>
@@ -379,12 +459,15 @@
 
         // Electricity Price Card Component
         function ElectricityCard({ electricity }) {
-            if (!electricity?.currentPrice) return null;
+            if (!electricity?.spotPrice) return null;
             
-            const { currentPrice, avgPrice, minPrice, maxPrice, prices, zoneName, zone, currency, vatRate } = electricity;
+            const { spotPrice, gridFee, effectivePrice, priceMode, avgPrice, minPrice, maxPrice, prices, zoneName, zone, currency, vatRate } = electricity;
+            
+            const isNorgespris = priceMode === 'norgespris';
+            const displayPrice = effectivePrice || spotPrice;
             
             const range = maxPrice - minPrice;
-            const position = range > 0 ? ((currentPrice - minPrice) / range) * 100 : 50;
+            const position = range > 0 ? ((spotPrice - minPrice) / range) * 100 : 50;
             const currentHour = new Date().getHours();
             const vatText = vatRate === 0 ? '(uten MVA)' : `(inkl. ${(vatRate * 100).toFixed(0)}% MVA)`;
             
@@ -397,28 +480,62 @@
                         {zone} - {zoneName} {vatText}
                     </div>
                     
-                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '1rem', marginBottom: '1rem' }}>
-                        <div style={{ textAlign: 'center' }}>
-                            <div style={{ color: '#9ca3af', fontSize: '0.75rem' }}>Nå</div>
-                            <div style={{ fontSize: '1.5rem', fontWeight: 'bold', color: '#facc15' }}>
-                                {currentPrice?.toFixed(2)}
-                            </div>
-                            <div style={{ fontSize: '0.625rem', color: '#6b7280' }}>{currency}/kWh</div>
-                        </div>
-                        <div style={{ textAlign: 'center' }}>
-                            <div style={{ color: '#9ca3af', fontSize: '0.75rem' }}>Snitt</div>
-                            <div style={{ fontSize: '1.5rem', fontWeight: 'bold', color: '#9ca3af' }}>
-                                {avgPrice?.toFixed(2)}
-                            </div>
-                            <div style={{ fontSize: '0.625rem', color: '#6b7280' }}>{currency}/kWh</div>
-                        </div>
-                        <div style={{ textAlign: 'center' }}>
-                            <div style={{ color: '#9ca3af', fontSize: '0.75rem' }}>Lavest</div>
-                            <div style={{ fontSize: '1.5rem', fontWeight: 'bold', color: '#4ade80' }}>
-                                {minPrice?.toFixed(2)}
-                            </div>
-                            <div style={{ fontSize: '0.625rem', color: '#6b7280' }}>{currency}/kWh</div>
-                        </div>
+                    {/* Price Mode Toggle Display */}
+                    <div style={{ 
+                        display: 'inline-flex', 
+                        alignItems: 'center', 
+                        background: isNorgespris ? 'rgba(34, 197, 94, 0.2)' : 'rgba(59, 130, 246, 0.2)',
+                        padding: '4px 12px',
+                        borderRadius: '20px',
+                        marginBottom: '1rem',
+                        fontSize: '0.75rem'
+                    }}>
+                        {isNorgespris ? '🏠 Norgespris (spot + nettleie)' : '📊 Kun spotpris'}
+                    </div>
+                    
+                    <div style={{ display: 'grid', gridTemplateColumns: isNorgespris ? '1fr 1fr' : '1fr 1fr 1fr', gap: '1rem', marginBottom: '1rem' }}>
+                        {isNorgespris ? (
+                            <>
+                                <div style={{ textAlign: 'center' }}>
+                                    <div style={{ color: '#9ca3af', fontSize: '0.75rem' }}>Total pris nå</div>
+                                    <div style={{ fontSize: '1.5rem', fontWeight: 'bold', color: '#facc15' }}>
+                                        {displayPrice?.toFixed(2)}
+                                    </div>
+                                    <div style={{ fontSize: '0.625rem', color: '#6b7280' }}>{currency}/kWh</div>
+                                </div>
+                                <div style={{ textAlign: 'center' }}>
+                                    <div style={{ color: '#9ca3af', fontSize: '0.75rem' }}>Spot / Nettleie</div>
+                                    <div style={{ fontSize: '1.25rem', fontWeight: 'bold', color: '#9ca3af' }}>
+                                        {spotPrice?.toFixed(2)} / {gridFee?.toFixed(2)}
+                                    </div>
+                                    <div style={{ fontSize: '0.625rem', color: '#6b7280' }}>{currency}/kWh</div>
+                                </div>
+                            </>
+                        ) : (
+                            <>
+                                <div style={{ textAlign: 'center' }}>
+                                    <div style={{ color: '#9ca3af', fontSize: '0.75rem' }}>Nå</div>
+                                    <div style={{ fontSize: '1.5rem', fontWeight: 'bold', color: '#facc15' }}>
+                                        {spotPrice?.toFixed(2)}
+                                    </div>
+                                    <div style={{ fontSize: '0.625rem', color: '#6b7280' }}>{currency}/kWh</div>
+                                </div>
+                                <div style={{ textAlign: 'center' }}>
+                                    <div style={{ color: '#9ca3af', fontSize: '0.75rem' }}>Snitt</div>
+                                    <div style={{ fontSize: '1.5rem', fontWeight: 'bold', color: '#9ca3af' }}>
+                                        {avgPrice?.toFixed(2)}
+                                    </div>
+                                    <div style={{ fontSize: '0.625rem', color: '#6b7280' }}>{currency}/kWh</div>
+                                </div>
+                                <div style={{ textAlign: 'center' }}>
+                                    <div style={{ color: '#9ca3af', fontSize: '0.75rem' }}>Lavest</div>
+                                    <div style={{ fontSize: '1.5rem', fontWeight: 'bold', color: '#4ade80' }}>
+                                        {minPrice?.toFixed(2)}
+                                    </div>
+                                    <div style={{ fontSize: '0.625rem', color: '#6b7280' }}>{currency}/kWh</div>
+                                </div>
+                            </>
+                        )}
                     </div>
                     
                     <div style={{ marginBottom: '1rem' }}>
@@ -433,7 +550,7 @@
                     
                     {prices && prices.length > 0 && (
                         <div style={{ marginTop: '1rem' }}>
-                            <div style={{ fontSize: '0.75rem', color: '#9ca3af', marginBottom: '0.5rem' }}>Timepriser i dag</div>
+                            <div style={{ fontSize: '0.75rem', color: '#9ca3af', marginBottom: '0.5rem' }}>Timepriser i dag (spot)</div>
                             <div style={{ display: 'flex', alignItems: 'flex-end', gap: '2px', height: '60px' }}>
                                 {prices.map((p, idx) => {
                                     const height = range > 0 ? ((p.priceIncVat - minPrice) / range) * 100 : 50;
@@ -556,7 +673,7 @@
                     });
                     const data = await response.json();
                     if (response.ok) {
-                        alert(`✅ Connection successful!\n\nMiner responded with GHS 5s: ${data.summary?.['GHS 5s'] || 'N/A'}`);
+                        alert(`✅ Connection successful!\n\nMiner responded with GHS 5s: ${data.summary?.['GHS 5s'] || 'N/A'}\n\nAvailable fields: ${data.availableFields?.join(', ') || 'N/A'}`);
                     } else {
                         setError(data.error + (data.hint ? `\n${data.hint}` : ''));
                     }
@@ -656,6 +773,11 @@
                 const hours = Math.floor((seconds % 86400) / 3600);
                 const minutes = Math.floor((seconds % 3600) / 60);
                 return days > 0 ? `${days}d ${hours}h ${minutes}m` : `${hours}h ${minutes}m`;
+            };
+            
+            const formatTemp = (temp) => {
+                if (temp === null || temp === undefined || temp === 0) return 'N/A';
+                return `${temp}°C`;
             };
 
             const currency = stats?.electricity?.currency || config.country === 'norway' ? 'NOK' : 'EUR';
@@ -796,7 +918,7 @@
                                 {/* Main Stats Row */}
                                 <div className="grid grid-cols-1 md-grid-cols-2 lg-grid-cols-4" style={{ marginBottom: '1.5rem' }}>
                                     <StatCard label="Hashrate" value={formatHashrate(stats.hashrate)} color="#60a5fa" icon="⚡" />
-                                    <StatCard label="Temperature" value={stats.temperature ? `${stats.temperature}°C` : 'N/A'} color="#fb923c" icon="🌡️" />
+                                    <StatCard label="Temperature" value={formatTemp(stats.temperature)} color="#fb923c" icon="🌡️" />
                                     <StatCard 
                                         label="Power Draw" 
                                         value={stats.powerDraw ? `${stats.powerDraw}W` : 'N/A'} 
@@ -852,7 +974,9 @@
                                             {stats.boards?.map((board, idx) => (
                                                 <div key={idx} style={{ display: 'flex', justifyContent: 'space-between' }}>
                                                     <span>Board {idx + 1}</span>
-                                                    <span style={{ fontWeight: '600', color: '#fb923c' }}>{board.temp ? `${board.temp}°C` : 'N/A'}</span>
+                                                    <span style={{ fontWeight: '600', color: board.temp ? '#fb923c' : '#6b7280' }}>
+                                                        {formatTemp(board.temp)}
+                                                    </span>
                                                 </div>
                                             ))}
                                             {stats.fans && (
@@ -860,16 +984,29 @@
                                                     <div style={{ borderTop: '1px solid rgba(255,255,255,0.1)', paddingTop: '0.75rem', marginTop: '0.5rem' }}>
                                                         <div style={{ display: 'flex', justifyContent: 'space-between' }}>
                                                             <span>Fan 1</span>
-                                                            <span style={{ fontWeight: '600', color: '#60a5fa' }}>{stats.fans.speed1 ? `${stats.fans.speed1} RPM` : 'N/A'}</span>
+                                                            <span style={{ fontWeight: '600', color: stats.fans.speed1 ? '#60a5fa' : '#6b7280' }}>
+                                                                {stats.fans.speed1 ? `${stats.fans.speed1} RPM` : 'N/A'}
+                                                            </span>
                                                         </div>
                                                     </div>
                                                     <div style={{ display: 'flex', justifyContent: 'space-between' }}>
                                                         <span>Fan 2</span>
-                                                        <span style={{ fontWeight: '600', color: '#60a5fa' }}>{stats.fans.speed2 ? `${stats.fans.speed2} RPM` : 'N/A'}</span>
+                                                        <span style={{ fontWeight: '600', color: stats.fans.speed2 ? '#60a5fa' : '#6b7280' }}>
+                                                            {stats.fans.speed2 ? `${stats.fans.speed2} RPM` : 'N/A'}
+                                                        </span>
                                                     </div>
                                                 </>
                                             )}
                                         </div>
+                                        
+                                        {/* Debug info - can be removed in production */}
+                                        {stats._debug && (
+                                            <div style={{ marginTop: '1rem', padding: '0.5rem', background: 'rgba(0,0,0,0.3)', borderRadius: '0.5rem', fontSize: '0.625rem', color: '#6b7280' }}>
+                                                <div><strong>Debug:</strong></div>
+                                                <div>Temp fields: {stats._debug.tempFields?.join(', ') || 'none found'}</div>
+                                                <div>Fan fields: {stats._debug.fanFields?.join(', ') || 'none found'}</div>
+                                            </div>
+                                        )}
                                     </div>
 
                                     <div className="stat-card">
