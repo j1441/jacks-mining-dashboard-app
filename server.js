@@ -254,31 +254,94 @@ async function fetchBraiinsGraphQL(ip) {
     console.log('BosminerInfo fields:', bosminerInfoSchema.data.__type.fields.map(f => f.name));
   }
   
+  // Introspect Fan type to see exact fields
+  const fanIntrospection = `{
+    __type(name: "Fan") {
+      fields {
+        name
+        type {
+          name
+          kind
+        }
+      }
+    }
+  }`;
+  
+  const fanSchema = await graphqlRequest(ip, fanIntrospection);
+  if (fanSchema?.data?.__type?.fields) {
+    console.log('Fan type fields:', fanSchema.data.__type.fields.map(f => f.name));
+  }
+  
+  // Introspect TempCtrl type
+  const tempCtrlIntrospection = `{
+    __type(name: "TempCtrl") {
+      fields {
+        name
+        type {
+          name
+          kind
+        }
+      }
+    }
+  }`;
+  
+  const tempCtrlSchema = await graphqlRequest(ip, tempCtrlIntrospection);
+  if (tempCtrlSchema?.data?.__type?.fields) {
+    console.log('TempCtrl type fields:', tempCtrlSchema.data.__type.fields.map(f => f.name));
+  }
+  
+  // Also try TemperatureCtrl or TempControl
+  const tempCtrl2Introspection = `{
+    __type(name: "TemperatureCtrl") {
+      fields {
+        name
+        type {
+          name
+          kind
+        }
+      }
+    }
+  }`;
+  
+  const tempCtrl2Schema = await graphqlRequest(ip, tempCtrl2Introspection);
+  if (tempCtrl2Schema?.data?.__type?.fields) {
+    console.log('TemperatureCtrl type fields:', tempCtrl2Schema.data.__type.fields.map(f => f.name));
+  }
+  
   // Build queries dynamically based on discovered fields
   const queries = [];
   
-  // Try bos.manager which might have temperature/performance data
-  queries.push(`{
-    bos {
-      manager {
-        status
-      }
-    }
-  }`);
-  
-  // Try bos.info
-  queries.push(`{
-    bos {
-      info {
-        system
-      }
-    }
-  }`);
-  
-  // Try bosminer.info with workSolver
+  // CORRECT QUERY: Based on discovered BosminerInfo fields: fans, tempCtrl
   queries.push(`{
     bosminer {
       info {
+        fans {
+          rpm
+        }
+        tempCtrl {
+          mode
+          target
+        }
+      }
+    }
+  }`);
+  
+  // Try with more fan/temp fields
+  queries.push(`{
+    bosminer {
+      info {
+        modelName
+        fans {
+          name
+          rpm
+          speed
+        }
+        tempCtrl {
+          mode
+          target
+          hot
+          dangerous
+        }
         workSolver {
           realHashrate {
             mhs1M
@@ -290,10 +353,23 @@ async function fetchBraiinsGraphQL(ip) {
     }
   }`);
   
-  // Try display which might have sensor data
+  // Try simpler query with just fans
   queries.push(`{
-    display {
-      overview
+    bosminer {
+      info {
+        fans {
+          rpm
+        }
+      }
+    }
+  }`);
+  
+  // Try bos.manager which might have temperature/performance data
+  queries.push(`{
+    bos {
+      manager {
+        status
+      }
     }
   }`);
   
@@ -301,7 +377,6 @@ async function fetchBraiinsGraphQL(ip) {
   queries.push(`{
     bos {
       hostname
-      uptime
     }
   }`);
   
@@ -973,6 +1048,42 @@ async function getMinerStats(ip, config = {}) {
     // Try GraphQL data first (most reliable for Braiins OS)
     if (graphqlData?.data) {
       console.log('=== PROCESSING GRAPHQL DATA ===');
+      console.log('Raw GraphQL data:', JSON.stringify(graphqlData.data, null, 2));
+      
+      // Handle bosminer.info.fans and bosminer.info.tempCtrl format (BOSer)
+      if (graphqlData.data.bosminer?.info) {
+        const info = graphqlData.data.bosminer.info;
+        console.log('Found bosminer.info format');
+        
+        // Extract fans
+        if (info.fans && Array.isArray(info.fans)) {
+          console.log('Found fans array:', info.fans);
+          info.fans.forEach((fan, idx) => {
+            if (fan.rpm !== undefined) {
+              fans[`speed${idx + 1}`] = fan.rpm;
+            } else if (fan.speed !== undefined) {
+              fans[`speed${idx + 1}`] = fan.speed;
+            }
+          });
+        }
+        
+        // Extract temperature from tempCtrl
+        if (info.tempCtrl) {
+          console.log('Found tempCtrl:', info.tempCtrl);
+          if (info.tempCtrl.target !== undefined) {
+            temps.chip = info.tempCtrl.target;
+          }
+          if (info.tempCtrl.hot !== undefined) {
+            // hot might be max temp threshold, use as reference
+            console.log('Hot threshold:', info.tempCtrl.hot);
+          }
+        }
+        
+        // Try to get workSolver data
+        if (info.workSolver) {
+          console.log('Found workSolver:', JSON.stringify(info.workSolver).substring(0, 500));
+        }
+      }
       
       // Handle multiple possible GraphQL response formats
       
