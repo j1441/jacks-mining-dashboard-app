@@ -108,6 +108,16 @@ function httpsGet(url) {
 async function fetchBraiinsGraphQL(ip) {
   console.log('=== STARTING GRAPHQL DISCOVERY ===');
   
+  // First, authenticate with LuCI to get a session token
+  console.log('Authenticating with LuCI...');
+  const sessionToken = await luciLogin(ip, 'root', 'root');
+  
+  if (sessionToken) {
+    console.log('Got LuCI session token, will use for GraphQL requests');
+  } else {
+    console.log('No session token, will try Basic Auth fallback');
+  }
+  
   // First, get ALL types in the schema to find temp/fan related ones
   const fullSchemaQuery = `{
     __schema {
@@ -125,7 +135,7 @@ async function fetchBraiinsGraphQL(ip) {
     }
   }`;
   
-  const fullSchema = await graphqlRequest(ip, fullSchemaQuery);
+  const fullSchema = await graphqlRequest(ip, fullSchemaQuery, sessionToken);
   if (fullSchema?.data?.__schema?.types) {
     // Find relevant types (Fan, TempCtrl, etc.)
     const relevantTypes = fullSchema.data.__schema.types.filter(t => 
@@ -173,7 +183,7 @@ async function fetchBraiinsGraphQL(ip) {
   let availableFields = [];
   let bosminerFields = [];
   let bosFields = [];
-  const schemaResult = await graphqlRequest(ip, introspectionQuery);
+  const schemaResult = await graphqlRequest(ip, introspectionQuery, sessionToken);
   
   if (schemaResult?.data?.__schema?.queryType?.fields) {
     const fields = schemaResult.data.__schema.queryType.fields;
@@ -214,7 +224,7 @@ async function fetchBraiinsGraphQL(ip) {
     }
   }`;
   
-  const bosminerSchema = await graphqlRequest(ip, bosminerIntrospection);
+  const bosminerSchema = await graphqlRequest(ip, bosminerIntrospection, sessionToken);
   if (bosminerSchema?.data?.__type?.fields) {
     const fields = bosminerSchema.data.__type.fields;
     console.log('BosminerQuery fields (detailed):', fields.map(f => f.name));
@@ -234,7 +244,7 @@ async function fetchBraiinsGraphQL(ip) {
     }
   }`;
   
-  const bosSchema = await graphqlRequest(ip, bosIntrospection);
+  const bosSchema = await graphqlRequest(ip, bosIntrospection, sessionToken);
   if (bosSchema?.data?.__type?.fields) {
     console.log('BosQuery fields:', bosSchema.data.__type.fields.map(f => f.name));
     bosFields = bosSchema.data.__type.fields.map(f => f.name);
@@ -253,7 +263,7 @@ async function fetchBraiinsGraphQL(ip) {
     }
   }`;
   
-  const bosInfoSchema = await graphqlRequest(ip, bosInfoIntrospection);
+  const bosInfoSchema = await graphqlRequest(ip, bosInfoIntrospection, sessionToken);
   if (bosInfoSchema?.data?.__type?.fields) {
     console.log('BosInfo fields:', bosInfoSchema.data.__type.fields.map(f => f.name));
   }
@@ -271,7 +281,7 @@ async function fetchBraiinsGraphQL(ip) {
     }
   }`;
   
-  const managerSchema = await graphqlRequest(ip, managerIntrospection);
+  const managerSchema = await graphqlRequest(ip, managerIntrospection, sessionToken);
   if (managerSchema?.data?.__type?.fields) {
     console.log('Manager fields:', managerSchema.data.__type.fields.map(f => f.name));
   }
@@ -289,7 +299,7 @@ async function fetchBraiinsGraphQL(ip) {
     }
   }`;
   
-  const bosminerInfoSchema = await graphqlRequest(ip, bosminerInfoIntrospection);
+  const bosminerInfoSchema = await graphqlRequest(ip, bosminerInfoIntrospection, sessionToken);
   if (bosminerInfoSchema?.data?.__type?.fields) {
     console.log('BosminerInfo fields:', bosminerInfoSchema.data.__type.fields.map(f => `${f.name}(${f.type?.name || f.type?.kind})`));
   }
@@ -307,7 +317,7 @@ async function fetchBraiinsGraphQL(ip) {
     }
   }`;
   
-  const fanSchema = await graphqlRequest(ip, fanIntrospection);
+  const fanSchema = await graphqlRequest(ip, fanIntrospection, sessionToken);
   if (fanSchema?.data?.__type?.fields) {
     console.log('Fan type fields:', fanSchema.data.__type.fields.map(f => f.name));
   }
@@ -325,7 +335,7 @@ async function fetchBraiinsGraphQL(ip) {
     }
   }`;
   
-  const tempCtrlSchema = await graphqlRequest(ip, tempCtrlIntrospection);
+  const tempCtrlSchema = await graphqlRequest(ip, tempCtrlIntrospection, sessionToken);
   if (tempCtrlSchema?.data?.__type?.fields) {
     console.log('TempCtrlInfo type fields:', tempCtrlSchema.data.__type.fields.map(f => f.name));
   }
@@ -343,7 +353,7 @@ async function fetchBraiinsGraphQL(ip) {
     }
   }`;
   
-  const workSolverSchema = await graphqlRequest(ip, workSolverIntrospection);
+  const workSolverSchema = await graphqlRequest(ip, workSolverIntrospection, sessionToken);
   if (workSolverSchema?.data?.__type?.fields) {
     console.log('WorkSolverInfo type fields:', workSolverSchema.data.__type.fields.map(f => f.name));
   }
@@ -439,13 +449,14 @@ async function fetchBraiinsGraphQL(ip) {
   // Try each query format until one works
   for (let i = 0; i < queries.length; i++) {
     console.log(`Trying GraphQL query format ${i + 1}...`);
-    const result = await graphqlRequest(ip, queries[i]);
+    const result = await graphqlRequest(ip, queries[i], sessionToken);
     
     if (result?.data && !result.errors) {
       console.log(`GraphQL query format ${i + 1} succeeded:`, JSON.stringify(result.data, null, 2).substring(0, 1500));
       result._availableFields = availableFields;
       result._bosminerFields = bosminerFields;
       result._bosFields = bosFields;
+      result._sessionToken = sessionToken ? 'present' : 'none';
       return result;
     } else if (result?.errors) {
       console.log(`GraphQL query format ${i + 1} failed:`, result.errors[0]?.message);
@@ -457,30 +468,103 @@ async function fetchBraiinsGraphQL(ip) {
     _availableFields: availableFields, 
     _bosminerFields: bosminerFields,
     _bosFields: bosFields,
+    _sessionToken: sessionToken ? 'present' : 'none',
     data: null 
   };
 }
 
 /**
- * Helper function to make GraphQL requests with authentication
+ * Authenticate with LuCI to get a session token
+ * This is required for accessing bosminer data on BOSer
  */
-function graphqlRequest(ip, query) {
+function luciLogin(ip, username = 'root', password = 'root') {
+  return new Promise((resolve, reject) => {
+    const postData = `luci_username=${encodeURIComponent(username)}&luci_password=${encodeURIComponent(password)}`;
+    
+    const options = {
+      hostname: ip,
+      port: 80,
+      path: '/cgi-bin/luci',
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/x-www-form-urlencoded',
+        'Content-Length': Buffer.byteLength(postData)
+      },
+      timeout: 10000
+    };
+    
+    const req = http.request(options, (res) => {
+      let data = '';
+      res.on('data', chunk => data += chunk);
+      res.on('end', () => {
+        // Look for sysauth cookie in response headers
+        const cookies = res.headers['set-cookie'];
+        let sessionToken = null;
+        
+        if (cookies) {
+          for (const cookie of cookies) {
+            const match = cookie.match(/sysauth=([^;]+)/);
+            if (match) {
+              sessionToken = match[1];
+              break;
+            }
+          }
+        }
+        
+        if (sessionToken) {
+          console.log('LuCI login successful, got session token');
+          resolve(sessionToken);
+        } else {
+          console.log('LuCI login response:', res.statusCode, 'cookies:', cookies);
+          // Try to extract from redirect or other methods
+          resolve(null);
+        }
+      });
+    });
+    
+    req.on('error', (err) => {
+      console.error('LuCI login error:', err.message);
+      resolve(null);
+    });
+    
+    req.on('timeout', () => {
+      req.destroy();
+      console.error('LuCI login timeout');
+      resolve(null);
+    });
+    
+    req.write(postData);
+    req.end();
+  });
+}
+
+/**
+ * Helper function to make GraphQL requests with authentication
+ * Supports both Basic Auth and LuCI session auth
+ */
+function graphqlRequest(ip, query, sessionToken = null) {
   return new Promise((resolve, reject) => {
     const postData = JSON.stringify({ query });
     
-    // Create Basic Auth header with root:root credentials (Braiins OS default)
-    const authHeader = 'Basic ' + Buffer.from('root:root').toString('base64');
+    const headers = {
+      'Content-Type': 'application/json',
+      'Content-Length': Buffer.byteLength(postData)
+    };
+    
+    // Use session cookie if available, otherwise try Basic Auth
+    if (sessionToken) {
+      headers['Cookie'] = `sysauth=${sessionToken}`;
+    } else {
+      // Try Basic Auth as fallback
+      headers['Authorization'] = 'Basic ' + Buffer.from('root:root').toString('base64');
+    }
     
     const options = {
       hostname: ip,
       port: 80,
       path: '/graphql',
       method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Content-Length': Buffer.byteLength(postData),
-        'Authorization': authHeader
-      },
+      headers,
       timeout: 10000
     };
     

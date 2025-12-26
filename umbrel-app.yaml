@@ -4,7 +4,7 @@ name: Mining Dashboard
 tagline: Monitor and control your home heating miner
 icon: https://raw.githubusercontent.com/j1441/jacks-mining-dashboard-app/main/icon.svg
 category: automation
-version: "1.2.0"
+version: "2.2.11"
 port: 3456
 description: >-
   Monitor your Antminer running Braiins OS with a clean, modern web interface.
@@ -48,18 +48,14 @@ gallery:
   - https://i.imgur.com/placeholder1.png
   - https://i.imgur.com/placeholder2.png
 releaseNotes: >-
-  v1.2.0 - Norgespris & Temperature Fix
+  v2.2.11 - LuCI Session Authentication
 
-  • Added Norgespris/Spotpris toggle in settings
+  • Added proper LuCI session authentication for BOSer
 
-  • Norgespris includes spot price + configurable grid fee (nettleie)
+  • First logs in via /cgi-bin/luci to get sysauth cookie
 
-  • Fixed temperature extraction for Braiins OS miners
+  • Uses session cookie for GraphQL requests to bosminer
 
-  • Added debug info for temperature fields to help troubleshoot
-
-  • Improved logging of miner stats response
-
-  • Better handling of different Braiins OS versions
+  • This should fix the "Unauthorized access" error!
 submitter: j1441
 submission: https://github.com/j1441/jacks-mining-dashboard-app
