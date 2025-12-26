@@ -348,10 +348,66 @@ async function fetchBraiinsGraphQL(ip) {
     console.log('WorkSolverInfo type fields:', workSolverSchema.data.__type.fields.map(f => f.name));
   }
   
-  // Build queries dynamically based on discovered fields
+  // Build queries with CORRECT field names based on schema discovery
+  // FanInfo has: name, speed, rpm
+  // TempCtrlInfo has: targetC, hotC, dangerousC
+  // WorkSolverInfo.temperatures is array of Temperature with: name, degreesC
   const queries = [];
   
-  // Query 1: Get fans with just rpm (most common field)
+  // Query 1: Full temperature and fan data with correct field names
+  queries.push(`{
+    bosminer {
+      info {
+        tempCtrl {
+          targetC
+          hotC
+          dangerousC
+        }
+        fans {
+          name
+          speed
+          rpm
+        }
+        workSolver {
+          temperatures {
+            name
+            degreesC
+          }
+        }
+      }
+    }
+  }`);
+  
+  // Query 2: Just tempCtrl and fans (simpler)
+  queries.push(`{
+    bosminer {
+      info {
+        tempCtrl {
+          targetC
+          hotC
+        }
+        fans {
+          rpm
+        }
+      }
+    }
+  }`);
+  
+  // Query 3: Just workSolver temperatures
+  queries.push(`{
+    bosminer {
+      info {
+        workSolver {
+          temperatures {
+            name
+            degreesC
+          }
+        }
+      }
+    }
+  }`);
+  
+  // Query 4: Just fans
   queries.push(`{
     bosminer {
       info {
@@ -362,48 +418,18 @@ async function fetchBraiinsGraphQL(ip) {
     }
   }`);
   
-  // Query 2: Try workSolver which might have hashboard temperatures
+  // Query 5: Just tempCtrl
   queries.push(`{
     bosminer {
       info {
-        workSolver {
-          hashboards {
-            id
-            temperature
-          }
+        tempCtrl {
+          targetC
         }
       }
     }
   }`);
   
-  // Query 3: Try workSolver with different structure
-  queries.push(`{
-    bosminer {
-      info {
-        workSolver {
-          realHashrate {
-            mhs15M
-          }
-          nominalHashrate {
-            mhs15M
-          }
-        }
-      }
-    }
-  }`);
-  
-  // Query 4: Try summary which might have overall temp
-  queries.push(`{
-    bosminer {
-      info {
-        summary {
-          temperature
-        }
-      }
-    }
-  }`);
-  
-  // Query 5: Just hostname to confirm auth works
+  // Query 6: Just hostname to confirm connection works
   queries.push(`{
     bos {
       hostname
@@ -1085,33 +1111,65 @@ async function getMinerStats(ip, config = {}) {
         const info = graphqlData.data.bosminer.info;
         console.log('Found bosminer.info format');
         
-        // Extract fans
+        // Extract fans - FanInfo has: name, speed, rpm
         if (info.fans && Array.isArray(info.fans)) {
-          console.log('Found fans array:', info.fans);
+          console.log('Found fans array:', JSON.stringify(info.fans));
           info.fans.forEach((fan, idx) => {
-            if (fan.rpm !== undefined) {
+            if (fan.rpm !== undefined && fan.rpm !== null) {
               fans[`speed${idx + 1}`] = fan.rpm;
-            } else if (fan.speed !== undefined) {
+            } else if (fan.speed !== undefined && fan.speed !== null) {
               fans[`speed${idx + 1}`] = fan.speed;
             }
           });
         }
         
-        // Extract temperature from tempCtrl
+        // Extract temperature from tempCtrl - TempCtrlInfo has: targetC, hotC, dangerousC
         if (info.tempCtrl) {
-          console.log('Found tempCtrl:', info.tempCtrl);
-          if (info.tempCtrl.target !== undefined) {
-            temps.chip = info.tempCtrl.target;
+          console.log('Found tempCtrl:', JSON.stringify(info.tempCtrl));
+          // Use targetC as the operating temperature
+          if (info.tempCtrl.targetC !== undefined && info.tempCtrl.targetC !== null) {
+            temps.chip = info.tempCtrl.targetC;
           }
-          if (info.tempCtrl.hot !== undefined) {
-            // hot might be max temp threshold, use as reference
-            console.log('Hot threshold:', info.tempCtrl.hot);
+          // hotC and dangerousC are thresholds, not current temps
+          if (info.tempCtrl.hotC !== undefined) {
+            console.log('Hot threshold:', info.tempCtrl.hotC);
+          }
+          if (info.tempCtrl.dangerousC !== undefined) {
+            console.log('Dangerous threshold:', info.tempCtrl.dangerousC);
           }
         }
         
-        // Try to get workSolver data
-        if (info.workSolver) {
-          console.log('Found workSolver:', JSON.stringify(info.workSolver).substring(0, 500));
+        // Extract actual temperatures from workSolver.temperatures
+        // Temperature type has: name, degreesC
+        if (info.workSolver?.temperatures && Array.isArray(info.workSolver.temperatures)) {
+          console.log('Found workSolver.temperatures:', JSON.stringify(info.workSolver.temperatures));
+          info.workSolver.temperatures.forEach((temp, idx) => {
+            if (temp.degreesC !== undefined && temp.degreesC !== null) {
+              const name = (temp.name || '').toLowerCase();
+              // Try to identify board vs chip temps
+              if (name.includes('board') || name.includes('pcb') || name.includes('hashboard')) {
+                const boardNum = name.match(/\d+/)?.[0] || (idx + 1);
+                temps[`board${boardNum}`] = temp.degreesC;
+              } else if (name.includes('chip')) {
+                temps.chip = temp.degreesC;
+              } else {
+                // Default: first 3 are boards, any after might be chip
+                if (idx < 3) {
+                  temps[`board${idx + 1}`] = temp.degreesC;
+                } else if (temps.chip === null) {
+                  temps.chip = temp.degreesC;
+                }
+              }
+            }
+          });
+          
+          // Set chip to max board temp if not explicitly found
+          if (temps.chip === null) {
+            const boardTemps = [temps.board1, temps.board2, temps.board3].filter(t => t !== null);
+            if (boardTemps.length > 0) {
+              temps.chip = Math.max(...boardTemps);
+            }
+          }
         }
       }
       
