@@ -1,7 +1,7 @@
 {
   "name": "jacks-mining-dashboard-app",
-  "version": "1.0.0",
-  "description": "Home heating miner dashboard for monitoring Antminer with Braiins OS on Umbrel",
+  "version": "2.0.0",
+  "description": "Home heating miner dashboard with electricity price tracking and efficiency metrics for Antminer with Braiins OS on Umbrel",
   "main": "server.js",
   "scripts": {
     "start": "node server.js",
@@ -14,7 +14,9 @@
     "dashboard",
     "umbrel",
     "bitcoin",
-    "monitoring"
+    "monitoring",
+    "electricity",
+    "heating"
   ],
   "author": "j1441",
   "license": "MIT",

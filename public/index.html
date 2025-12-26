@@ -8,14 +8,10 @@
     <script crossorigin src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.2.0/umd/react-dom.production.min.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/babel-standalone/7.23.5/babel.min.js"></script>
     <style>
-        * {
-            box-sizing: border-box;
-        }
+        * { box-sizing: border-box; }
         body {
             margin: 0;
-            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', 'Oxygen', 'Ubuntu', 'Cantarell', 'Fira Sans', 'Droid Sans', 'Helvetica Neue', sans-serif;
-            -webkit-font-smoothing: antialiased;
-            -moz-osx-font-smoothing: grayscale;
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', 'Oxygen', 'Ubuntu', sans-serif;
             background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%);
             color: #e0e0e0;
             min-height: 100vh;
@@ -38,16 +34,13 @@
             border: 2px solid transparent;
             cursor: pointer;
         }
-        .power-btn:hover {
-            transform: scale(1.05);
-        }
+        .power-btn:hover { transform: scale(1.05); }
         .power-btn.active {
             border-color: #10b981;
             box-shadow: 0 0 20px rgba(16, 185, 129, 0.3);
         }
         .status-dot {
-            width: 12px;
-            height: 12px;
+            width: 12px; height: 12px;
             border-radius: 50%;
             display: inline-block;
             animation: pulse 2s infinite;
@@ -60,46 +53,90 @@
             border: 3px solid rgba(255, 255, 255, 0.1);
             border-radius: 50%;
             border-top: 3px solid #3b82f6;
-            width: 40px;
-            height: 40px;
+            width: 40px; height: 40px;
             animation: spin 1s linear infinite;
         }
         @keyframes spin {
             0% { transform: rotate(0deg); }
             100% { transform: rotate(360deg); }
         }
-        .grid {
-            display: grid;
-            gap: 1.5rem;
-        }
+        .grid { display: grid; gap: 1.5rem; }
         .grid-cols-1 { grid-template-columns: repeat(1, 1fr); }
         @media (min-width: 768px) {
             .md-grid-cols-2 { grid-template-columns: repeat(2, 1fr); }
             .md-grid-cols-3 { grid-template-columns: repeat(3, 1fr); }
+            .md-grid-cols-4 { grid-template-columns: repeat(4, 1fr); }
         }
         @media (min-width: 1024px) {
             .lg-grid-cols-2 { grid-template-columns: repeat(2, 1fr); }
+            .lg-grid-cols-3 { grid-template-columns: repeat(3, 1fr); }
             .lg-grid-cols-4 { grid-template-columns: repeat(4, 1fr); }
         }
-        .text-blue-400 { color: #60a5fa; }
-        .text-orange-400 { color: #fb923c; }
-        .text-green-400 { color: #4ade80; }
-        .text-purple-400 { color: #c084fc; }
-        .text-red-400 { color: #f87171; }
-        .text-gray-400 { color: #9ca3af; }
-        .bg-blue-600 { background-color: #2563eb; }
-        .bg-blue-600:hover { background-color: #1d4ed8; }
-        .bg-gray-800 { background-color: #1f2937; }
-        .border-gray-700 { border-color: #374151; }
-        .bg-blue-900-30 { background-color: rgba(30, 58, 138, 0.3); }
-        .bg-green-900-30 { background-color: rgba(20, 83, 45, 0.3); }
-        .bg-red-900-30 { background-color: rgba(127, 29, 29, 0.3); }
-        .bg-red-900-50 { background-color: rgba(127, 29, 29, 0.5); }
-        .border-red-500 { border-color: #ef4444; }
-        .text-red-200 { color: #fecaca; }
-        input:focus {
+        .efficiency-badge {
+            display: inline-flex;
+            align-items: center;
+            padding: 4px 12px;
+            border-radius: 20px;
+            font-size: 0.875rem;
+            font-weight: 600;
+        }
+        .efficiency-great { background: rgba(34, 197, 94, 0.2); color: #4ade80; }
+        .efficiency-good { background: rgba(250, 204, 21, 0.2); color: #facc15; }
+        .efficiency-poor { background: rgba(248, 113, 113, 0.2); color: #f87171; }
+        .price-bar {
+            height: 4px;
+            border-radius: 2px;
+            background: linear-gradient(90deg, #4ade80, #facc15, #f87171);
+            position: relative;
+        }
+        .price-indicator {
+            position: absolute;
+            top: -6px;
+            width: 16px; height: 16px;
+            background: white;
+            border-radius: 50%;
+            transform: translateX(-50%);
+            box-shadow: 0 2px 4px rgba(0,0,0,0.3);
+        }
+        select, input {
+            width: 100%;
+            padding: 0.75rem 1rem;
+            background-color: #1f2937;
+            border: 1px solid #374151;
+            border-radius: 0.5rem;
+            color: white;
+            font-size: 1rem;
+        }
+        select:focus, input:focus {
             outline: none;
             border-color: #3b82f6;
+        }
+        .settings-icon {
+            cursor: pointer;
+            padding: 0.5rem;
+            border-radius: 0.5rem;
+            transition: background 0.2s;
+        }
+        .settings-icon:hover {
+            background: rgba(255,255,255,0.1);
+        }
+        .modal-overlay {
+            position: fixed;
+            top: 0; left: 0; right: 0; bottom: 0;
+            background: rgba(0,0,0,0.7);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            z-index: 1000;
+        }
+        .modal {
+            background: #1f2937;
+            border-radius: 12px;
+            padding: 24px;
+            max-width: 500px;
+            width: 90%;
+            max-height: 90vh;
+            overflow-y: auto;
         }
     </style>
 </head>
@@ -109,6 +146,346 @@
     <script type="text/babel">
         const { useState, useEffect, useCallback } = React;
 
+        // Settings Modal Component
+        function SettingsModal({ isOpen, onClose, config, zones, onSave }) {
+            const [country, setCountry] = useState(config.country || 'norway');
+            const [zone, setZone] = useState(config.electricityZone || 'NO5');
+            const [saving, setSaving] = useState(false);
+
+            useEffect(() => {
+                setCountry(config.country || 'norway');
+                setZone(config.electricityZone || 'NO5');
+            }, [config]);
+
+            const handleSave = async () => {
+                setSaving(true);
+                try {
+                    await onSave({ country, electricityZone: zone });
+                    onClose();
+                } catch (err) {
+                    console.error('Failed to save settings:', err);
+                } finally {
+                    setSaving(false);
+                }
+            };
+
+            if (!isOpen) return null;
+
+            const countryZones = zones[country]?.zones || [];
+
+            return (
+                <div className="modal-overlay" onClick={onClose}>
+                    <div className="modal" onClick={e => e.stopPropagation()}>
+                        <h2 style={{ marginTop: 0, marginBottom: '1.5rem' }}>⚙️ Innstillinger</h2>
+                        
+                        <div style={{ marginBottom: '1rem' }}>
+                            <label style={{ display: 'block', marginBottom: '0.5rem', color: '#9ca3af', fontSize: '0.875rem' }}>
+                                Land
+                            </label>
+                            <select 
+                                value={country} 
+                                onChange={(e) => {
+                                    setCountry(e.target.value);
+                                    const newZones = zones[e.target.value]?.zones || [];
+                                    if (newZones.length > 0) {
+                                        setZone(newZones[0].code);
+                                    }
+                                }}
+                            >
+                                {Object.entries(zones).map(([code, c]) => (
+                                    <option key={code} value={code}>{c.name}</option>
+                                ))}
+                            </select>
+                        </div>
+                        
+                        <div style={{ marginBottom: '1.5rem' }}>
+                            <label style={{ display: 'block', marginBottom: '0.5rem', color: '#9ca3af', fontSize: '0.875rem' }}>
+                                Prisområde
+                            </label>
+                            <select value={zone} onChange={(e) => setZone(e.target.value)}>
+                                {countryZones.map((z) => (
+                                    <option key={z.code} value={z.code}>{z.code} - {z.name}</option>
+                                ))}
+                            </select>
+                        </div>
+                        
+                        <div style={{ display: 'flex', gap: '0.5rem', justifyContent: 'flex-end' }}>
+                            <button
+                                onClick={onClose}
+                                style={{
+                                    padding: '0.75rem 1.5rem',
+                                    backgroundColor: '#374151',
+                                    borderRadius: '0.5rem',
+                                    border: 'none',
+                                    color: 'white',
+                                    cursor: 'pointer'
+                                }}
+                            >
+                                Avbryt
+                            </button>
+                            <button
+                                onClick={handleSave}
+                                disabled={saving}
+                                style={{
+                                    padding: '0.75rem 1.5rem',
+                                    backgroundColor: '#2563eb',
+                                    borderRadius: '0.5rem',
+                                    border: 'none',
+                                    color: 'white',
+                                    cursor: saving ? 'not-allowed' : 'pointer',
+                                    opacity: saving ? 0.5 : 1
+                                }}
+                            >
+                                {saving ? 'Lagrer...' : 'Lagre'}
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            );
+        }
+
+        // Stat Card Component
+        function StatCard({ label, value, subValue, color, icon }) {
+            return (
+                <div className="stat-card">
+                    <div style={{ color: '#9ca3af', fontSize: '0.875rem', marginBottom: '0.5rem', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                        {icon && <span>{icon}</span>}
+                        {label}
+                    </div>
+                    <div style={{ fontSize: '1.875rem', fontWeight: 'bold', color }}>
+                        {value}
+                    </div>
+                    {subValue && (
+                        <div style={{ fontSize: '0.75rem', color: '#6b7280', marginTop: '0.25rem' }}>
+                            {subValue}
+                        </div>
+                    )}
+                </div>
+            );
+        }
+
+        // Network Stats Card
+        function NetworkCard({ network }) {
+            if (!network?.hashrate) return null;
+            
+            const difficultyT = network.difficulty ? (network.difficulty / 1e12).toFixed(2) : 'N/A';
+            
+            return (
+                <div className="stat-card">
+                    <h2 style={{ fontSize: '1.25rem', fontWeight: 'bold', marginBottom: '1rem', marginTop: 0 }}>🌐 Bitcoin Nettverk</h2>
+                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1rem' }}>
+                        <div>
+                            <div style={{ color: '#9ca3af', fontSize: '0.75rem' }}>Hashrate</div>
+                            <div style={{ fontSize: '1.25rem', fontWeight: '600', color: '#60a5fa' }}>
+                                {network.hashrateFormatted || 'N/A'}
+                            </div>
+                        </div>
+                        <div>
+                            <div style={{ color: '#9ca3af', fontSize: '0.75rem' }}>Difficulty</div>
+                            <div style={{ fontSize: '1.25rem', fontWeight: '600', color: '#c084fc' }}>
+                                {difficultyT}T
+                            </div>
+                        </div>
+                        <div>
+                            <div style={{ color: '#9ca3af', fontSize: '0.75rem' }}>Block Height</div>
+                            <div style={{ fontSize: '1.25rem', fontWeight: '600', color: '#9ca3af' }}>
+                                {network.blockHeight?.toLocaleString() || 'N/A'}
+                            </div>
+                        </div>
+                        <div>
+                            <div style={{ color: '#9ca3af', fontSize: '0.75rem' }}>Block Reward</div>
+                            <div style={{ fontSize: '1.25rem', fontWeight: '600', color: '#f7931a' }}>
+                                {network.blockReward} BTC
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            );
+        }
+
+        // Efficiency Card Component
+        function EfficiencyCard({ stats }) {
+            if (!stats?.efficiency) return null;
+            
+            const { efficiency } = stats;
+            const currency = efficiency.currency || 'NOK';
+            
+            let efficiencyClass = 'efficiency-poor';
+            let efficiencyLabel = 'Ikke lønnsomt';
+            if (efficiency.effectiveSCOP >= 3) {
+                efficiencyClass = 'efficiency-great';
+                efficiencyLabel = 'Utmerket';
+            } else if (efficiency.effectiveSCOP >= 1.5) {
+                efficiencyClass = 'efficiency-good';
+                efficiencyLabel = 'Bra';
+            }
+            
+            return (
+                <div className="stat-card">
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1rem' }}>
+                        <h2 style={{ fontSize: '1.25rem', fontWeight: 'bold', margin: 0 }}>⚡ Effektivitet</h2>
+                        <span className={`efficiency-badge ${efficiencyClass}`}>{efficiencyLabel}</span>
+                    </div>
+                    
+                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1rem' }}>
+                        <div>
+                            <div style={{ color: '#9ca3af', fontSize: '0.75rem' }}>Daglig kostnad</div>
+                            <div style={{ fontSize: '1.25rem', fontWeight: '600', color: '#f87171' }}>
+                                {efficiency.dailyElectricityCost?.toFixed(0)} {currency}
+                            </div>
+                        </div>
+                        <div>
+                            <div style={{ color: '#9ca3af', fontSize: '0.75rem' }}>Daglig BTC-verdi</div>
+                            <div style={{ fontSize: '1.25rem', fontWeight: '600', color: '#4ade80' }}>
+                                {efficiency.dailyEarnings?.toFixed(0)} {currency}
+                            </div>
+                        </div>
+                        <div>
+                            <div style={{ color: '#9ca3af', fontSize: '0.75rem' }}>Daglig resultat</div>
+                            <div style={{ fontSize: '1.25rem', fontWeight: '600', color: efficiency.isProfitable ? '#4ade80' : '#f87171' }}>
+                                {efficiency.isProfitable ? '+' : ''}{efficiency.dailyProfit?.toFixed(0)} {currency}
+                            </div>
+                        </div>
+                        <div>
+                            <div style={{ color: '#9ca3af', fontSize: '0.75rem' }}>Effektiv SCOP</div>
+                            <div style={{ fontSize: '1.25rem', fontWeight: '600', color: '#22d3ee' }}>
+                                {efficiency.effectiveSCOP?.toFixed(1)}
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <div style={{ marginTop: '1rem', padding: '0.75rem', background: 'rgba(255,255,255,0.05)', borderRadius: '0.5rem' }}>
+                        <div style={{ fontSize: '0.75rem', color: '#9ca3af', marginBottom: '0.5rem' }}>
+                            Sammenligning med varmepumpe (SCOP 3.5)
+                        </div>
+                        <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                            <span>Varmepumpe ville kostet:</span>
+                            <span style={{ fontWeight: '600' }}>{efficiency.equivalentHeatPumpCost?.toFixed(0)} {currency}/dag</span>
+                        </div>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', color: efficiency.heatingSavings > 0 ? '#4ade80' : '#f87171' }}>
+                            <span>Miner {efficiency.heatingSavings > 0 ? 'sparer' : 'koster ekstra'}:</span>
+                            <span style={{ fontWeight: '600' }}>{Math.abs(efficiency.heatingSavings)?.toFixed(0)} {currency}/dag</span>
+                        </div>
+                    </div>
+                    
+                    <div style={{ marginTop: '1rem', fontSize: '0.75rem', color: '#6b7280' }}>
+                        <div>Daglig BTC: ≈{efficiency.dailyBTCEstimate?.toFixed(8)} BTC</div>
+                        <div>Hashprice: {efficiency.hashprice?.toFixed(2)} {currency}/TH/dag</div>
+                        <div>Breakeven BTC-pris: {efficiency.breakevenBTCPrice?.toLocaleString()} {currency}</div>
+                    </div>
+                </div>
+            );
+        }
+
+        // Electricity Price Card Component
+        function ElectricityCard({ electricity }) {
+            if (!electricity?.currentPrice) return null;
+            
+            const { currentPrice, avgPrice, minPrice, maxPrice, prices, zoneName, zone, currency, vatRate } = electricity;
+            
+            const range = maxPrice - minPrice;
+            const position = range > 0 ? ((currentPrice - minPrice) / range) * 100 : 50;
+            const currentHour = new Date().getHours();
+            const vatText = vatRate === 0 ? '(uten MVA)' : `(inkl. ${(vatRate * 100).toFixed(0)}% MVA)`;
+            
+            return (
+                <div className="stat-card">
+                    <h2 style={{ fontSize: '1.25rem', fontWeight: 'bold', marginBottom: '0.5rem', marginTop: 0 }}>
+                        💡 Strømpris
+                    </h2>
+                    <div style={{ fontSize: '0.75rem', color: '#9ca3af', marginBottom: '1rem' }}>
+                        {zone} - {zoneName} {vatText}
+                    </div>
+                    
+                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '1rem', marginBottom: '1rem' }}>
+                        <div style={{ textAlign: 'center' }}>
+                            <div style={{ color: '#9ca3af', fontSize: '0.75rem' }}>Nå</div>
+                            <div style={{ fontSize: '1.5rem', fontWeight: 'bold', color: '#facc15' }}>
+                                {currentPrice?.toFixed(2)}
+                            </div>
+                            <div style={{ fontSize: '0.625rem', color: '#6b7280' }}>{currency}/kWh</div>
+                        </div>
+                        <div style={{ textAlign: 'center' }}>
+                            <div style={{ color: '#9ca3af', fontSize: '0.75rem' }}>Snitt</div>
+                            <div style={{ fontSize: '1.5rem', fontWeight: 'bold', color: '#9ca3af' }}>
+                                {avgPrice?.toFixed(2)}
+                            </div>
+                            <div style={{ fontSize: '0.625rem', color: '#6b7280' }}>{currency}/kWh</div>
+                        </div>
+                        <div style={{ textAlign: 'center' }}>
+                            <div style={{ color: '#9ca3af', fontSize: '0.75rem' }}>Lavest</div>
+                            <div style={{ fontSize: '1.5rem', fontWeight: 'bold', color: '#4ade80' }}>
+                                {minPrice?.toFixed(2)}
+                            </div>
+                            <div style={{ fontSize: '0.625rem', color: '#6b7280' }}>{currency}/kWh</div>
+                        </div>
+                    </div>
+                    
+                    <div style={{ marginBottom: '1rem' }}>
+                        <div className="price-bar">
+                            <div className="price-indicator" style={{ left: `${position}%` }}></div>
+                        </div>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.625rem', color: '#6b7280', marginTop: '0.25rem' }}>
+                            <span>{minPrice?.toFixed(2)}</span>
+                            <span>{maxPrice?.toFixed(2)}</span>
+                        </div>
+                    </div>
+                    
+                    {prices && prices.length > 0 && (
+                        <div style={{ marginTop: '1rem' }}>
+                            <div style={{ fontSize: '0.75rem', color: '#9ca3af', marginBottom: '0.5rem' }}>Timepriser i dag</div>
+                            <div style={{ display: 'flex', alignItems: 'flex-end', gap: '2px', height: '60px' }}>
+                                {prices.map((p, idx) => {
+                                    const height = range > 0 ? ((p.priceIncVat - minPrice) / range) * 100 : 50;
+                                    const isCurrentHour = idx === currentHour;
+                                    return (
+                                        <div
+                                            key={idx}
+                                            style={{
+                                                flex: 1,
+                                                height: `${Math.max(height, 5)}%`,
+                                                background: isCurrentHour ? '#facc15' : 'rgba(255,255,255,0.2)',
+                                                borderRadius: '2px 2px 0 0',
+                                                minHeight: '3px'
+                                            }}
+                                            title={`${idx}:00 - ${p.priceIncVat?.toFixed(2)} ${currency}/kWh`}
+                                        />
+                                    );
+                                })}
+                            </div>
+                            <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.5rem', color: '#6b7280', marginTop: '0.25rem' }}>
+                                <span>00:00</span>
+                                <span>12:00</span>
+                                <span>23:00</span>
+                            </div>
+                        </div>
+                    )}
+                </div>
+            );
+        }
+
+        // BTC Price Card
+        function BTCPriceCard({ btcPrice, currency = 'NOK' }) {
+            if (!btcPrice?.nok) return null;
+            
+            const price = currency === 'EUR' ? btcPrice.eur : 
+                          currency === 'SEK' ? btcPrice.sek : 
+                          currency === 'USD' ? btcPrice.usd : btcPrice.nok;
+            
+            return (
+                <div className="stat-card">
+                    <div style={{ color: '#9ca3af', fontSize: '0.875rem', marginBottom: '0.5rem' }}>₿ Bitcoin</div>
+                    <div style={{ fontSize: '1.875rem', fontWeight: 'bold', color: '#f7931a' }}>
+                        {price?.toLocaleString()} {currency}
+                    </div>
+                    <div style={{ fontSize: '0.75rem', color: '#6b7280' }}>
+                        ${btcPrice.usd?.toLocaleString()} USD
+                    </div>
+                </div>
+            );
+        }
+
+        // Main Dashboard Component
         function Dashboard() {
             const [minerIP, setMinerIP] = useState('');
             const [connected, setConnected] = useState(false);
@@ -117,19 +494,33 @@
             const [loading, setLoading] = useState(false);
             const [testing, setTesting] = useState(false);
             const [ws, setWs] = useState(null);
+            const [config, setConfig] = useState({});
+            const [zones, setZones] = useState({});
+            const [showSettings, setShowSettings] = useState(false);
 
             useEffect(() => {
                 loadConfig();
+                loadZones();
             }, []);
+
+            const loadZones = async () => {
+                try {
+                    const response = await fetch('/api/electricity/zones');
+                    const data = await response.json();
+                    setZones(data);
+                } catch (err) {
+                    console.error('Failed to load zones:', err);
+                }
+            };
 
             const loadConfig = async () => {
                 try {
                     const response = await fetch('/api/config');
                     const data = await response.json();
                     console.log('Loaded config:', data);
+                    setConfig(data);
                     if (data.minerIP) {
                         setMinerIP(data.minerIP);
-                        // Auto-connect if we have a saved IP
                         setConnected(true);
                         setupWebSocket();
                     }
@@ -138,26 +529,33 @@
                 }
             };
 
+            const saveSettings = async (settings) => {
+                const response = await fetch('/api/config', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ ...config, ...settings })
+                });
+                const data = await response.json();
+                if (data.success) {
+                    setConfig(data.config);
+                }
+            };
+
             const testConnection = async () => {
                 if (!minerIP) {
                     setError('Please enter a miner IP address');
                     return;
                 }
-
                 setTesting(true);
                 setError(null);
-
                 try {
                     const response = await fetch('/api/miner/test', {
                         method: 'POST',
                         headers: { 'Content-Type': 'application/json' },
                         body: JSON.stringify({ minerIP })
                     });
-
                     const data = await response.json();
-                    
                     if (response.ok) {
-                        setError(null);
                         alert(`✅ Connection successful!\n\nMiner responded with GHS 5s: ${data.summary?.['GHS 5s'] || 'N/A'}`);
                     } else {
                         setError(data.error + (data.hint ? `\n${data.hint}` : ''));
@@ -174,22 +572,17 @@
                     setError('Please enter a miner IP address');
                     return;
                 }
-
                 setLoading(true);
                 setError(null);
-
                 try {
-                    // Save the config first
                     const response = await fetch('/api/config', {
                         method: 'POST',
                         headers: { 'Content-Type': 'application/json' },
                         body: JSON.stringify({ minerIP })
                     });
-
                     const data = await response.json();
-                    console.log('Config saved:', data);
-
                     if (response.ok) {
+                        setConfig(data.config);
                         setConnected(true);
                         setupWebSocket();
                     } else {
@@ -205,42 +598,27 @@
             const setupWebSocket = useCallback(() => {
                 const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
                 const wsUrl = `${protocol}//${window.location.host}`;
-                console.log('Connecting to WebSocket:', wsUrl);
-                
                 const websocket = new WebSocket(wsUrl);
-
-                websocket.onopen = () => {
-                    console.log('WebSocket connected');
-                };
 
                 websocket.onmessage = (event) => {
                     try {
                         const data = JSON.parse(event.data);
-                        console.log('WebSocket data:', data);
-                        
-                        if (data.error) {
+                        if (data.error && !data.electricity) {
                             setError(data.error);
                             setStats(null);
                         } else {
                             setStats(data);
-                            setError(null);
+                            if (!data.error) setError(null);
                         }
                     } catch (err) {
                         console.error('Failed to parse WebSocket message:', err);
                     }
                 };
 
-                websocket.onerror = (err) => {
-                    console.error('WebSocket error:', err);
-                    setError('WebSocket connection error');
-                };
-
+                websocket.onerror = () => setError('WebSocket connection error');
                 websocket.onclose = () => {
-                    console.log('WebSocket closed, reconnecting in 5s...');
                     setTimeout(() => {
-                        if (connected) {
-                            setupWebSocket();
-                        }
+                        if (connected) setupWebSocket();
                     }, 5000);
                 };
 
@@ -254,7 +632,6 @@
                         headers: { 'Content-Type': 'application/json' },
                         body: JSON.stringify({ profile })
                     });
-
                     if (!response.ok) {
                         const data = await response.json();
                         throw new Error(data.error || 'Failed to set power profile');
@@ -265,36 +642,31 @@
             };
 
             const disconnect = () => {
-                if (ws) {
-                    ws.close();
-                }
+                if (ws) ws.close();
                 setConnected(false);
                 setStats(null);
                 setError(null);
             };
 
-            const formatHashrate = (ths) => {
-                if (ths === undefined || ths === null) return 'N/A';
-                return `${ths.toFixed(2)} TH/s`;
-            };
-
+            const formatHashrate = (ths) => ths != null ? `${ths.toFixed(2)} TH/s` : 'N/A';
+            
             const formatUptime = (seconds) => {
                 if (!seconds) return 'N/A';
                 const days = Math.floor(seconds / 86400);
                 const hours = Math.floor((seconds % 86400) / 3600);
                 const minutes = Math.floor((seconds % 3600) / 60);
-                if (days > 0) {
-                    return `${days}d ${hours}h ${minutes}m`;
-                }
-                return `${hours}h ${minutes}m`;
+                return days > 0 ? `${days}d ${hours}h ${minutes}m` : `${hours}h ${minutes}m`;
             };
 
+            const currency = stats?.electricity?.currency || config.country === 'norway' ? 'NOK' : 'EUR';
+
+            // Login/Connect Screen
             if (!connected) {
                 return (
                     <div style={{ minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '1rem' }}>
                         <div className="stat-card" style={{ maxWidth: '28rem', width: '100%' }}>
                             <h1 style={{ fontSize: '1.875rem', fontWeight: 'bold', marginBottom: '1.5rem', textAlign: 'center' }}>
-                                ⛏️ Jack's Mining Dashboard
+                                ⛏️ Mining Dashboard
                             </h1>
                             <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
                                 <div>
@@ -307,15 +679,6 @@
                                         value={minerIP}
                                         onChange={(e) => setMinerIP(e.target.value)}
                                         onKeyPress={(e) => e.key === 'Enter' && connectToMiner()}
-                                        style={{
-                                            width: '100%',
-                                            padding: '0.75rem 1rem',
-                                            backgroundColor: '#1f2937',
-                                            border: '1px solid #374151',
-                                            borderRadius: '0.5rem',
-                                            color: 'white',
-                                            fontSize: '1rem'
-                                        }}
                                     />
                                 </div>
                                 <div style={{ display: 'flex', gap: '0.5rem' }}>
@@ -323,13 +686,9 @@
                                         onClick={testConnection}
                                         disabled={testing || loading}
                                         style={{
-                                            flex: 1,
-                                            padding: '0.75rem 1.5rem',
-                                            backgroundColor: '#374151',
-                                            borderRadius: '0.5rem',
-                                            fontWeight: '600',
-                                            border: 'none',
-                                            color: 'white',
+                                            flex: 1, padding: '0.75rem 1.5rem',
+                                            backgroundColor: '#374151', borderRadius: '0.5rem',
+                                            fontWeight: '600', border: 'none', color: 'white',
                                             cursor: testing ? 'not-allowed' : 'pointer',
                                             opacity: testing ? 0.5 : 1
                                         }}
@@ -340,13 +699,9 @@
                                         onClick={connectToMiner}
                                         disabled={loading || testing}
                                         style={{
-                                            flex: 1,
-                                            padding: '0.75rem 1.5rem',
-                                            backgroundColor: '#2563eb',
-                                            borderRadius: '0.5rem',
-                                            fontWeight: '600',
-                                            border: 'none',
-                                            color: 'white',
+                                            flex: 1, padding: '0.75rem 1.5rem',
+                                            backgroundColor: '#2563eb', borderRadius: '0.5rem',
+                                            fontWeight: '600', border: 'none', color: 'white',
                                             cursor: loading ? 'not-allowed' : 'pointer',
                                             opacity: loading ? 0.5 : 1
                                         }}
@@ -371,7 +726,6 @@
                                     <ul style={{ margin: '0.5rem 0', paddingLeft: '1.25rem' }}>
                                         <li>Miner must be running Braiins OS</li>
                                         <li>CGMiner API port 4028 must be accessible</li>
-                                        <li>Miner must be on same network or routable</li>
                                     </ul>
                                 </div>
                             </div>
@@ -380,17 +734,30 @@
                 );
             }
 
+            // Main Dashboard
             return (
                 <div style={{ minHeight: '100vh', padding: '1.5rem' }}>
-                    <div style={{ maxWidth: '80rem', margin: '0 auto' }}>
-                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '2rem', flexWrap: 'wrap', gap: '1rem' }}>
-                            <h1 style={{ fontSize: '2rem', fontWeight: 'bold' }}>⛏️ Mining Dashboard</h1>
+                    <SettingsModal
+                        isOpen={showSettings}
+                        onClose={() => setShowSettings(false)}
+                        config={config}
+                        zones={zones}
+                        onSave={saveSettings}
+                    />
+                    
+                    <div style={{ maxWidth: '90rem', margin: '0 auto' }}>
+                        {/* Header */}
+                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1.5rem', flexWrap: 'wrap', gap: '1rem' }}>
+                            <h1 style={{ fontSize: '1.75rem', fontWeight: 'bold', margin: 0 }}>⛏️ Mining Dashboard</h1>
                             <div style={{ display: 'flex', alignItems: 'center', gap: '1rem' }}>
                                 <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-                                    <span className={`status-dot`} style={{ backgroundColor: stats ? '#22c55e' : '#ef4444' }}></span>
-                                    <span style={{ fontSize: '0.875rem' }}>{stats ? 'Connected' : 'Connecting...'}</span>
+                                    <span className="status-dot" style={{ backgroundColor: stats && !stats.error ? '#22c55e' : '#ef4444' }}></span>
+                                    <span style={{ fontSize: '0.875rem' }}>{stats && !stats.error ? 'Connected' : 'Connecting...'}</span>
                                 </div>
                                 <span style={{ fontSize: '0.875rem', color: '#9ca3af' }}>{minerIP}</span>
+                                <div className="settings-icon" onClick={() => setShowSettings(true)} title="Settings">
+                                    ⚙️
+                                </div>
                                 <button
                                     onClick={disconnect}
                                     style={{
@@ -410,12 +777,9 @@
 
                         {error && (
                             <div style={{
-                                marginBottom: '1.5rem',
-                                padding: '1rem',
+                                marginBottom: '1.5rem', padding: '1rem',
                                 backgroundColor: 'rgba(127, 29, 29, 0.5)',
-                                border: '1px solid #ef4444',
-                                borderRadius: '0.5rem',
-                                color: '#fecaca'
+                                border: '1px solid #ef4444', borderRadius: '0.5rem', color: '#fecaca'
                             }}>
                                 {error}
                             </div>
@@ -429,111 +793,79 @@
 
                         {stats && (
                             <>
-                                <div className="grid grid-cols-1 md-grid-cols-2 lg-grid-cols-4" style={{ marginBottom: '2rem' }}>
-                                    <div className="stat-card">
-                                        <div style={{ color: '#9ca3af', fontSize: '0.875rem', marginBottom: '0.5rem' }}>Hashrate</div>
-                                        <div style={{ fontSize: '1.875rem', fontWeight: 'bold', color: '#60a5fa' }}>
-                                            {formatHashrate(stats.hashrate)}
-                                        </div>
-                                    </div>
-                                    <div className="stat-card">
-                                        <div style={{ color: '#9ca3af', fontSize: '0.875rem', marginBottom: '0.5rem' }}>Temperature</div>
-                                        <div style={{ fontSize: '1.875rem', fontWeight: 'bold', color: '#fb923c' }}>
-                                            {stats.temperature ? `${stats.temperature}°C` : 'N/A'}
-                                        </div>
-                                    </div>
-                                    <div className="stat-card">
-                                        <div style={{ color: '#9ca3af', fontSize: '0.875rem', marginBottom: '0.5rem' }}>Power Draw</div>
-                                        <div style={{ fontSize: '1.875rem', fontWeight: 'bold', color: '#4ade80' }}>
-                                            {stats.powerDraw ? `${stats.powerDraw}W` : 'N/A'}
-                                        </div>
-                                    </div>
-                                    <div className="stat-card">
-                                        <div style={{ color: '#9ca3af', fontSize: '0.875rem', marginBottom: '0.5rem' }}>Uptime</div>
-                                        <div style={{ fontSize: '1.875rem', fontWeight: 'bold', color: '#c084fc' }}>
-                                            {formatUptime(stats.uptime)}
-                                        </div>
-                                    </div>
+                                {/* Main Stats Row */}
+                                <div className="grid grid-cols-1 md-grid-cols-2 lg-grid-cols-4" style={{ marginBottom: '1.5rem' }}>
+                                    <StatCard label="Hashrate" value={formatHashrate(stats.hashrate)} color="#60a5fa" icon="⚡" />
+                                    <StatCard label="Temperature" value={stats.temperature ? `${stats.temperature}°C` : 'N/A'} color="#fb923c" icon="🌡️" />
+                                    <StatCard 
+                                        label="Power Draw" 
+                                        value={stats.powerDraw ? `${stats.powerDraw}W` : 'N/A'} 
+                                        subValue={stats.efficiency ? `${stats.efficiency.dailyKWh?.toFixed(1)} kWh/dag` : null}
+                                        color="#4ade80" icon="🔌" 
+                                    />
+                                    <StatCard label="Uptime" value={formatUptime(stats.uptime)} color="#c084fc" icon="⏱️" />
                                 </div>
 
-                                <div className="stat-card" style={{ marginBottom: '2rem' }}>
-                                    <h2 style={{ fontSize: '1.25rem', fontWeight: 'bold', marginBottom: '1rem' }}>Power Profiles</h2>
+                                {/* Efficiency & Economics Row */}
+                                <div className="grid grid-cols-1 lg-grid-cols-4" style={{ marginBottom: '1.5rem' }}>
+                                    <EfficiencyCard stats={stats} />
+                                    <ElectricityCard electricity={stats.electricity} />
+                                    <BTCPriceCard btcPrice={stats.btcPrice} currency={currency} />
+                                    <NetworkCard network={stats.network} />
+                                </div>
+
+                                {/* Power Profiles */}
+                                <div className="stat-card" style={{ marginBottom: '1.5rem' }}>
+                                    <h2 style={{ fontSize: '1.25rem', fontWeight: 'bold', marginBottom: '1rem', marginTop: 0 }}>🔥 Power Profiles (Varme)</h2>
                                     <div className="grid grid-cols-1 md-grid-cols-3">
-                                        <button
-                                            onClick={() => setPowerProfile('low')}
-                                            className={`power-btn ${stats.powerProfile === 'low' ? 'active' : ''}`}
-                                            style={{
-                                                padding: '1rem',
-                                                borderRadius: '0.5rem',
-                                                backgroundColor: 'rgba(30, 58, 138, 0.3)',
-                                                border: stats.powerProfile === 'low' ? '2px solid #10b981' : '2px solid transparent',
-                                                color: 'white',
-                                                textAlign: 'center'
-                                            }}
-                                        >
-                                            <div style={{ fontSize: '1.125rem', fontWeight: '600' }}>🔋 Low</div>
-                                            <div style={{ fontSize: '0.875rem', color: '#9ca3af' }}>~2000W</div>
-                                        </button>
-                                        <button
-                                            onClick={() => setPowerProfile('medium')}
-                                            className={`power-btn ${stats.powerProfile === 'medium' ? 'active' : ''}`}
-                                            style={{
-                                                padding: '1rem',
-                                                borderRadius: '0.5rem',
-                                                backgroundColor: 'rgba(20, 83, 45, 0.3)',
-                                                border: stats.powerProfile === 'medium' ? '2px solid #10b981' : '2px solid transparent',
-                                                color: 'white',
-                                                textAlign: 'center'
-                                            }}
-                                        >
-                                            <div style={{ fontSize: '1.125rem', fontWeight: '600' }}>⚡ Medium</div>
-                                            <div style={{ fontSize: '0.875rem', color: '#9ca3af' }}>~3250W</div>
-                                        </button>
-                                        <button
-                                            onClick={() => setPowerProfile('high')}
-                                            className={`power-btn ${stats.powerProfile === 'high' ? 'active' : ''}`}
-                                            style={{
-                                                padding: '1rem',
-                                                borderRadius: '0.5rem',
-                                                backgroundColor: 'rgba(127, 29, 29, 0.3)',
-                                                border: stats.powerProfile === 'high' ? '2px solid #10b981' : '2px solid transparent',
-                                                color: 'white',
-                                                textAlign: 'center'
-                                            }}
-                                        >
-                                            <div style={{ fontSize: '1.125rem', fontWeight: '600' }}>🔥 High</div>
-                                            <div style={{ fontSize: '0.875rem', color: '#9ca3af' }}>~3500W</div>
-                                        </button>
+                                        {['low', 'medium', 'high'].map((profile) => {
+                                            const profileConfig = { low: { icon: '🔋', power: '~2000W', kwh: '~48 kWh/dag', bg: 'rgba(30, 58, 138, 0.3)' },
+                                                medium: { icon: '⚡', power: '~3250W', kwh: '~78 kWh/dag', bg: 'rgba(20, 83, 45, 0.3)' },
+                                                high: { icon: '🔥', power: '~3500W', kwh: '~84 kWh/dag', bg: 'rgba(127, 29, 29, 0.3)' }
+                                            }[profile];
+                                            return (
+                                                <button
+                                                    key={profile}
+                                                    onClick={() => setPowerProfile(profile)}
+                                                    className={`power-btn ${stats.powerProfile === profile ? 'active' : ''}`}
+                                                    style={{
+                                                        padding: '1rem', borderRadius: '0.5rem',
+                                                        backgroundColor: profileConfig.bg,
+                                                        border: stats.powerProfile === profile ? '2px solid #10b981' : '2px solid transparent',
+                                                        color: 'white', textAlign: 'center'
+                                                    }}
+                                                >
+                                                    <div style={{ fontSize: '1.125rem', fontWeight: '600' }}>{profileConfig.icon} {profile.charAt(0).toUpperCase() + profile.slice(1)}</div>
+                                                    <div style={{ fontSize: '0.875rem', color: '#9ca3af' }}>{profileConfig.power}</div>
+                                                    <div style={{ fontSize: '0.75rem', color: '#6b7280' }}>{profileConfig.kwh}</div>
+                                                </button>
+                                            );
+                                        })}
                                     </div>
                                 </div>
 
+                                {/* Details Row */}
                                 <div className="grid grid-cols-1 lg-grid-cols-2">
                                     <div className="stat-card">
-                                        <h2 style={{ fontSize: '1.25rem', fontWeight: 'bold', marginBottom: '1rem' }}>Board Temperatures</h2>
+                                        <h2 style={{ fontSize: '1.25rem', fontWeight: 'bold', marginBottom: '1rem', marginTop: 0 }}>🌡️ Board Temperatures</h2>
                                         <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
-                                            {stats.boards && stats.boards.map((board, idx) => (
-                                                <div key={idx} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                                            {stats.boards?.map((board, idx) => (
+                                                <div key={idx} style={{ display: 'flex', justifyContent: 'space-between' }}>
                                                     <span>Board {idx + 1}</span>
-                                                    <span style={{ fontWeight: '600', color: '#fb923c' }}>
-                                                        {board.temp ? `${board.temp}°C` : 'N/A'}
-                                                    </span>
+                                                    <span style={{ fontWeight: '600', color: '#fb923c' }}>{board.temp ? `${board.temp}°C` : 'N/A'}</span>
                                                 </div>
                                             ))}
                                             {stats.fans && (
                                                 <>
                                                     <div style={{ borderTop: '1px solid rgba(255,255,255,0.1)', paddingTop: '0.75rem', marginTop: '0.5rem' }}>
-                                                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                                                        <div style={{ display: 'flex', justifyContent: 'space-between' }}>
                                                             <span>Fan 1</span>
-                                                            <span style={{ fontWeight: '600', color: '#60a5fa' }}>
-                                                                {stats.fans.speed1 ? `${stats.fans.speed1} RPM` : 'N/A'}
-                                                            </span>
+                                                            <span style={{ fontWeight: '600', color: '#60a5fa' }}>{stats.fans.speed1 ? `${stats.fans.speed1} RPM` : 'N/A'}</span>
                                                         </div>
                                                     </div>
-                                                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                                                    <div style={{ display: 'flex', justifyContent: 'space-between' }}>
                                                         <span>Fan 2</span>
-                                                        <span style={{ fontWeight: '600', color: '#60a5fa' }}>
-                                                            {stats.fans.speed2 ? `${stats.fans.speed2} RPM` : 'N/A'}
-                                                        </span>
+                                                        <span style={{ fontWeight: '600', color: '#60a5fa' }}>{stats.fans.speed2 ? `${stats.fans.speed2} RPM` : 'N/A'}</span>
                                                     </div>
                                                 </>
                                             )}
@@ -541,7 +873,7 @@
                                     </div>
 
                                     <div className="stat-card">
-                                        <h2 style={{ fontSize: '1.25rem', fontWeight: 'bold', marginBottom: '1rem' }}>Pool Statistics</h2>
+                                        <h2 style={{ fontSize: '1.25rem', fontWeight: 'bold', marginBottom: '1rem', marginTop: 0 }}>📊 Pool Statistics</h2>
                                         <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
                                             <div style={{ display: 'flex', justifyContent: 'space-between' }}>
                                                 <span>Status</span>
@@ -559,12 +891,16 @@
                                             </div>
                                             <div style={{ display: 'flex', justifyContent: 'space-between' }}>
                                                 <span>Reject Rate</span>
-                                                <span style={{ fontWeight: '600' }}>
-                                                    {stats.rejectRate !== undefined ? `${stats.rejectRate.toFixed(2)}%` : '0%'}
-                                                </span>
+                                                <span style={{ fontWeight: '600' }}>{stats.rejectRate?.toFixed(2) || 0}%</span>
                                             </div>
                                         </div>
                                     </div>
+                                </div>
+                                
+                                {/* Footer */}
+                                <div style={{ marginTop: '1.5rem', textAlign: 'center', fontSize: '0.75rem', color: '#6b7280' }}>
+                                    <p>Strømpriser fra hvakosterstrommen.no • BTC-pris fra CoinGecko • Nettverksdata fra blockchain.info</p>
+                                    <p>Data oppdateres hvert 5. sekund</p>
                                 </div>
                             </>
                         )}
