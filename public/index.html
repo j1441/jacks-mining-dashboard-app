@@ -175,14 +175,14 @@
         function SettingsModal({ isOpen, onClose, config, zones, onSave }) {
             const [country, setCountry] = useState(config.country || 'norway');
             const [zone, setZone] = useState(config.electricityZone || 'NO5');
-            const [priceMode, setPriceMode] = useState(config.priceMode || 'norgespris');
+            const [priceMode, setPriceMode] = useState(config.priceMode || 'stromstotteavtale');
             const [gridFee, setGridFee] = useState(config.gridFeePerKwh || 0.50);
             const [saving, setSaving] = useState(false);
 
             useEffect(() => {
                 setCountry(config.country || 'norway');
                 setZone(config.electricityZone || 'NO5');
-                setPriceMode(config.priceMode || 'norgespris');
+                setPriceMode(config.priceMode || 'stromstotteavtale');
                 setGridFee(config.gridFeePerKwh || 0.50);
             }, [config]);
 
@@ -217,52 +217,50 @@
                                 Prisvisning
                             </label>
                             <div className="toggle-container">
-                                <button 
-                                    className={`toggle-btn ${priceMode === 'spotpris' ? 'active' : ''}`}
-                                    onClick={() => setPriceMode('spotpris')}
-                                >
-                                    Spotpris
-                                </button>
-                                <button 
+                                <button
                                     className={`toggle-btn ${priceMode === 'norgespris' ? 'active' : ''}`}
                                     onClick={() => setPriceMode('norgespris')}
                                 >
                                     Norgespris
                                 </button>
+                                <button
+                                    className={`toggle-btn ${priceMode === 'stromstotteavtale' ? 'active' : ''}`}
+                                    onClick={() => setPriceMode('stromstotteavtale')}
+                                >
+                                    Strømstøtteavtale
+                                </button>
                             </div>
                             <div style={{ fontSize: '0.75rem', color: '#6b7280', marginTop: '0.5rem' }}>
-                                {priceMode === 'spotpris'
-                                    ? 'Spotpris + tilpassbar nettleie (kan justeres for tid/sesong)'
-                                    : 'Spotpris + fast 0.50 kr/kWh nettleie'}
+                                {priceMode === 'norgespris'
+                                    ? 'Fast 0.50 kr/kWh + tilpassbar nettleie'
+                                    : 'Spotpris (med statsstøtte) + tilpassbar nettleie'}
                             </div>
                         </div>
 
-                        {priceMode === 'spotpris' && (
-                            <div style={{ marginBottom: '1.5rem' }}>
-                                <label style={{ display: 'block', marginBottom: '0.5rem', color: '#9ca3af', fontSize: '0.875rem' }}>
-                                    Nettleie (kr/kWh)
-                                </label>
-                                <input
-                                    type="number"
-                                    step="0.01"
-                                    min="0"
-                                    value={gridFee}
-                                    onChange={(e) => setGridFee(e.target.value)}
-                                    placeholder="0.50"
-                                />
-                                <div style={{ fontSize: '0.75rem', color: '#6b7280', marginTop: '0.5rem' }}>
-                                    Variabel nettleie basert på tid og sesong. Juster for dag/natt eller sesong.
-                                </div>
+                        <div style={{ marginBottom: '1.5rem' }}>
+                            <label style={{ display: 'block', marginBottom: '0.5rem', color: '#9ca3af', fontSize: '0.875rem' }}>
+                                Nettleie (kr/kWh)
+                            </label>
+                            <input
+                                type="number"
+                                step="0.01"
+                                min="0"
+                                value={gridFee}
+                                onChange={(e) => setGridFee(e.target.value)}
+                                placeholder="0.50"
+                            />
+                            <div style={{ fontSize: '0.75rem', color: '#6b7280', marginTop: '0.5rem' }}>
+                                Variabel nettleie basert på tid og sesong. Juster for dag/natt eller sesong.
                             </div>
-                        )}
+                        </div>
 
-                        {priceMode === 'norgespris' && (
-                            <div style={{ marginBottom: '1.5rem', padding: '0.75rem', background: 'rgba(59, 130, 246, 0.1)', borderRadius: '0.5rem', border: '1px solid rgba(59, 130, 246, 0.3)' }}>
+                        {priceMode === 'stromstotteavtale' && (
+                            <div style={{ marginBottom: '1.5rem', padding: '0.75rem', background: 'rgba(34, 197, 94, 0.1)', borderRadius: '0.5rem', border: '1px solid rgba(34, 197, 94, 0.3)' }}>
                                 <div style={{ fontSize: '0.75rem', color: '#9ca3af' }}>
-                                    Fast nettleie: <span style={{ fontWeight: '600', color: '#60a5fa' }}>0.50 kr/kWh</span>
+                                    💚 <span style={{ fontWeight: '600', color: '#4ade80' }}>Statsstøtte aktiv</span>
                                 </div>
                                 <div style={{ fontSize: '0.625rem', color: '#6b7280', marginTop: '0.25rem' }}>
-                                    Forenklet fast sats for enkel beregning
+                                    Staten dekker 90% av spotpris over 93.75 øre/kWh
                                 </div>
                             </div>
                         )}
@@ -409,7 +407,7 @@
                 efficiencyLabel = 'Bra';
             }
             
-            const priceLabel = electricity?.priceMode === 'norgespris' ? 'Norgespris' : 'Spotpris';
+            const priceLabel = electricity?.priceMode === 'norgespris' ? 'Norgespris' : 'Strømstøtteavtale';
             
             return (
                 <div className="stat-card">
@@ -470,18 +468,19 @@
 
         // Electricity Price Card Component
         function ElectricityCard({ electricity }) {
-            if (!electricity?.spotPrice) return null;
-            
-            const { spotPrice, gridFee, effectivePrice, priceMode, avgPrice, minPrice, maxPrice, prices, zoneName, zone, currency, vatRate } = electricity;
-            
+            if (!electricity?.rawSpotPrice && !electricity?.spotPrice) return null;
+
+            const { rawSpotPrice, basePrice, gridFee, effectivePrice, subsidyApplied, subsidyAmount, priceMode, avgPrice, minPrice, maxPrice, prices, zoneName, zone, currency, vatRate } = electricity;
+
             const isNorgespris = priceMode === 'norgespris';
-            const displayPrice = effectivePrice || spotPrice;
-            
+            const displayPrice = effectivePrice || rawSpotPrice || 0;
+            const spotForDisplay = rawSpotPrice || electricity.spotPrice || 0;
+
             const range = maxPrice - minPrice;
-            const position = range > 0 ? ((spotPrice - minPrice) / range) * 100 : 50;
+            const position = range > 0 ? ((spotForDisplay - minPrice) / range) * 100 : 50;
             const currentHour = new Date().getHours();
             const vatText = vatRate === 0 ? '(uten MVA)' : `(inkl. ${(vatRate * 100).toFixed(0)}% MVA)`;
-            
+
             return (
                 <div className="stat-card">
                     <h2 style={{ fontSize: '1.25rem', fontWeight: 'bold', marginBottom: '0.5rem', marginTop: 0 }}>
@@ -490,64 +489,49 @@
                     <div style={{ fontSize: '0.75rem', color: '#9ca3af', marginBottom: '1rem' }}>
                         {zone} - {zoneName} {vatText}
                     </div>
-                    
-                    {/* Price Mode Toggle Display */}
-                    <div style={{ 
-                        display: 'inline-flex', 
-                        alignItems: 'center', 
-                        background: isNorgespris ? 'rgba(34, 197, 94, 0.2)' : 'rgba(59, 130, 246, 0.2)',
+
+                    {/* Price Mode Display */}
+                    <div style={{
+                        display: 'inline-flex',
+                        alignItems: 'center',
+                        background: isNorgespris ? 'rgba(59, 130, 246, 0.2)' : 'rgba(34, 197, 94, 0.2)',
                         padding: '4px 12px',
                         borderRadius: '20px',
                         marginBottom: '1rem',
                         fontSize: '0.75rem'
                     }}>
-                        {isNorgespris ? '🏠 Norgespris (spot + nettleie)' : '📊 Kun spotpris'}
+                        {isNorgespris ? '🏠 Norgespris (fast 0.50)' : '💚 Strømstøtteavtale'}
                     </div>
-                    
-                    <div style={{ display: 'grid', gridTemplateColumns: isNorgespris ? '1fr 1fr' : '1fr 1fr 1fr', gap: '1rem', marginBottom: '1rem' }}>
-                        {isNorgespris ? (
-                            <>
-                                <div style={{ textAlign: 'center' }}>
-                                    <div style={{ color: '#9ca3af', fontSize: '0.75rem' }}>Total pris nå</div>
-                                    <div style={{ fontSize: '1.5rem', fontWeight: 'bold', color: '#facc15' }}>
-                                        {displayPrice?.toFixed(2)}
-                                    </div>
-                                    <div style={{ fontSize: '0.625rem', color: '#6b7280' }}>{currency}/kWh</div>
-                                </div>
-                                <div style={{ textAlign: 'center' }}>
-                                    <div style={{ color: '#9ca3af', fontSize: '0.75rem' }}>Spot / Nettleie</div>
-                                    <div style={{ fontSize: '1.25rem', fontWeight: 'bold', color: '#9ca3af' }}>
-                                        {spotPrice?.toFixed(2)} / {gridFee?.toFixed(2)}
-                                    </div>
-                                    <div style={{ fontSize: '0.625rem', color: '#6b7280' }}>{currency}/kWh</div>
-                                </div>
-                            </>
-                        ) : (
-                            <>
-                                <div style={{ textAlign: 'center' }}>
-                                    <div style={{ color: '#9ca3af', fontSize: '0.75rem' }}>Nå</div>
-                                    <div style={{ fontSize: '1.5rem', fontWeight: 'bold', color: '#facc15' }}>
-                                        {spotPrice?.toFixed(2)}
-                                    </div>
-                                    <div style={{ fontSize: '0.625rem', color: '#6b7280' }}>{currency}/kWh</div>
-                                </div>
-                                <div style={{ textAlign: 'center' }}>
-                                    <div style={{ color: '#9ca3af', fontSize: '0.75rem' }}>Snitt</div>
-                                    <div style={{ fontSize: '1.5rem', fontWeight: 'bold', color: '#9ca3af' }}>
-                                        {avgPrice?.toFixed(2)}
-                                    </div>
-                                    <div style={{ fontSize: '0.625rem', color: '#6b7280' }}>{currency}/kWh</div>
-                                </div>
-                                <div style={{ textAlign: 'center' }}>
-                                    <div style={{ color: '#9ca3af', fontSize: '0.75rem' }}>Lavest</div>
-                                    <div style={{ fontSize: '1.5rem', fontWeight: 'bold', color: '#4ade80' }}>
-                                        {minPrice?.toFixed(2)}
-                                    </div>
-                                    <div style={{ fontSize: '0.625rem', color: '#6b7280' }}>{currency}/kWh</div>
-                                </div>
-                            </>
-                        )}
+
+                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1rem', marginBottom: '1rem' }}>
+                        <div style={{ textAlign: 'center' }}>
+                            <div style={{ color: '#9ca3af', fontSize: '0.75rem' }}>Total pris nå</div>
+                            <div style={{ fontSize: '1.5rem', fontWeight: 'bold', color: '#facc15' }}>
+                                {displayPrice?.toFixed(2)}
+                            </div>
+                            <div style={{ fontSize: '0.625rem', color: '#6b7280' }}>{currency}/kWh</div>
+                        </div>
+                        <div style={{ textAlign: 'center' }}>
+                            <div style={{ color: '#9ca3af', fontSize: '0.75rem' }}>
+                                {isNorgespris ? 'Fast / Nettleie' : 'Effektiv / Nettleie'}
+                            </div>
+                            <div style={{ fontSize: '1.25rem', fontWeight: 'bold', color: '#9ca3af' }}>
+                                {basePrice?.toFixed(2)} / {gridFee?.toFixed(2)}
+                            </div>
+                            <div style={{ fontSize: '0.625rem', color: '#6b7280' }}>{currency}/kWh</div>
+                        </div>
                     </div>
+
+                    {!isNorgespris && subsidyApplied && (
+                        <div style={{ marginBottom: '1rem', padding: '0.75rem', background: 'rgba(34, 197, 94, 0.1)', borderRadius: '0.5rem', border: '1px solid rgba(34, 197, 94, 0.3)' }}>
+                            <div style={{ fontSize: '0.75rem', color: '#4ade80', fontWeight: '600' }}>
+                                💚 Statsstøtte: -{subsidyAmount?.toFixed(2)} {currency}/kWh
+                            </div>
+                            <div style={{ fontSize: '0.625rem', color: '#6b7280', marginTop: '0.25rem' }}>
+                                Spot: {rawSpotPrice?.toFixed(2)} → Etter støtte: {basePrice?.toFixed(2)} {currency}/kWh
+                            </div>
+                        </div>
+                    )}
                     
                     <div style={{ marginBottom: '1rem' }}>
                         <div className="price-bar">

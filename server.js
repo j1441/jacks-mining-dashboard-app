@@ -1638,10 +1638,13 @@ async function getMinerStats(ip, config = {}) {
       
       // Electricity data with both prices
       electricity: {
-        spotPrice: spotPrice,
+        rawSpotPrice: rawSpotPrice,
+        basePrice: basePrice,
         gridFee: gridFee,
         effectivePrice: effectivePrice,
-        priceMode: useNorgespris ? 'norgespris' : 'spotpris',
+        subsidyApplied: subsidyApplied,
+        subsidyAmount: subsidyAmount,
+        priceMode: useNorgespris ? 'norgespris' : 'stromstotteavtale',
         currentPrice: effectivePrice, // For backward compatibility
         avgPrice: electricityPriceCache.avgPrice,
         minPrice: electricityPriceCache.minPrice,
@@ -1767,7 +1770,7 @@ async function loadConfig() {
         country: 'norway',
         electricityZone: 'NO5',
         gridFeePerKwh: 0.50,
-        priceMode: 'norgespris' // 'spotpris' or 'norgespris'
+        priceMode: 'stromstotteavtale' // 'norgespris' or 'stromstotteavtale'
       };
     }
     throw err;
@@ -1939,6 +1942,11 @@ app.post('/api/miners/add', async (req, res) => {
     }
 
     const config = await loadConfig();
+
+    // Ensure miners array exists
+    if (!config.miners) {
+      config.miners = [];
+    }
 
     // Check if miner already exists
     const exists = config.miners.some(m => m.ip === ip);
