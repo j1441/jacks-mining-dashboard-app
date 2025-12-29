@@ -579,11 +579,11 @@
         // BTC Price Card
         function BTCPriceCard({ btcPrice, currency = 'NOK' }) {
             if (!btcPrice?.nok) return null;
-            
-            const price = currency === 'EUR' ? btcPrice.eur : 
-                          currency === 'SEK' ? btcPrice.sek : 
+
+            const price = currency === 'EUR' ? btcPrice.eur :
+                          currency === 'SEK' ? btcPrice.sek :
                           currency === 'USD' ? btcPrice.usd : btcPrice.nok;
-            
+
             return (
                 <div className="stat-card">
                     <div style={{ color: '#9ca3af', fontSize: '0.875rem', marginBottom: '0.5rem' }}>₿ Bitcoin</div>
@@ -593,6 +593,160 @@
                     <div style={{ fontSize: '0.75rem', color: '#6b7280' }}>
                         ${btcPrice.usd?.toLocaleString()} USD
                     </div>
+                </div>
+            );
+        }
+
+        // 24-Hour Price Graph Card
+        function PriceGraphCard({ electricity, config }) {
+            if (!electricity?.prices || electricity.prices.length === 0) return null;
+
+            const { prices, gridFee, priceMode, subsidyApplied, currency, zoneName, zone, vatRate } = electricity;
+            const isNorgespris = priceMode === 'norgespris';
+            const currentHour = new Date().getHours();
+            const vatText = vatRate === 0 ? '(uten MVA)' : `(inkl. ${(vatRate * 100).toFixed(0)}% MVA)`;
+
+            // Calculate base prices based on mode
+            const priceData = prices.map((p, idx) => {
+                const spotPrice = p.priceIncVat || 0;
+                let basePrice;
+
+                if (isNorgespris) {
+                    // Fixed 0.50 kr/kWh for Norgespris
+                    basePrice = 0.50;
+                } else {
+                    // Strømstøtteavtale: Apply subsidy if spot > 0.9375
+                    const threshold = 0.9375;
+                    if (spotPrice > threshold) {
+                        const subsidyAmount = (spotPrice - threshold) * 0.90;
+                        basePrice = spotPrice - subsidyAmount;
+                    } else {
+                        basePrice = spotPrice;
+                    }
+                }
+
+                return {
+                    hour: idx,
+                    gridFee: gridFee || 0,
+                    basePrice: basePrice,
+                    totalPrice: basePrice + (gridFee || 0),
+                    rawSpot: spotPrice,
+                    time: p.time
+                };
+            });
+
+            // Find max for scaling
+            const maxTotal = Math.max(...priceData.map(d => d.totalPrice));
+            const maxHeight = Math.max(maxTotal, 2.0); // At least 2.0 for scale
+
+            return (
+                <div className="stat-card" style={{ gridColumn: '1 / -1' }}>
+                    <h2 style={{ fontSize: '1.25rem', fontWeight: 'bold', marginBottom: '0.5rem', marginTop: 0 }}>
+                        📊 Strømpris neste 24 timer
+                    </h2>
+                    <div style={{ fontSize: '0.75rem', color: '#9ca3af', marginBottom: '1rem' }}>
+                        {zone} - {zoneName} {vatText} | {isNorgespris ? 'Norgespris (0.50 kr/kWh + nettleie)' : 'Strømstøtteavtale (spotpris + nettleie)'}
+                    </div>
+
+                    {/* Legend */}
+                    <div style={{ display: 'flex', gap: '1.5rem', marginBottom: '1rem', fontSize: '0.75rem' }}>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                            <div style={{ width: '16px', height: '16px', background: '#3b82f6', borderRadius: '3px' }}></div>
+                            <span>{isNorgespris ? 'Fast pris (0.50)' : 'Effektiv spotpris'}</span>
+                        </div>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                            <div style={{ width: '16px', height: '16px', background: '#f59e0b', borderRadius: '3px' }}></div>
+                            <span>Nettleie ({gridFee?.toFixed(2)} kr/kWh)</span>
+                        </div>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                            <div style={{ width: '16px', height: '16px', background: '#facc15', border: '2px solid #eab308', borderRadius: '3px' }}></div>
+                            <span>Nåværende time</span>
+                        </div>
+                    </div>
+
+                    {/* Graph */}
+                    <div style={{ display: 'flex', alignItems: 'flex-end', gap: '2px', height: '200px', marginBottom: '0.5rem' }}>
+                        {priceData.map((data, idx) => {
+                            const isCurrentHour = idx === currentHour;
+                            const basePriceHeight = (data.basePrice / maxHeight) * 100;
+                            const gridFeeHeight = (data.gridFee / maxHeight) * 100;
+
+                            return (
+                                <div
+                                    key={idx}
+                                    style={{
+                                        flex: 1,
+                                        height: '100%',
+                                        display: 'flex',
+                                        flexDirection: 'column',
+                                        justifyContent: 'flex-end',
+                                        position: 'relative',
+                                        cursor: 'pointer'
+                                    }}
+                                    title={`${idx}:00\nBase: ${data.basePrice.toFixed(2)} ${currency}/kWh\nNettleie: ${data.gridFee.toFixed(2)} ${currency}/kWh\nTotal: ${data.totalPrice.toFixed(2)} ${currency}/kWh${!isNorgespris ? `\nRå spot: ${data.rawSpot.toFixed(2)} ${currency}/kWh` : ''}`}
+                                >
+                                    {/* Grid fee (top part) */}
+                                    <div style={{
+                                        height: `${gridFeeHeight}%`,
+                                        background: '#f59e0b',
+                                        borderRadius: '2px 2px 0 0',
+                                        minHeight: gridFeeHeight > 0 ? '2px' : '0',
+                                        border: isCurrentHour ? '2px solid #eab308' : 'none'
+                                    }} />
+                                    {/* Base price (bottom part) */}
+                                    <div style={{
+                                        height: `${basePriceHeight}%`,
+                                        background: isCurrentHour ? '#facc15' : '#3b82f6',
+                                        borderRadius: gridFeeHeight > 0 ? '0' : '2px 2px 0 0',
+                                        minHeight: basePriceHeight > 0 ? '2px' : '0',
+                                        border: isCurrentHour ? '2px solid #eab308' : 'none'
+                                    }} />
+                                </div>
+                            );
+                        })}
+                    </div>
+
+                    {/* Time labels */}
+                    <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.625rem', color: '#6b7280', marginBottom: '1rem' }}>
+                        <span>00:00</span>
+                        <span>06:00</span>
+                        <span>12:00</span>
+                        <span>18:00</span>
+                        <span>23:00</span>
+                    </div>
+
+                    {/* Price range info */}
+                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '1rem', fontSize: '0.875rem' }}>
+                        <div>
+                            <div style={{ color: '#9ca3af', fontSize: '0.75rem' }}>Laveste totalpris</div>
+                            <div style={{ fontWeight: '600', color: '#4ade80' }}>
+                                {Math.min(...priceData.map(d => d.totalPrice)).toFixed(2)} {currency}/kWh
+                            </div>
+                        </div>
+                        <div>
+                            <div style={{ color: '#9ca3af', fontSize: '0.75rem' }}>Gjennomsnitt</div>
+                            <div style={{ fontWeight: '600', color: '#9ca3af' }}>
+                                {(priceData.reduce((sum, d) => sum + d.totalPrice, 0) / priceData.length).toFixed(2)} {currency}/kWh
+                            </div>
+                        </div>
+                        <div>
+                            <div style={{ color: '#9ca3af', fontSize: '0.75rem' }}>Høyeste totalpris</div>
+                            <div style={{ fontWeight: '600', color: '#f87171' }}>
+                                {Math.max(...priceData.map(d => d.totalPrice)).toFixed(2)} {currency}/kWh
+                            </div>
+                        </div>
+                    </div>
+
+                    {!isNorgespris && (
+                        <div style={{ marginTop: '1rem', padding: '0.75rem', background: 'rgba(34, 197, 94, 0.1)', borderRadius: '0.5rem', border: '1px solid rgba(34, 197, 94, 0.3)' }}>
+                            <div style={{ fontSize: '0.75rem', color: '#9ca3af' }}>
+                                💚 <span style={{ fontWeight: '600', color: '#4ade80' }}>Strømstøtteavtale aktiv</span>
+                            </div>
+                            <div style={{ fontSize: '0.625rem', color: '#6b7280', marginTop: '0.25rem' }}>
+                                Grafen viser effektiv spotpris etter statsstøtte (90% av beløp over 93.75 øre/kWh)
+                            </div>
+                        </div>
+                    )}
                 </div>
             );
         }
@@ -1147,6 +1301,11 @@
                                     <ElectricityCard electricity={globalData.electricity} />
                                     <BTCPriceCard btcPrice={globalData.btcPrice} currency={currency} />
                                     <NetworkCard network={globalData.network} />
+                                </div>
+
+                                {/* 24-Hour Price Graph */}
+                                <div className="grid grid-cols-1" style={{ marginBottom: '1.5rem' }}>
+                                    <PriceGraphCard electricity={globalData.electricity} config={config} />
                                 </div>
 
                                 {/* Miners Grid */}
