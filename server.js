@@ -1581,10 +1581,33 @@ async function getMinerStats(ip, config = {}) {
     if (currency === 'USD') btcPrice = btcPriceCache.priceUSD || 95000;
 
     // Calculate effective electricity price based on pricing mode
-    const spotPrice = electricityPriceCache.currentPrice || 1.0;
+    const rawSpotPrice = electricityPriceCache.currentPrice || 1.0;
     const gridFee = config.gridFeePerKwh || 0.50;
     const useNorgespris = config.priceMode === 'norgespris';
-    const effectivePrice = useNorgespris ? spotPrice + gridFee : spotPrice;
+
+    let basePrice;
+    let subsidyApplied = false;
+    let subsidyAmount = 0;
+
+    if (useNorgespris) {
+      // Norgespris: Fixed 0.50 NOK/kWh + grid fees
+      basePrice = 0.50;
+    } else {
+      // Strømstøtteavtale: Spot price with state subsidy
+      // State covers 90% of spot price above 93.75 øre/kWh (0.9375 NOK/kWh)
+      const threshold = 0.9375;
+      if (rawSpotPrice > threshold) {
+        const excessPrice = rawSpotPrice - threshold;
+        subsidyAmount = excessPrice * 0.90;
+        basePrice = rawSpotPrice - subsidyAmount;
+        subsidyApplied = true;
+      } else {
+        basePrice = rawSpotPrice;
+      }
+    }
+
+    // Total effective price = base price + grid fees
+    const effectivePrice = basePrice + gridFee;
 
     // Calculate efficiency metrics with effective price
     const efficiency = calculateEfficiency(hashrate, power, effectivePrice, btcPrice, currency);
@@ -1722,12 +1745,25 @@ async function setPowerProfile(ip, profile) {
 async function loadConfig() {
   try {
     const data = await fs.readFile(CONFIG_FILE, 'utf8');
-    return JSON.parse(data);
+    const config = JSON.parse(data);
+
+    // Migrate old single-miner config to multi-miner format
+    if (config.minerIP && !config.miners) {
+      config.miners = [{
+        ip: config.minerIP,
+        name: 'Miner 1',
+        powerProfile: config.currentProfile || 'medium'
+      }];
+      delete config.minerIP;
+      delete config.currentProfile;
+      await saveConfig(config);
+    }
+
+    return config;
   } catch (err) {
     if (err.code === 'ENOENT') {
-      return { 
-        minerIP: null, 
-        currentProfile: 'medium',
+      return {
+        miners: [], // Array of {ip, name, powerProfile}
         country: 'norway',
         electricityZone: 'NO5',
         gridFeePerKwh: 0.50,
@@ -1826,11 +1862,11 @@ app.get('/api/miner/stats', async (req, res) => {
 app.post('/api/miner/power', async (req, res) => {
   try {
     const config = await loadConfig();
-    const ip = req.body.ip || config.minerIP;
+    const ip = req.body.ip;
     const profile = req.body.profile;
 
     if (!ip) {
-      return res.status(400).json({ error: 'No miner IP configured' });
+      return res.status(400).json({ error: 'No miner IP provided' });
     }
 
     if (!['low', 'medium', 'high'].includes(profile)) {
@@ -1838,10 +1874,14 @@ app.post('/api/miner/power', async (req, res) => {
     }
 
     const result = await setPowerProfile(ip, profile);
-    
-    config.currentProfile = profile;
-    await saveConfig(config);
-    
+
+    // Update the miner's power profile in config
+    const miner = config.miners.find(m => m.ip === ip);
+    if (miner) {
+      miner.powerProfile = profile;
+      await saveConfig(config);
+    }
+
     res.json(result);
   } catch (err) {
     console.error('API power error:', err);
@@ -1885,6 +1925,85 @@ app.get('/api/config', async (req, res) => {
     res.json(config);
   } catch (err) {
     console.error('API config load error:', err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Add a new miner
+app.post('/api/miners/add', async (req, res) => {
+  try {
+    const { ip, name } = req.body;
+
+    if (!ip) {
+      return res.status(400).json({ error: 'Miner IP is required' });
+    }
+
+    const config = await loadConfig();
+
+    // Check if miner already exists
+    const exists = config.miners.some(m => m.ip === ip);
+    if (exists) {
+      return res.status(400).json({ error: 'Miner with this IP already exists' });
+    }
+
+    // Add new miner
+    config.miners.push({
+      ip,
+      name: name || `Miner ${config.miners.length + 1}`,
+      powerProfile: 'medium'
+    });
+
+    await saveConfig(config);
+    res.json({ success: true, config });
+  } catch (err) {
+    console.error('Add miner error:', err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Remove a miner
+app.post('/api/miners/remove', async (req, res) => {
+  try {
+    const { ip } = req.body;
+
+    if (!ip) {
+      return res.status(400).json({ error: 'Miner IP is required' });
+    }
+
+    const config = await loadConfig();
+    config.miners = config.miners.filter(m => m.ip !== ip);
+
+    await saveConfig(config);
+    res.json({ success: true, config });
+  } catch (err) {
+    console.error('Remove miner error:', err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Update miner details
+app.post('/api/miners/update', async (req, res) => {
+  try {
+    const { ip, name, powerProfile } = req.body;
+
+    if (!ip) {
+      return res.status(400).json({ error: 'Miner IP is required' });
+    }
+
+    const config = await loadConfig();
+    const miner = config.miners.find(m => m.ip === ip);
+
+    if (!miner) {
+      return res.status(404).json({ error: 'Miner not found' });
+    }
+
+    if (name) miner.name = name;
+    if (powerProfile) miner.powerProfile = powerProfile;
+
+    await saveConfig(config);
+    res.json({ success: true, config });
+  } catch (err) {
+    console.error('Update miner error:', err);
     res.status(500).json({ error: err.message });
   }
 });
@@ -2024,11 +2143,10 @@ async function start() {
     const sendStats = async () => {
       try {
         const config = await loadConfig();
-        const ip = config.minerIP;
 
-        if (!ip) {
-          ws.send(JSON.stringify({ 
-            error: 'No miner configured. Please enter miner IP address.',
+        if (!config.miners || config.miners.length === 0) {
+          ws.send(JSON.stringify({
+            miners: [],
             electricity: electricityPriceCache,
             btcPrice: btcPriceCache,
             network: networkStatsCache
@@ -2036,17 +2154,52 @@ async function start() {
           return;
         }
 
-        const stats = await getMinerStats(ip, config);
-        ws.send(JSON.stringify(stats));
-        
+        // Fetch stats for all miners in parallel
+        const minerStatsPromises = config.miners.map(async (miner) => {
+          try {
+            const stats = await getMinerStats(miner.ip, config);
+            return {
+              ...stats,
+              minerIp: miner.ip,
+              minerName: miner.name,
+              powerProfile: miner.powerProfile
+            };
+          } catch (err) {
+            console.error(`Error fetching stats for ${miner.name} (${miner.ip}):`, err.message);
+            return {
+              minerIp: miner.ip,
+              minerName: miner.name,
+              error: err.message,
+              powerProfile: miner.powerProfile
+            };
+          }
+        });
+
+        const minersStats = await Promise.all(minerStatsPromises);
+
+        const response = {
+          miners: minersStats,
+          electricity: electricityPriceCache,
+          btcPrice: btcPriceCache,
+          network: networkStatsCache
+        };
+
+        ws.send(JSON.stringify(response));
+
         if (Date.now() - lastHistorySave > historySaveInterval) {
-          await saveHistoryEntry(stats);
+          // Save history for all miners
+          for (const stats of minersStats) {
+            if (!stats.error) {
+              await saveHistoryEntry(stats);
+            }
+          }
           lastHistorySave = Date.now();
         }
       } catch (err) {
         console.error('WebSocket stats error:', err);
-        ws.send(JSON.stringify({ 
+        ws.send(JSON.stringify({
           error: err.message,
+          miners: [],
           electricity: electricityPriceCache,
           btcPrice: btcPriceCache,
           network: networkStatsCache

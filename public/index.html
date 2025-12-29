@@ -231,13 +231,13 @@
                                 </button>
                             </div>
                             <div style={{ fontSize: '0.75rem', color: '#6b7280', marginTop: '0.5rem' }}>
-                                {priceMode === 'spotpris' 
-                                    ? 'Kun spotpris (strømpris fra børs inkl. MVA)' 
-                                    : 'Spotpris + nettleie (total strømkostnad)'}
+                                {priceMode === 'spotpris'
+                                    ? 'Spotpris + tilpassbar nettleie (kan justeres for tid/sesong)'
+                                    : 'Spotpris + fast 0.50 kr/kWh nettleie'}
                             </div>
                         </div>
 
-                        {priceMode === 'norgespris' && (
+                        {priceMode === 'spotpris' && (
                             <div style={{ marginBottom: '1.5rem' }}>
                                 <label style={{ display: 'block', marginBottom: '0.5rem', color: '#9ca3af', fontSize: '0.875rem' }}>
                                     Nettleie (kr/kWh)
@@ -251,7 +251,18 @@
                                     placeholder="0.50"
                                 />
                                 <div style={{ fontSize: '0.75rem', color: '#6b7280', marginTop: '0.5rem' }}>
-                                    Inkluderer nettleie, avgifter og påslag fra strømleverandør
+                                    Variabel nettleie basert på tid og sesong. Juster for dag/natt eller sesong.
+                                </div>
+                            </div>
+                        )}
+
+                        {priceMode === 'norgespris' && (
+                            <div style={{ marginBottom: '1.5rem', padding: '0.75rem', background: 'rgba(59, 130, 246, 0.1)', borderRadius: '0.5rem', border: '1px solid rgba(59, 130, 246, 0.3)' }}>
+                                <div style={{ fontSize: '0.75rem', color: '#9ca3af' }}>
+                                    Fast nettleie: <span style={{ fontWeight: '600', color: '#60a5fa' }}>0.50 kr/kWh</span>
+                                </div>
+                                <div style={{ fontSize: '0.625rem', color: '#6b7280', marginTop: '0.25rem' }}>
+                                    Forenklet fast sats for enkel beregning
                                 </div>
                             </div>
                         )}
@@ -602,22 +613,326 @@
             );
         }
 
-        // Main Dashboard Component
-        function Dashboard() {
+        // Add Miner Modal Component
+        function AddMinerModal({ isOpen, onClose, onAdd, miners }) {
             const [minerIP, setMinerIP] = useState('');
-            const [connected, setConnected] = useState(false);
-            const [stats, setStats] = useState(null);
+            const [minerName, setMinerName] = useState('');
             const [error, setError] = useState(null);
             const [loading, setLoading] = useState(false);
             const [testing, setTesting] = useState(false);
+
+            if (!isOpen) return null;
+
+            const testConnection = async () => {
+                if (!minerIP) {
+                    setError('Please enter a miner IP address');
+                    return;
+                }
+                setTesting(true);
+                setError(null);
+                try {
+                    const response = await fetch('/api/miner/test', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ minerIP })
+                    });
+                    const data = await response.json();
+                    if (response.ok) {
+                        alert(`Connection successful!\n\nMiner responded with GHS 5s: ${data.summary?.['GHS 5s'] || 'N/A'}`);
+                    } else {
+                        setError(data.error + (data.hint ? `\n${data.hint}` : ''));
+                    }
+                } catch (err) {
+                    setError('Failed to test connection: ' + err.message);
+                } finally {
+                    setTesting(false);
+                }
+            };
+
+            const handleAdd = async () => {
+                if (!minerIP) {
+                    setError('Please enter a miner IP address');
+                    return;
+                }
+                setLoading(true);
+                setError(null);
+                try {
+                    await onAdd(minerIP, minerName || `Miner ${miners.length + 1}`);
+                    setMinerIP('');
+                    setMinerName('');
+                    setError(null);
+                    onClose();
+                } catch (err) {
+                    setError(err.message);
+                } finally {
+                    setLoading(false);
+                }
+            };
+
+            return (
+                <div className="modal-overlay" onClick={onClose}>
+                    <div className="modal" onClick={e => e.stopPropagation()}>
+                        <h2 style={{ marginTop: 0, marginBottom: '1.5rem' }}>Add Miner</h2>
+
+                        {error && (
+                            <div style={{
+                                marginBottom: '1rem', padding: '0.75rem',
+                                backgroundColor: 'rgba(127, 29, 29, 0.5)',
+                                border: '1px solid #ef4444', borderRadius: '0.5rem',
+                                color: '#fecaca', fontSize: '0.875rem'
+                            }}>
+                                {error}
+                            </div>
+                        )}
+
+                        <div style={{ marginBottom: '1rem' }}>
+                            <label style={{ display: 'block', marginBottom: '0.5rem', color: '#9ca3af', fontSize: '0.875rem' }}>
+                                Miner IP Address
+                            </label>
+                            <input
+                                type="text"
+                                value={minerIP}
+                                onChange={(e) => setMinerIP(e.target.value)}
+                                placeholder="192.168.1.100"
+                            />
+                        </div>
+
+                        <div style={{ marginBottom: '1.5rem' }}>
+                            <label style={{ display: 'block', marginBottom: '0.5rem', color: '#9ca3af', fontSize: '0.875rem' }}>
+                                Miner Name (Optional)
+                            </label>
+                            <input
+                                type="text"
+                                value={minerName}
+                                onChange={(e) => setMinerName(e.target.value)}
+                                placeholder="Living Room Miner"
+                            />
+                        </div>
+
+                        <div style={{ display: 'flex', gap: '0.5rem', justifyContent: 'flex-end' }}>
+                            <button
+                                onClick={testConnection}
+                                disabled={testing || !minerIP}
+                                style={{
+                                    padding: '0.75rem 1.5rem',
+                                    backgroundColor: '#374151',
+                                    borderRadius: '0.5rem',
+                                    border: 'none',
+                                    color: 'white',
+                                    cursor: testing || !minerIP ? 'not-allowed' : 'pointer',
+                                    opacity: testing || !minerIP ? 0.5 : 1
+                                }}
+                            >
+                                {testing ? 'Testing...' : 'Test Connection'}
+                            </button>
+                            <button
+                                onClick={onClose}
+                                style={{
+                                    padding: '0.75rem 1.5rem',
+                                    backgroundColor: '#374151',
+                                    borderRadius: '0.5rem',
+                                    border: 'none',
+                                    color: 'white',
+                                    cursor: 'pointer'
+                                }}
+                            >
+                                Cancel
+                            </button>
+                            <button
+                                onClick={handleAdd}
+                                disabled={loading || !minerIP}
+                                style={{
+                                    padding: '0.75rem 1.5rem',
+                                    backgroundColor: '#2563eb',
+                                    borderRadius: '0.5rem',
+                                    border: 'none',
+                                    color: 'white',
+                                    cursor: loading || !minerIP ? 'not-allowed' : 'pointer',
+                                    opacity: loading || !minerIP ? 0.5 : 1
+                                }}
+                            >
+                                {loading ? 'Adding...' : 'Add Miner'}
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            );
+        }
+
+        // Miner Card Component
+        function MinerCard({ miner, globalData, currency, onRemove, onSetPowerProfile }) {
+            const formatHashrate = (ths) => ths != null ? `${ths.toFixed(2)} TH/s` : 'N/A';
+            const formatUptime = (seconds) => {
+                if (!seconds) return 'N/A';
+                const days = Math.floor(seconds / 86400);
+                const hours = Math.floor((seconds % 86400) / 3600);
+                const minutes = Math.floor((seconds % 3600) / 60);
+                return days > 0 ? `${days}d ${hours}h ${minutes}m` : `${hours}h ${minutes}m`;
+            };
+            const formatTemp = (temp) => {
+                if (temp === null || temp === undefined || temp === 0) return 'N/A';
+                return `${temp}°C`;
+            };
+
+            const stats = { ...miner, ...globalData };
+
+            return (
+                <div className="stat-card" style={{ position: 'relative' }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1rem' }}>
+                        <div>
+                            <h3 style={{ margin: 0, fontSize: '1.25rem', fontWeight: 'bold' }}>
+                                {miner.minerName || miner.minerIp}
+                            </h3>
+                            <div style={{ fontSize: '0.75rem', color: '#9ca3af', marginTop: '0.25rem' }}>
+                                {miner.minerIp}
+                            </div>
+                        </div>
+                        <button
+                            onClick={() => onRemove(miner.minerIp)}
+                            style={{
+                                padding: '0.5rem',
+                                backgroundColor: 'rgba(127, 29, 29, 0.3)',
+                                borderRadius: '0.375rem',
+                                border: '1px solid #ef4444',
+                                color: '#f87171',
+                                cursor: 'pointer',
+                                fontSize: '0.875rem'
+                            }}
+                            title="Remove miner"
+                        >
+                            Remove
+                        </button>
+                    </div>
+
+                    {miner.error && (
+                        <div style={{
+                            marginBottom: '1rem', padding: '0.75rem',
+                            backgroundColor: 'rgba(127, 29, 29, 0.5)',
+                            border: '1px solid #ef4444', borderRadius: '0.5rem',
+                            color: '#fecaca', fontSize: '0.75rem'
+                        }}>
+                            {miner.error}
+                        </div>
+                    )}
+
+                    {/* Main Stats */}
+                    <div className="grid grid-cols-2" style={{ gap: '1rem', marginBottom: '1rem' }}>
+                        <div>
+                            <div style={{ color: '#9ca3af', fontSize: '0.75rem' }}>Hashrate</div>
+                            <div style={{ fontSize: '1.25rem', fontWeight: '600', color: '#60a5fa' }}>
+                                {formatHashrate(miner.hashrate)}
+                            </div>
+                        </div>
+                        <div>
+                            <div style={{ color: '#9ca3af', fontSize: '0.75rem' }}>Temperature</div>
+                            <div style={{ fontSize: '1.25rem', fontWeight: '600', color: '#fb923c' }}>
+                                {formatTemp(miner.temperature)}
+                            </div>
+                        </div>
+                        <div>
+                            <div style={{ color: '#9ca3af', fontSize: '0.75rem' }}>Power Draw</div>
+                            <div style={{ fontSize: '1.25rem', fontWeight: '600', color: '#4ade80' }}>
+                                {miner.powerDraw ? `${miner.powerDraw}W` : 'N/A'}
+                            </div>
+                            {miner.efficiency?.dailyKWh && (
+                                <div style={{ fontSize: '0.625rem', color: '#6b7280' }}>
+                                    {miner.efficiency.dailyKWh.toFixed(1)} kWh/dag
+                                </div>
+                            )}
+                        </div>
+                        <div>
+                            <div style={{ color: '#9ca3af', fontSize: '0.75rem' }}>Uptime</div>
+                            <div style={{ fontSize: '1.25rem', fontWeight: '600', color: '#c084fc' }}>
+                                {formatUptime(miner.uptime)}
+                            </div>
+                        </div>
+                    </div>
+
+                    {/* Efficiency Info */}
+                    {miner.efficiency && (
+                        <div style={{ marginBottom: '1rem', padding: '0.75rem', background: 'rgba(255,255,255,0.05)', borderRadius: '0.5rem' }}>
+                            <div className="grid grid-cols-2" style={{ gap: '0.5rem', fontSize: '0.75rem' }}>
+                                <div>
+                                    <div style={{ color: '#9ca3af' }}>Daily Profit</div>
+                                    <div style={{ fontWeight: '600', color: miner.efficiency.isProfitable ? '#4ade80' : '#f87171' }}>
+                                        {miner.efficiency.isProfitable ? '+' : ''}{miner.efficiency.dailyProfit?.toFixed(0)} {currency}
+                                    </div>
+                                </div>
+                                <div>
+                                    <div style={{ color: '#9ca3af' }}>Effective SCOP</div>
+                                    <div style={{ fontWeight: '600', color: '#22d3ee' }}>
+                                        {miner.efficiency.effectiveSCOP?.toFixed(1)}
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    )}
+
+                    {/* Power Profiles */}
+                    <div style={{ marginBottom: '1rem' }}>
+                        <div style={{ fontSize: '0.875rem', fontWeight: '600', marginBottom: '0.5rem' }}>Power Profile</div>
+                        <div className="grid grid-cols-3" style={{ gap: '0.5rem' }}>
+                            {['low', 'medium', 'high'].map((profile) => {
+                                const profileConfig = {
+                                    low: { icon: '🔋', label: 'Low', bg: 'rgba(30, 58, 138, 0.3)' },
+                                    medium: { icon: '⚡', label: 'Med', bg: 'rgba(20, 83, 45, 0.3)' },
+                                    high: { icon: '🔥', label: 'High', bg: 'rgba(127, 29, 29, 0.3)' }
+                                }[profile];
+                                const isActive = miner.powerProfile === profile;
+                                return (
+                                    <button
+                                        key={profile}
+                                        onClick={() => onSetPowerProfile(miner.minerIp, profile)}
+                                        className={`power-btn ${isActive ? 'active' : ''}`}
+                                        style={{
+                                            padding: '0.5rem',
+                                            borderRadius: '0.375rem',
+                                            backgroundColor: profileConfig.bg,
+                                            border: isActive ? '2px solid #10b981' : '2px solid transparent',
+                                            color: 'white',
+                                            textAlign: 'center',
+                                            fontSize: '0.75rem'
+                                        }}
+                                    >
+                                        <div>{profileConfig.icon}</div>
+                                        <div>{profileConfig.label}</div>
+                                    </button>
+                                );
+                            })}
+                        </div>
+                    </div>
+
+                    {/* Pool Stats */}
+                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.5rem', fontSize: '0.75rem' }}>
+                        <div>
+                            <div style={{ color: '#9ca3af' }}>Accepted</div>
+                            <div style={{ fontWeight: '600' }}>{miner.acceptedShares?.toLocaleString() || 0}</div>
+                        </div>
+                        <div>
+                            <div style={{ color: '#9ca3af' }}>Rejected</div>
+                            <div style={{ fontWeight: '600', color: '#f87171' }}>{miner.rejectedShares?.toLocaleString() || 0}</div>
+                        </div>
+                    </div>
+                </div>
+            );
+        }
+
+        // Main Dashboard Component
+        function Dashboard() {
+            const [miners, setMiners] = useState([]);
+            const [minersStats, setMinersStats] = useState([]);
+            const [error, setError] = useState(null);
             const [ws, setWs] = useState(null);
             const [config, setConfig] = useState({});
             const [zones, setZones] = useState({});
             const [showSettings, setShowSettings] = useState(false);
+            const [showAddMiner, setShowAddMiner] = useState(false);
+            const [globalData, setGlobalData] = useState({});
 
             useEffect(() => {
                 loadConfig();
                 loadZones();
+                setupWebSocket();
             }, []);
 
             const loadZones = async () => {
@@ -636,11 +951,7 @@
                     const data = await response.json();
                     console.log('Loaded config:', data);
                     setConfig(data);
-                    if (data.minerIP) {
-                        setMinerIP(data.minerIP);
-                        setConnected(true);
-                        setupWebSocket();
-                    }
+                    setMiners(data.miners || []);
                 } catch (err) {
                     console.error('Failed to load config:', err);
                 }
@@ -658,57 +969,42 @@
                 }
             };
 
-            const testConnection = async () => {
-                if (!minerIP) {
-                    setError('Please enter a miner IP address');
-                    return;
-                }
-                setTesting(true);
-                setError(null);
+            const addMiner = async (ip, name) => {
                 try {
-                    const response = await fetch('/api/miner/test', {
+                    const response = await fetch('/api/miners/add', {
                         method: 'POST',
                         headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({ minerIP })
-                    });
-                    const data = await response.json();
-                    if (response.ok) {
-                        alert(`✅ Connection successful!\n\nMiner responded with GHS 5s: ${data.summary?.['GHS 5s'] || 'N/A'}\n\nAvailable fields: ${data.availableFields?.join(', ') || 'N/A'}`);
-                    } else {
-                        setError(data.error + (data.hint ? `\n${data.hint}` : ''));
-                    }
-                } catch (err) {
-                    setError('Failed to test connection: ' + err.message);
-                } finally {
-                    setTesting(false);
-                }
-            };
-
-            const connectToMiner = async () => {
-                if (!minerIP) {
-                    setError('Please enter a miner IP address');
-                    return;
-                }
-                setLoading(true);
-                setError(null);
-                try {
-                    const response = await fetch('/api/config', {
-                        method: 'POST',
-                        headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({ minerIP })
+                        body: JSON.stringify({ ip, name })
                     });
                     const data = await response.json();
                     if (response.ok) {
                         setConfig(data.config);
-                        setConnected(true);
-                        setupWebSocket();
+                        setMiners(data.config.miners);
                     } else {
-                        throw new Error(data.error || 'Failed to save config');
+                        throw new Error(data.error || 'Failed to add miner');
+                    }
+                } catch (err) {
+                    throw err;
+                }
+            };
+
+            const removeMiner = async (ip) => {
+                if (!confirm(`Remove miner ${ip}?`)) return;
+                try {
+                    const response = await fetch('/api/miners/remove', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ ip })
+                    });
+                    const data = await response.json();
+                    if (response.ok) {
+                        setConfig(data.config);
+                        setMiners(data.config.miners);
+                    } else {
+                        throw new Error(data.error || 'Failed to remove miner');
                     }
                 } catch (err) {
                     setError(err.message);
-                } finally {
-                    setLoading(false);
                 }
             };
 
@@ -720,12 +1016,18 @@
                 websocket.onmessage = (event) => {
                     try {
                         const data = JSON.parse(event.data);
-                        if (data.error && !data.electricity) {
-                            setError(data.error);
-                            setStats(null);
-                        } else {
-                            setStats(data);
-                            if (!data.error) setError(null);
+                        if (data.miners !== undefined) {
+                            setMinersStats(data.miners || []);
+                            setGlobalData({
+                                electricity: data.electricity,
+                                btcPrice: data.btcPrice,
+                                network: data.network
+                            });
+                            if (data.error) {
+                                setError(data.error);
+                            } else {
+                                setError(null);
+                            }
                         }
                     } catch (err) {
                         console.error('Failed to parse WebSocket message:', err);
@@ -735,19 +1037,19 @@
                 websocket.onerror = () => setError('WebSocket connection error');
                 websocket.onclose = () => {
                     setTimeout(() => {
-                        if (connected) setupWebSocket();
+                        setupWebSocket();
                     }, 5000);
                 };
 
                 setWs(websocket);
-            }, [connected]);
+            }, []);
 
-            const setPowerProfile = async (profile) => {
+            const setPowerProfile = async (minerIp, profile) => {
                 try {
                     const response = await fetch('/api/miner/power', {
                         method: 'POST',
                         headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({ profile })
+                        body: JSON.stringify({ ip: minerIp, profile })
                     });
                     if (!response.ok) {
                         const data = await response.json();
@@ -758,103 +1060,9 @@
                 }
             };
 
-            const disconnect = () => {
-                if (ws) ws.close();
-                setConnected(false);
-                setStats(null);
-                setError(null);
-            };
-
-            const formatHashrate = (ths) => ths != null ? `${ths.toFixed(2)} TH/s` : 'N/A';
-            
-            const formatUptime = (seconds) => {
-                if (!seconds) return 'N/A';
-                const days = Math.floor(seconds / 86400);
-                const hours = Math.floor((seconds % 86400) / 3600);
-                const minutes = Math.floor((seconds % 3600) / 60);
-                return days > 0 ? `${days}d ${hours}h ${minutes}m` : `${hours}h ${minutes}m`;
-            };
-            
-            const formatTemp = (temp) => {
-                if (temp === null || temp === undefined || temp === 0) return 'N/A';
-                return `${temp}°C`;
-            };
-
-            const currency = stats?.electricity?.currency || config.country === 'norway' ? 'NOK' : 'EUR';
-
-            // Login/Connect Screen
-            if (!connected) {
-                return (
-                    <div style={{ minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '1rem' }}>
-                        <div className="stat-card" style={{ maxWidth: '28rem', width: '100%' }}>
-                            <h1 style={{ fontSize: '1.875rem', fontWeight: 'bold', marginBottom: '1.5rem', textAlign: 'center' }}>
-                                ⛏️ Mining Dashboard
-                            </h1>
-                            <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
-                                <div>
-                                    <label style={{ display: 'block', marginBottom: '0.5rem', color: '#9ca3af', fontSize: '0.875rem' }}>
-                                        Miner IP Address
-                                    </label>
-                                    <input
-                                        type="text"
-                                        placeholder="e.g., 192.168.1.100"
-                                        value={minerIP}
-                                        onChange={(e) => setMinerIP(e.target.value)}
-                                        onKeyPress={(e) => e.key === 'Enter' && connectToMiner()}
-                                    />
-                                </div>
-                                <div style={{ display: 'flex', gap: '0.5rem' }}>
-                                    <button
-                                        onClick={testConnection}
-                                        disabled={testing || loading}
-                                        style={{
-                                            flex: 1, padding: '0.75rem 1.5rem',
-                                            backgroundColor: '#374151', borderRadius: '0.5rem',
-                                            fontWeight: '600', border: 'none', color: 'white',
-                                            cursor: testing ? 'not-allowed' : 'pointer',
-                                            opacity: testing ? 0.5 : 1
-                                        }}
-                                    >
-                                        {testing ? 'Testing...' : 'Test Connection'}
-                                    </button>
-                                    <button
-                                        onClick={connectToMiner}
-                                        disabled={loading || testing}
-                                        style={{
-                                            flex: 1, padding: '0.75rem 1.5rem',
-                                            backgroundColor: '#2563eb', borderRadius: '0.5rem',
-                                            fontWeight: '600', border: 'none', color: 'white',
-                                            cursor: loading ? 'not-allowed' : 'pointer',
-                                            opacity: loading ? 0.5 : 1
-                                        }}
-                                    >
-                                        {loading ? 'Connecting...' : 'Connect'}
-                                    </button>
-                                </div>
-                                {error && (
-                                    <div style={{
-                                        padding: '0.75rem',
-                                        backgroundColor: 'rgba(127, 29, 29, 0.5)',
-                                        border: '1px solid #ef4444',
-                                        borderRadius: '0.5rem',
-                                        color: '#fecaca',
-                                        whiteSpace: 'pre-wrap'
-                                    }}>
-                                        {error}
-                                    </div>
-                                )}
-                                <div style={{ fontSize: '0.75rem', color: '#6b7280', marginTop: '0.5rem' }}>
-                                    <strong>Requirements:</strong>
-                                    <ul style={{ margin: '0.5rem 0', paddingLeft: '1.25rem' }}>
-                                        <li>Miner must be running Braiins OS</li>
-                                        <li>CGMiner API port 4028 must be accessible</li>
-                                    </ul>
-                                </div>
-                            </div>
-                        </div>
-                    </div>
-                );
-            }
+            const currency = globalData?.electricity?.currency || (config.country === 'norway' ? 'NOK' : 'EUR');
+            const hasMiners = miners.length > 0;
+            const connectedMiners = minersStats.filter(m => !m.error).length;
 
             // Main Dashboard
             return (
@@ -866,33 +1074,43 @@
                         zones={zones}
                         onSave={saveSettings}
                     />
-                    
+
+                    <AddMinerModal
+                        isOpen={showAddMiner}
+                        onClose={() => setShowAddMiner(false)}
+                        onAdd={addMiner}
+                        miners={miners}
+                    />
+
                     <div style={{ maxWidth: '90rem', margin: '0 auto' }}>
                         {/* Header */}
                         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1.5rem', flexWrap: 'wrap', gap: '1rem' }}>
-                            <h1 style={{ fontSize: '1.75rem', fontWeight: 'bold', margin: 0 }}>⛏️ Mining Dashboard</h1>
+                            <div>
+                                <h1 style={{ fontSize: '1.75rem', fontWeight: 'bold', margin: 0 }}>Mining Dashboard</h1>
+                                {hasMiners && (
+                                    <div style={{ fontSize: '0.875rem', color: '#9ca3af', marginTop: '0.25rem' }}>
+                                        {connectedMiners} of {miners.length} miners connected
+                                    </div>
+                                )}
+                            </div>
                             <div style={{ display: 'flex', alignItems: 'center', gap: '1rem' }}>
-                                <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-                                    <span className="status-dot" style={{ backgroundColor: stats && !stats.error ? '#22c55e' : '#ef4444' }}></span>
-                                    <span style={{ fontSize: '0.875rem' }}>{stats && !stats.error ? 'Connected' : 'Connecting...'}</span>
-                                </div>
-                                <span style={{ fontSize: '0.875rem', color: '#9ca3af' }}>{minerIP}</span>
                                 <div className="settings-icon" onClick={() => setShowSettings(true)} title="Settings">
-                                    ⚙️
+                                    Settings
                                 </div>
                                 <button
-                                    onClick={disconnect}
+                                    onClick={() => setShowAddMiner(true)}
                                     style={{
                                         padding: '0.5rem 1rem',
-                                        backgroundColor: '#374151',
+                                        backgroundColor: '#2563eb',
                                         borderRadius: '0.5rem',
                                         border: 'none',
                                         color: 'white',
                                         cursor: 'pointer',
-                                        fontSize: '0.875rem'
+                                        fontSize: '0.875rem',
+                                        fontWeight: '600'
                                     }}
                                 >
-                                    Disconnect
+                                    + Add Miner
                                 </button>
                             </div>
                         </div>
@@ -907,177 +1125,66 @@
                             </div>
                         )}
 
-                        {!stats && !error && (
-                            <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '16rem' }}>
-                                <div className="loading-spinner"></div>
+                        {!hasMiners && (
+                            <div style={{
+                                textAlign: 'center',
+                                padding: '4rem 2rem',
+                                background: 'rgba(255, 255, 255, 0.05)',
+                                borderRadius: '12px',
+                                border: '2px dashed rgba(255, 255, 255, 0.2)'
+                            }}>
+                                <div style={{ fontSize: '3rem', marginBottom: '1rem' }}>⛏️</div>
+                                <h2 style={{ fontSize: '1.5rem', marginBottom: '0.5rem' }}>No Miners Added</h2>
+                                <p style={{ color: '#9ca3af', marginBottom: '1.5rem' }}>
+                                    Get started by adding your first miner
+                                </p>
+                                <button
+                                    onClick={() => setShowAddMiner(true)}
+                                    style={{
+                                        padding: '0.75rem 1.5rem',
+                                        backgroundColor: '#2563eb',
+                                        borderRadius: '0.5rem',
+                                        border: 'none',
+                                        color: 'white',
+                                        cursor: 'pointer',
+                                        fontSize: '1rem',
+                                        fontWeight: '600'
+                                    }}
+                                >
+                                    + Add Your First Miner
+                                </button>
                             </div>
                         )}
 
-                        {stats && (
+                        {hasMiners && (
                             <>
-                                {/* Main Stats Row */}
-                                <div className="grid grid-cols-1 md-grid-cols-2 lg-grid-cols-4" style={{ marginBottom: '1.5rem' }}>
-                                    <StatCard label="Hashrate" value={formatHashrate(stats.hashrate)} color="#60a5fa" icon="⚡" />
-                                    <StatCard label="Temperature" value={formatTemp(stats.temperature)} color="#fb923c" icon="🌡️" />
-                                    <StatCard 
-                                        label="Power Draw" 
-                                        value={stats.powerDraw ? `${stats.powerDraw}W` : 'N/A'} 
-                                        subValue={stats.efficiency ? `${stats.efficiency.dailyKWh?.toFixed(1)} kWh/dag` : null}
-                                        color="#4ade80" icon="🔌" 
-                                    />
-                                    <StatCard label="Uptime" value={formatUptime(stats.uptime)} color="#c084fc" icon="⏱️" />
+                                {/* Global Data Section */}
+                                <div className="grid grid-cols-1 md-grid-cols-3" style={{ marginBottom: '1.5rem' }}>
+                                    <ElectricityCard electricity={globalData.electricity} />
+                                    <BTCPriceCard btcPrice={globalData.btcPrice} currency={currency} />
+                                    <NetworkCard network={globalData.network} />
                                 </div>
 
-                                {/* Efficiency & Economics Row */}
-                                <div className="grid grid-cols-1 lg-grid-cols-4" style={{ marginBottom: '1.5rem' }}>
-                                    <EfficiencyCard stats={stats} />
-                                    <ElectricityCard electricity={stats.electricity} />
-                                    <BTCPriceCard btcPrice={stats.btcPrice} currency={currency} />
-                                    <NetworkCard network={stats.network} />
-                                </div>
-
-                                {/* Power Profiles */}
-                                <div className="stat-card" style={{ marginBottom: '1.5rem' }}>
-                                    <h2 style={{ fontSize: '1.25rem', fontWeight: 'bold', marginBottom: '1rem', marginTop: 0 }}>🔥 Power Profiles (Varme)</h2>
-                                    <div className="grid grid-cols-1 md-grid-cols-3">
-                                        {['low', 'medium', 'high'].map((profile) => {
-                                            const profileConfig = { low: { icon: '🔋', power: '~2000W', kwh: '~48 kWh/dag', bg: 'rgba(30, 58, 138, 0.3)' },
-                                                medium: { icon: '⚡', power: '~3250W', kwh: '~78 kWh/dag', bg: 'rgba(20, 83, 45, 0.3)' },
-                                                high: { icon: '🔥', power: '~3500W', kwh: '~84 kWh/dag', bg: 'rgba(127, 29, 29, 0.3)' }
-                                            }[profile];
-                                            return (
-                                                <button
-                                                    key={profile}
-                                                    onClick={() => setPowerProfile(profile)}
-                                                    className={`power-btn ${stats.powerProfile === profile ? 'active' : ''}`}
-                                                    style={{
-                                                        padding: '1rem', borderRadius: '0.5rem',
-                                                        backgroundColor: profileConfig.bg,
-                                                        border: stats.powerProfile === profile ? '2px solid #10b981' : '2px solid transparent',
-                                                        color: 'white', textAlign: 'center'
-                                                    }}
-                                                >
-                                                    <div style={{ fontSize: '1.125rem', fontWeight: '600' }}>{profileConfig.icon} {profile.charAt(0).toUpperCase() + profile.slice(1)}</div>
-                                                    <div style={{ fontSize: '0.875rem', color: '#9ca3af' }}>{profileConfig.power}</div>
-                                                    <div style={{ fontSize: '0.75rem', color: '#6b7280' }}>{profileConfig.kwh}</div>
-                                                </button>
-                                            );
-                                        })}
+                                {/* Miners Grid */}
+                                <div>
+                                    <h2 style={{ fontSize: '1.25rem', fontWeight: 'bold', marginBottom: '1rem' }}>Your Miners</h2>
+                                    <div className="grid grid-cols-1 md-grid-cols-2 lg-grid-cols-3">
+                                        {minersStats.map((miner) => (
+                                            <MinerCard
+                                                key={miner.minerIp}
+                                                miner={miner}
+                                                globalData={globalData}
+                                                currency={currency}
+                                                onRemove={removeMiner}
+                                                onSetPowerProfile={setPowerProfile}
+                                            />
+                                        ))}
                                     </div>
                                 </div>
 
-                                {/* Details Row */}
-                                <div className="grid grid-cols-1 lg-grid-cols-2">
-                                    <div className="stat-card">
-                                        <h2 style={{ fontSize: '1.25rem', fontWeight: 'bold', marginBottom: '1rem', marginTop: 0 }}>🌡️ Board Temperatures</h2>
-                                        <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
-                                            {stats.boards?.map((board, idx) => (
-                                                <div key={idx} style={{ display: 'flex', justifyContent: 'space-between' }}>
-                                                    <span>Board {idx + 1}</span>
-                                                    <span style={{ fontWeight: '600', color: board.temp ? '#fb923c' : '#6b7280' }}>
-                                                        {formatTemp(board.temp)}
-                                                    </span>
-                                                </div>
-                                            ))}
-                                            {stats.fans && (
-                                                <>
-                                                    <div style={{ borderTop: '1px solid rgba(255,255,255,0.1)', paddingTop: '0.75rem', marginTop: '0.5rem' }}>
-                                                        <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-                                                            <span>Fan 1</span>
-                                                            <span style={{ fontWeight: '600', color: stats.fans.speed1 ? '#60a5fa' : '#6b7280' }}>
-                                                                {stats.fans.speed1 ? `${stats.fans.speed1} RPM` : 'N/A'}
-                                                            </span>
-                                                        </div>
-                                                    </div>
-                                                    <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-                                                        <span>Fan 2</span>
-                                                        <span style={{ fontWeight: '600', color: stats.fans.speed2 ? '#60a5fa' : '#6b7280' }}>
-                                                            {stats.fans.speed2 ? `${stats.fans.speed2} RPM` : 'N/A'}
-                                                        </span>
-                                                    </div>
-                                                </>
-                                            )}
-                                        </div>
-                                        
-                                        {/* Debug info - can be removed in production */}
-                                        {stats._debug && (
-                                            <div style={{ marginTop: '1rem', padding: '0.5rem', background: 'rgba(0,0,0,0.3)', borderRadius: '0.5rem', fontSize: '0.625rem', color: '#6b7280', maxHeight: '400px', overflow: 'auto' }}>
-                                                <div><strong>Debug Info:</strong></div>
-                                                <div style={{ color: stats._debug.graphqlAvailable ? '#4ade80' : '#f87171' }}>
-                                                    GraphQL API: {stats._debug.graphqlAvailable ? '✓ Available' : '✗ Not available'}
-                                                </div>
-                                                {stats._debug.graphqlRootFields?.length > 0 && (
-                                                    <div style={{ marginTop: '0.25rem' }}>
-                                                        <strong>GraphQL Root:</strong> {stats._debug.graphqlRootFields.join(', ')}
-                                                    </div>
-                                                )}
-                                                {stats._debug.graphqlBosminerFields?.length > 0 && (
-                                                    <div style={{ marginTop: '0.25rem' }}>
-                                                        <strong>Bosminer:</strong> {stats._debug.graphqlBosminerFields.join(', ')}
-                                                    </div>
-                                                )}
-                                                {stats._debug.graphqlBosFields?.length > 0 && (
-                                                    <div style={{ marginTop: '0.25rem' }}>
-                                                        <strong>Bos:</strong> {stats._debug.graphqlBosFields.join(', ')}
-                                                    </div>
-                                                )}
-                                                {stats._debug.graphqlAvailable && (
-                                                    <>
-                                                        <div style={{ marginTop: '0.25rem' }}>
-                                                            <strong>GraphQL Data:</strong>
-                                                            <div style={{ wordBreak: 'break-all', fontSize: '0.5rem' }}>
-                                                                {stats._debug.graphqlRawData || 'none'}
-                                                            </div>
-                                                        </div>
-                                                    </>
-                                                )}
-                                                <div style={{ marginTop: '0.25rem' }}>Stats entries: {stats._debug.statsEntryCount}</div>
-                                                <div style={{ marginTop: '0.25rem' }}>
-                                                    <strong>CGMiner Temp fields:</strong> {stats._debug.tempFields?.length > 0 ? stats._debug.tempFields.join(', ') : 'none'}
-                                                </div>
-                                                <div style={{ marginTop: '0.25rem' }}>
-                                                    <strong>CGMiner Fan fields:</strong> {stats._debug.fanFields?.length > 0 ? stats._debug.fanFields.join(', ') : 'none'}
-                                                </div>
-                                                {!stats._debug.graphqlAvailable && (
-                                                    <div style={{ marginTop: '0.25rem' }}>
-                                                        <strong>All numeric fields:</strong>
-                                                        <div style={{ wordBreak: 'break-all' }}>
-                                                            {stats._debug.allNumericFields?.join(', ') || 'none'}
-                                                        </div>
-                                                    </div>
-                                                )}
-                                            </div>
-                                        )}
-                                    </div>
-
-                                    <div className="stat-card">
-                                        <h2 style={{ fontSize: '1.25rem', fontWeight: 'bold', marginBottom: '1rem', marginTop: 0 }}>📊 Pool Statistics</h2>
-                                        <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
-                                            <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-                                                <span>Status</span>
-                                                <span style={{ fontWeight: '600', color: stats.poolStatus === 'Connected' ? '#4ade80' : '#f87171' }}>
-                                                    {stats.poolStatus || 'Unknown'}
-                                                </span>
-                                            </div>
-                                            <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-                                                <span>Accepted Shares</span>
-                                                <span style={{ fontWeight: '600' }}>{stats.acceptedShares?.toLocaleString() || 0}</span>
-                                            </div>
-                                            <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-                                                <span>Rejected Shares</span>
-                                                <span style={{ fontWeight: '600', color: '#f87171' }}>{stats.rejectedShares?.toLocaleString() || 0}</span>
-                                            </div>
-                                            <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-                                                <span>Reject Rate</span>
-                                                <span style={{ fontWeight: '600' }}>{stats.rejectRate?.toFixed(2) || 0}%</span>
-                                            </div>
-                                        </div>
-                                    </div>
-                                </div>
-                                
                                 {/* Footer */}
                                 <div style={{ marginTop: '1.5rem', textAlign: 'center', fontSize: '0.75rem', color: '#6b7280' }}>
-                                    <p>Strømpriser fra hvakosterstrommen.no • BTC-pris fra CoinGecko • Nettverksdata fra blockchain.info</p>
+                                    <p>Strømpriser fra hvakosterstrommen.no, BTC-pris fra CoinGecko, Nettverksdata fra blockchain.info</p>
                                     <p>Data oppdateres hvert 5. sekund</p>
                                 </div>
                             </>
