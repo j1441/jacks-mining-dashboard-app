@@ -176,24 +176,27 @@
             const [country, setCountry] = useState(config.country || 'norway');
             const [zone, setZone] = useState(config.electricityZone || 'NO5');
             const [priceMode, setPriceMode] = useState(config.priceMode || 'stromstotteavtale');
-            const [gridFee, setGridFee] = useState(config.gridFeePerKwh || 0.50);
+            const [gridFeeWeekdayDay, setGridFeeWeekdayDay] = useState(config.gridFeeWeekdayDay || 0.50);
+            const [gridFeeWeekendNight, setGridFeeWeekendNight] = useState(config.gridFeeWeekendNight || 0.30);
             const [saving, setSaving] = useState(false);
 
             useEffect(() => {
                 setCountry(config.country || 'norway');
                 setZone(config.electricityZone || 'NO5');
                 setPriceMode(config.priceMode || 'stromstotteavtale');
-                setGridFee(config.gridFeePerKwh || 0.50);
+                setGridFeeWeekdayDay(config.gridFeeWeekdayDay || 0.50);
+                setGridFeeWeekendNight(config.gridFeeWeekendNight || 0.30);
             }, [config]);
 
             const handleSave = async () => {
                 setSaving(true);
                 try {
-                    await onSave({ 
-                        country, 
+                    await onSave({
+                        country,
                         electricityZone: zone,
                         priceMode,
-                        gridFeePerKwh: parseFloat(gridFee)
+                        gridFeeWeekdayDay: parseFloat(gridFeeWeekdayDay),
+                        gridFeeWeekendNight: parseFloat(gridFeeWeekendNight)
                     });
                     onClose();
                 } catch (err) {
@@ -211,7 +214,7 @@
                 <div className="modal-overlay" onClick={onClose}>
                     <div className="modal" onClick={e => e.stopPropagation()}>
                         <h2 style={{ marginTop: 0, marginBottom: '1.5rem' }}>⚙️ Innstillinger</h2>
-                        
+
                         <div style={{ marginBottom: '1.5rem' }}>
                             <label style={{ display: 'block', marginBottom: '0.5rem', color: '#9ca3af', fontSize: '0.875rem' }}>
                                 Prisvisning
@@ -239,18 +242,35 @@
 
                         <div style={{ marginBottom: '1.5rem' }}>
                             <label style={{ display: 'block', marginBottom: '0.5rem', color: '#9ca3af', fontSize: '0.875rem' }}>
-                                Nettleie (kr/kWh)
+                                Nettleie - Hverdag dag (kr/kWh)
                             </label>
                             <input
                                 type="number"
                                 step="0.01"
                                 min="0"
-                                value={gridFee}
-                                onChange={(e) => setGridFee(e.target.value)}
+                                value={gridFeeWeekdayDay}
+                                onChange={(e) => setGridFeeWeekdayDay(e.target.value)}
                                 placeholder="0.50"
                             />
                             <div style={{ fontSize: '0.75rem', color: '#6b7280', marginTop: '0.5rem' }}>
-                                Variabel nettleie basert på tid og sesong. Juster for dag/natt eller sesong.
+                                Man–Fre 06:00–22:00
+                            </div>
+                        </div>
+
+                        <div style={{ marginBottom: '1.5rem' }}>
+                            <label style={{ display: 'block', marginBottom: '0.5rem', color: '#9ca3af', fontSize: '0.875rem' }}>
+                                Nettleie - Helg/Natt (kr/kWh)
+                            </label>
+                            <input
+                                type="number"
+                                step="0.01"
+                                min="0"
+                                value={gridFeeWeekendNight}
+                                onChange={(e) => setGridFeeWeekendNight(e.target.value)}
+                                placeholder="0.30"
+                            />
+                            <div style={{ fontSize: '0.75rem', color: '#6b7280', marginTop: '0.5rem' }}>
+                                Lør, Søn, Man–Fre 22:00–06:00
                             </div>
                         </div>
 
@@ -601,10 +621,27 @@
         function PriceGraphCard({ electricity, config }) {
             if (!electricity?.prices || electricity.prices.length === 0) return null;
 
-            const { prices, gridFee, priceMode, subsidyApplied, currency, zoneName, zone, vatRate } = electricity;
+            const { prices, priceMode, subsidyApplied, currency, zoneName, zone, vatRate } = electricity;
             const isNorgespris = priceMode === 'norgespris';
             const currentHour = new Date().getHours();
             const vatText = vatRate === 0 ? '(uten MVA)' : `(inkl. ${(vatRate * 100).toFixed(0)}% MVA)`;
+
+            // Helper function to determine grid fee based on day/time
+            const getGridFeeForHour = (hour) => {
+                const now = new Date();
+                const date = new Date(now);
+                date.setHours(hour, 0, 0, 0);
+
+                const dayOfWeek = date.getDay(); // 0 = Sunday, 6 = Saturday
+                const isWeekend = dayOfWeek === 0 || dayOfWeek === 6;
+                const isNightTime = hour < 6 || hour >= 22;
+
+                if (isWeekend || isNightTime) {
+                    return config.gridFeeWeekendNight || 0.30;
+                } else {
+                    return config.gridFeeWeekdayDay || 0.50;
+                }
+            };
 
             // Calculate base prices based on mode
             const priceData = prices.map((p, idx) => {
@@ -625,11 +662,13 @@
                     }
                 }
 
+                const gridFee = getGridFeeForHour(idx);
+
                 return {
                     hour: idx,
-                    gridFee: gridFee || 0,
+                    gridFee: gridFee,
                     basePrice: basePrice,
-                    totalPrice: basePrice + (gridFee || 0),
+                    totalPrice: basePrice + gridFee,
                     rawSpot: spotPrice,
                     time: p.time
                 };
@@ -649,14 +688,14 @@
                     </div>
 
                     {/* Legend */}
-                    <div style={{ display: 'flex', gap: '1.5rem', marginBottom: '1rem', fontSize: '0.75rem' }}>
+                    <div style={{ display: 'flex', gap: '1.5rem', marginBottom: '1rem', fontSize: '0.75rem', flexWrap: 'wrap' }}>
                         <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
                             <div style={{ width: '16px', height: '16px', background: '#3b82f6', borderRadius: '3px' }}></div>
                             <span>{isNorgespris ? 'Fast pris (0.50)' : 'Effektiv spotpris'}</span>
                         </div>
                         <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
                             <div style={{ width: '16px', height: '16px', background: '#f59e0b', borderRadius: '3px' }}></div>
-                            <span>Nettleie ({gridFee?.toFixed(2)} kr/kWh)</span>
+                            <span>Nettleie (Dag: {config.gridFeeWeekdayDay?.toFixed(2)}, Helg/Natt: {config.gridFeeWeekendNight?.toFixed(2)} kr/kWh)</span>
                         </div>
                         <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
                             <div style={{ width: '16px', height: '16px', background: '#facc15', border: '2px solid #eab308', borderRadius: '3px' }}></div>

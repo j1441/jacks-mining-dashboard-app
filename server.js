@@ -931,6 +931,27 @@ async function fetchNetworkStats() {
 }
 
 /**
+ * Determine grid fee based on day of week and time
+ * @param {object} config - Configuration with gridFeeWeekdayDay and gridFeeWeekendNight
+ * @param {Date} date - Optional date to check (defaults to now)
+ * @returns {number} - The applicable grid fee
+ */
+function getGridFeeForTime(config, date = new Date()) {
+  const dayOfWeek = date.getDay(); // 0 = Sunday, 6 = Saturday
+  const hour = date.getHours();
+
+  // Weekend (Saturday=6, Sunday=0) or weekday night (22:00-06:00)
+  const isWeekend = dayOfWeek === 0 || dayOfWeek === 6;
+  const isNightTime = hour < 6 || hour >= 22;
+
+  if (isWeekend || isNightTime) {
+    return config.gridFeeWeekendNight || 0.30;
+  } else {
+    return config.gridFeeWeekdayDay || 0.50;
+  }
+}
+
+/**
  * Calculate mining profitability and efficiency metrics
  * @param {number} electricityPricePerKWh - The effective price (spot or spot+grid fee)
  */
@@ -1582,7 +1603,7 @@ async function getMinerStats(ip, config = {}) {
 
     // Calculate effective electricity price based on pricing mode
     const rawSpotPrice = electricityPriceCache.currentPrice || 1.0;
-    const gridFee = config.gridFeePerKwh || 0.50;
+    const gridFee = getGridFeeForTime(config);
     const useNorgespris = config.priceMode === 'norgespris';
 
     let basePrice;
@@ -1762,6 +1783,14 @@ async function loadConfig() {
       await saveConfig(config);
     }
 
+    // Migrate old single grid fee to dual grid fee format
+    if (config.gridFeePerKwh !== undefined && config.gridFeeWeekdayDay === undefined) {
+      config.gridFeeWeekdayDay = config.gridFeePerKwh;
+      config.gridFeeWeekendNight = config.gridFeePerKwh * 0.6; // Default to 60% for off-peak
+      delete config.gridFeePerKwh;
+      await saveConfig(config);
+    }
+
     return config;
   } catch (err) {
     if (err.code === 'ENOENT') {
@@ -1769,7 +1798,8 @@ async function loadConfig() {
         miners: [], // Array of {ip, name, powerProfile}
         country: 'norway',
         electricityZone: 'NO5',
-        gridFeePerKwh: 0.50,
+        gridFeeWeekdayDay: 0.50,
+        gridFeeWeekendNight: 0.30,
         priceMode: 'stromstotteavtale' // 'norgespris' or 'stromstotteavtale'
       };
     }
@@ -1896,25 +1926,30 @@ app.post('/api/config', async (req, res) => {
   try {
     console.log('Received config POST:', req.body);
     const existingConfig = await loadConfig();
-    
+
     const newIP = req.body.minerIP || req.body.minerIp;
     const newCountry = req.body.country || existingConfig.country || 'norway';
     const newZone = req.body.electricityZone || existingConfig.electricityZone || 'NO5';
-    
+
     const config = {
+      ...existingConfig,
       minerIP: newIP || existingConfig.minerIP,
       currentProfile: req.body.currentProfile || existingConfig.currentProfile || 'medium',
       country: newCountry,
       electricityZone: newZone,
-      gridFeePerKwh: req.body.gridFeePerKwh ?? existingConfig.gridFeePerKwh ?? 0.50,
+      gridFeeWeekdayDay: req.body.gridFeeWeekdayDay ?? existingConfig.gridFeeWeekdayDay ?? 0.50,
+      gridFeeWeekendNight: req.body.gridFeeWeekendNight ?? existingConfig.gridFeeWeekendNight ?? 0.30,
       priceMode: req.body.priceMode || existingConfig.priceMode || 'norgespris',
       updatedAt: new Date().toISOString()
     };
 
+    // Remove old gridFeePerKwh if it exists
+    delete config.gridFeePerKwh;
+
     await saveConfig(config);
-    
+
     await fetchElectricityPrices(newCountry, newZone);
-    
+
     res.json({ success: true, config });
   } catch (err) {
     console.error('API config save error:', err);

@@ -50,25 +50,32 @@ A comprehensive web-based dashboard for monitoring and controlling Bitcoin Antmi
 - Automatic config migration from single-miner to multi-miner format
 
 ### 2. Norwegian Electricity Pricing
-Two pricing modes with accurate calculations:
+Two pricing modes with accurate calculations and time-of-day grid fees:
 
 #### **Norgespris Mode**
 - Fixed base price: **0.50 NOK/kWh**
-- Plus custom grid fees (time/season dependent)
-- Formula: `Total = 0.50 + Grid Fee`
+- Plus time-of-day grid fees
+- Formula: `Total = 0.50 + Grid Fee (Time-dependent)`
 - Use case: Simplified fixed-rate contract
 
 #### **Strømstøtteavtale Mode** (with State Subsidy)
 - Spot price with 90% state subsidy above threshold
 - Threshold: **93.75 øre/kWh (0.9375 NOK/kWh)**
-- Plus custom grid fees
+- Plus time-of-day grid fees
 - Formula when spot > threshold:
   ```
   Subsidy = (Spot - 0.9375) × 0.90
   Effective Spot = Spot - Subsidy
-  Total = Effective Spot + Grid Fee
+  Total = Effective Spot + Grid Fee (Time-dependent)
   ```
 - Example: Spot 2.00 kr → Subsidy 0.956 kr → Effective 1.044 kr → Total 1.544 kr (with 0.50 grid fee)
+
+#### **Time-of-Day Grid Fees**
+- **Weekday Day Rate** (Mon–Fri 06:00–22:00): Default 0.50 kr/kWh
+- **Weekend/Night Rate** (Sat, Sun, Mon–Fri 22:00–06:00): Default 0.30 kr/kWh
+- Configurable separately in settings
+- Automatically applied based on current time
+- Grid fee calculation function: `getGridFeeForTime()` in server.js (lines 933-952)
 
 ### 3. Real-time Monitoring
 - **Hashrate** - Mining speed in TH/s
@@ -94,6 +101,19 @@ Each miner can be controlled independently:
 - **Medium:** ~3250W (~78 kWh/day) - Balanced (default)
 - **High:** ~3500W (~84 kWh/day) - Maximum heating
 
+### 6. 24-Hour Electricity Price Visualization
+- **Stacked bar chart** showing next 24 hours of electricity prices
+- **Two-layer visualization**:
+  - Blue bars (bottom): Base price (0.50 kr/kWh for Norgespris OR subsidized spot for Strømstøtteavtale)
+  - Orange bars (top): Grid fees (varies by time-of-day)
+- **Features**:
+  - Current hour highlighted in yellow
+  - Interactive tooltips with detailed breakdown per hour
+  - Price statistics (lowest, average, highest)
+  - Color-coded legend
+  - Mode-specific information panels
+- Component: `PriceGraphCard` in index.html (lines 620-771)
+
 ---
 
 ## File Structure
@@ -102,7 +122,7 @@ Each miner can be controlled independently:
 mining-dashboard-app/
 ├── server.js                 # Backend Express server (2200+ lines)
 ├── public/
-│   └── index.html           # Frontend React app (900+ lines)
+│   └── index.html           # Frontend React app (1200+ lines)
 ├── package.json             # Dependencies and metadata
 ├── Dockerfile               # Container build instructions
 ├── docker-compose.yaml      # Docker compose config
@@ -131,11 +151,14 @@ mining-dashboard-app/
   ],
   "country": "norway",
   "electricityZone": "NO5",
-  "gridFeePerKwh": 0.50,
+  "gridFeeWeekdayDay": 0.50,
+  "gridFeeWeekendNight": 0.30,
   "priceMode": "stromstotteavtale",
   "updatedAt": "2025-12-29T..."
 }
 ```
+
+**Note:** Old configs with `gridFeePerKwh` are automatically migrated to the dual grid fee format on load.
 
 ### Available Electricity Zones
 - **NO1:** Oslo / Øst-Norge
@@ -231,11 +254,17 @@ mining-dashboard-app/
 - Calculates efficiency metrics
 - Returns complete stats object with pricing
 
+#### Grid Fee Calculation (`getGridFeeForTime`)
+- Lines 933-952
+- Determines applicable grid fee based on day of week and hour
+- Returns weekday day rate (Mon–Fri 06:00–22:00) or weekend/night rate
+- Used by `getMinerStats()` for current pricing
+
 #### Electricity Pricing (`calculateEfficiency`)
-- Lines 1583-1610
+- Lines 954-1000+
 - Implements Norgespris vs Strømstøtteavtale logic
 - Applies state subsidy calculation
-- Returns effective price
+- Returns effective price and efficiency metrics
 
 #### CGMiner Communication (`sendCGMinerCommand`)
 - Lines 1378-1420
@@ -244,52 +273,67 @@ mining-dashboard-app/
 - Returns parsed response
 
 #### Configuration Management
-- `loadConfig()` - Lines 1724-1778
-  - Auto-migrates old single-miner format
+- `loadConfig()` - Lines 1748-1787
+  - Auto-migrates old single-miner format to multi-miner
+  - Auto-migrates old `gridFeePerKwh` to dual grid fee format
   - Returns default config if not exists
-- `saveConfig()` - Lines 1780-1783
+- `saveConfig()` - Lines 1789-1792
 
 ### Frontend (index.html)
 
 #### Components
-1. **SettingsModal** (lines 174-323)
+1. **SettingsModal** (lines 174-335)
    - Pricing mode toggle (Norgespris/Strømstøtteavtale)
-   - Grid fee input (both modes)
+   - Dual grid fee inputs (weekday day & weekend/night)
    - Country/zone selection
 
-2. **AddMinerModal** (lines 605-749)
+2. **PriceGraphCard** (lines 620-771)
+   - 24-hour electricity price visualization
+   - Stacked bar chart with base price + grid fees
+   - Time-of-day grid fee calculation per hour
+   - Interactive tooltips and price statistics
+   - Current hour highlighting
+
+3. **AddMinerModal** (lines 773-943)
    - IP and name input
    - Connection test before adding
    - Error handling
 
-3. **MinerCard** (lines 751-907)
+4. **MinerCard** (lines 945-1100)
    - Individual miner display
    - Stats, efficiency, power profiles
    - Remove button
 
-4. **ElectricityCard** (lines 460-596)
+5. **ElectricityCard** (lines 489-596)
    - Shows spot prices, grid fees, total
    - Subsidy information display
-   - Hourly price chart
+   - Hourly price chart (simplified)
 
-5. **EfficiencyCard** (lines 385-458)
+6. **EfficiencyCard** (lines 393-485)
    - Daily costs and earnings
    - SCOP comparison
    - Heat pump cost comparison
 
-6. **Dashboard** (lines 909-884)
+7. **Dashboard** (lines 1059-1184)
    - Main container
    - WebSocket connection
    - Miner management functions
+   - Layout with PriceGraphCard between global data and miners
 
 ---
 
 ## Common Customization Points
 
+### Modifying Grid Fee Time Periods
+1. Update `getGridFeeForTime()` in server.js (lines 933-952) - Backend calculation
+2. Update `getGridFeeForHour()` in PriceGraphCard (lines 629-644) - Frontend visualization
+3. Adjust hour ranges and day-of-week logic as needed
+
 ### Adding New Pricing Modes
-1. Update `server.js` lines 1583-1610 (pricing calculation)
-2. Update `public/index.html` lines 219-266 (settings modal)
-3. Update ElectricityCard display logic (lines 460-596)
+1. Update `server.js` lines 1604-1627 (pricing calculation in getMinerStats)
+2. Update `public/index.html` lines 218-238 (settings modal toggle)
+3. Update PriceGraphCard display logic (lines 631-663)
+4. Update ElectricityCard display logic (lines 489-596)
 
 ### Adding New Miner Metrics
 1. Extract data in `getMinerStats()` function
@@ -375,8 +419,12 @@ docker run -d -p 3456:3456 -v $(pwd)/data:/data mining-dashboard:1.2.11
 
 ### Migration Behavior
 - Old single-miner configs automatically migrate to multi-miner format
-- Migration happens in `loadConfig()` at lines 1729-1739
-- Original config is preserved with new `miners` array
+  - Migration happens in `loadConfig()` at lines 1754-1763
+  - Original config is preserved with new `miners` array
+- Old `gridFeePerKwh` configs automatically migrate to dual grid fee format
+  - Migration happens in `loadConfig()` at lines 1765-1771
+  - Weekday day rate set to old value
+  - Weekend/night rate set to 60% of old value as default
 
 ### WebSocket Reconnection
 - Auto-reconnects every 5 seconds on disconnect
@@ -444,9 +492,11 @@ docker run -d -p 3456:3456 -v $(pwd)/data:/data mining-dashboard:1.2.11
 1. Add miner via UI
 2. Verify connection in miner card
 3. Change power profile
-4. Check settings modal (pricing modes)
+4. Check settings modal (pricing modes and dual grid fees)
 5. Monitor WebSocket updates
-6. Remove miner
+6. View 24-hour price graph
+7. Test time-of-day grid fee calculations
+8. Remove miner
 
 ### Test Connection Endpoint
 ```bash
@@ -454,6 +504,27 @@ curl -X POST http://localhost:3456/api/miner/test \
   -H "Content-Type: application/json" \
   -d '{"minerIP": "192.168.1.100"}'
 ```
+
+---
+
+## Recent Updates (December 2025)
+
+### 24-Hour Electricity Price Graph (v1.3.0)
+- Added comprehensive price visualization showing next 24 hours
+- Stacked bar chart displays base price + time-varying grid fees
+- Current hour highlighted for easy reference
+- Interactive tooltips with detailed price breakdown per hour
+- Price statistics (min/avg/max) displayed below graph
+
+### Time-of-Day Grid Fees (v1.3.0)
+- Replaced single grid fee with dual rate system:
+  - Weekday day rate (Mon–Fri 06:00–22:00)
+  - Weekend/night rate (Sat, Sun, Mon–Fri 22:00–06:00)
+- Automatic calculation based on current time
+- Backend function: `getGridFeeForTime()` (server.js)
+- Frontend visualization updates per hour in graph
+- Settings UI updated with separate inputs for each rate
+- Automatic migration from old single-rate configs
 
 ---
 
@@ -468,6 +539,7 @@ curl -X POST http://localhost:3456/api/miner/test \
 - [ ] Profitability calculator with custom scenarios
 - [ ] Energy usage tracking and reports
 - [ ] Integration with home automation systems
+- [ ] Support for more complex grid fee structures (seasonal, multiple time periods)
 
 ---
 
