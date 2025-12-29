@@ -1094,6 +1094,287 @@
             );
         }
 
+        // Historical Charts Card Component
+        function HistoricalChartsCard({ miners }) {
+            const [historyData, setHistoryData] = useState([]);
+            const [selectedMiner, setSelectedMiner] = useState('all');
+            const [timeRange, setTimeRange] = useState(7);
+            const [loading, setLoading] = useState(true);
+            const [chartType, setChartType] = useState('hashrate');
+
+            useEffect(() => {
+                fetchHistoryData();
+                const interval = setInterval(fetchHistoryData, 60000); // Refresh every minute
+                return () => clearInterval(interval);
+            }, [selectedMiner, timeRange]);
+
+            const fetchHistoryData = async () => {
+                try {
+                    setLoading(true);
+                    const minerParam = selectedMiner !== 'all' ? `&minerIp=${selectedMiner}` : '';
+                    const response = await fetch(`/api/history?days=${timeRange}${minerParam}`);
+                    const data = await response.json();
+                    setHistoryData(data.entries || []);
+                } catch (err) {
+                    console.error('Failed to fetch history:', err);
+                } finally {
+                    setLoading(false);
+                }
+            };
+
+            if (!miners || miners.length === 0) return null;
+
+            // Group data by miner and time
+            const processedData = historyData.reduce((acc, entry) => {
+                const minerKey = entry.minerIp || 'unknown';
+                if (!acc[minerKey]) {
+                    acc[minerKey] = [];
+                }
+                acc[minerKey].push(entry);
+                return acc;
+            }, {});
+
+            // Get data for selected miner or all miners
+            const displayData = selectedMiner === 'all'
+                ? Object.values(processedData).flat().sort((a, b) => new Date(a.timestamp) - new Date(b.timestamp))
+                : (processedData[selectedMiner] || []).sort((a, b) => new Date(a.timestamp) - new Date(b.timestamp));
+
+            // Calculate chart data
+            const getChartValue = (entry) => {
+                switch (chartType) {
+                    case 'hashrate': return entry.hashrate || 0;
+                    case 'temperature': return entry.temperature || 0;
+                    case 'power': return entry.power || 0;
+                    default: return 0;
+                }
+            };
+
+            const chartLabel = {
+                hashrate: 'Hashrate (TH/s)',
+                temperature: 'Temperature (°C)',
+                power: 'Power Draw (W)'
+            }[chartType];
+
+            const maxValue = displayData.length > 0
+                ? Math.max(...displayData.map(getChartValue))
+                : 100;
+            const minValue = displayData.length > 0
+                ? Math.min(...displayData.map(getChartValue))
+                : 0;
+
+            return (
+                <div className="stat-card" style={{ gridColumn: '1 / -1' }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1rem', flexWrap: 'wrap', gap: '1rem' }}>
+                        <h2 style={{ fontSize: '1.25rem', fontWeight: 'bold', margin: 0 }}>
+                            📈 Historical Data
+                        </h2>
+                        <div style={{ display: 'flex', gap: '1rem', flexWrap: 'wrap' }}>
+                            {/* Chart Type Selector */}
+                            <select
+                                value={chartType}
+                                onChange={(e) => setChartType(e.target.value)}
+                                style={{
+                                    background: 'rgba(255, 255, 255, 0.1)',
+                                    color: '#e0e0e0',
+                                    border: '1px solid rgba(255, 255, 255, 0.2)',
+                                    borderRadius: '6px',
+                                    padding: '0.5rem',
+                                    fontSize: '0.875rem'
+                                }}
+                            >
+                                <option value="hashrate">Hashrate</option>
+                                <option value="temperature">Temperature</option>
+                                <option value="power">Power Draw</option>
+                            </select>
+
+                            {/* Miner Selector */}
+                            <select
+                                value={selectedMiner}
+                                onChange={(e) => setSelectedMiner(e.target.value)}
+                                style={{
+                                    background: 'rgba(255, 255, 255, 0.1)',
+                                    color: '#e0e0e0',
+                                    border: '1px solid rgba(255, 255, 255, 0.2)',
+                                    borderRadius: '6px',
+                                    padding: '0.5rem',
+                                    fontSize: '0.875rem'
+                                }}
+                            >
+                                <option value="all">All Miners</option>
+                                {miners.filter(m => !m.error).map(miner => (
+                                    <option key={miner.minerIp} value={miner.minerIp}>
+                                        {miner.minerName || miner.minerIp}
+                                    </option>
+                                ))}
+                            </select>
+
+                            {/* Time Range Selector */}
+                            <select
+                                value={timeRange}
+                                onChange={(e) => setTimeRange(parseInt(e.target.value))}
+                                style={{
+                                    background: 'rgba(255, 255, 255, 0.1)',
+                                    color: '#e0e0e0',
+                                    border: '1px solid rgba(255, 255, 255, 0.2)',
+                                    borderRadius: '6px',
+                                    padding: '0.5rem',
+                                    fontSize: '0.875rem'
+                                }}
+                            >
+                                <option value="1">Last 24 Hours</option>
+                                <option value="7">Last 7 Days</option>
+                                <option value="14">Last 14 Days</option>
+                                <option value="30">Last 30 Days</option>
+                            </select>
+                        </div>
+                    </div>
+
+                    {loading && (
+                        <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '300px' }}>
+                            <div className="loading-spinner"></div>
+                        </div>
+                    )}
+
+                    {!loading && displayData.length === 0 && (
+                        <div style={{ textAlign: 'center', padding: '3rem', color: '#9ca3af' }}>
+                            <div style={{ fontSize: '3rem', marginBottom: '1rem' }}>📊</div>
+                            <div>No historical data available yet.</div>
+                            <div style={{ fontSize: '0.875rem', marginTop: '0.5rem' }}>
+                                Data is collected hourly. Check back soon!
+                            </div>
+                        </div>
+                    )}
+
+                    {!loading && displayData.length > 0 && (
+                        <>
+                            {/* Chart */}
+                            <div style={{ position: 'relative', height: '300px', marginBottom: '1rem' }}>
+                                {/* Y-axis labels */}
+                                <div style={{ position: 'absolute', left: 0, top: 0, bottom: 0, display: 'flex', flexDirection: 'column', justifyContent: 'space-between', fontSize: '0.75rem', color: '#9ca3af', paddingRight: '0.5rem' }}>
+                                    <div>{maxValue.toFixed(1)}</div>
+                                    <div>{((maxValue + minValue) / 2).toFixed(1)}</div>
+                                    <div>{minValue.toFixed(1)}</div>
+                                </div>
+
+                                {/* Chart area */}
+                                <div style={{ marginLeft: '3rem', height: '100%', position: 'relative', border: '1px solid rgba(255, 255, 255, 0.1)', borderRadius: '8px', padding: '1rem' }}>
+                                    {/* Grid lines */}
+                                    <div style={{ position: 'absolute', inset: '1rem', display: 'flex', flexDirection: 'column', justifyContent: 'space-between' }}>
+                                        {[0, 1, 2, 3, 4].map(i => (
+                                            <div key={i} style={{ borderTop: '1px dashed rgba(255, 255, 255, 0.1)' }}></div>
+                                        ))}
+                                    </div>
+
+                                    {/* Line chart */}
+                                    <svg style={{ width: '100%', height: '100%' }} preserveAspectRatio="none">
+                                        {selectedMiner === 'all' ? (
+                                            // Show multiple lines for all miners
+                                            Object.entries(processedData).map(([minerIp, entries], idx) => {
+                                                const colors = ['#3b82f6', '#10b981', '#f59e0b', '#ef4444', '#8b5cf6'];
+                                                const color = colors[idx % colors.length];
+                                                const sortedEntries = [...entries].sort((a, b) => new Date(a.timestamp) - new Date(b.timestamp));
+
+                                                const points = sortedEntries.map((entry, i) => {
+                                                    const x = (i / (sortedEntries.length - 1 || 1)) * 100;
+                                                    const value = getChartValue(entry);
+                                                    const y = 100 - ((value - minValue) / (maxValue - minValue || 1)) * 100;
+                                                    return `${x},${y}`;
+                                                }).join(' ');
+
+                                                return (
+                                                    <polyline
+                                                        key={minerIp}
+                                                        points={points}
+                                                        fill="none"
+                                                        stroke={color}
+                                                        strokeWidth="2"
+                                                        vectorEffect="non-scaling-stroke"
+                                                    />
+                                                );
+                                            })
+                                        ) : (
+                                            // Show single line for selected miner
+                                            (() => {
+                                                const points = displayData.map((entry, i) => {
+                                                    const x = (i / (displayData.length - 1 || 1)) * 100;
+                                                    const value = getChartValue(entry);
+                                                    const y = 100 - ((value - minValue) / (maxValue - minValue || 1)) * 100;
+                                                    return `${x},${y}`;
+                                                }).join(' ');
+
+                                                return (
+                                                    <polyline
+                                                        points={points}
+                                                        fill="none"
+                                                        stroke="#3b82f6"
+                                                        strokeWidth="2"
+                                                        vectorEffect="non-scaling-stroke"
+                                                    />
+                                                );
+                                            })()
+                                        )}
+                                    </svg>
+                                </div>
+                            </div>
+
+                            {/* Stats */}
+                            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(150px, 1fr))', gap: '1rem', fontSize: '0.875rem' }}>
+                                <div>
+                                    <div style={{ color: '#9ca3af', fontSize: '0.75rem' }}>Current</div>
+                                    <div style={{ fontWeight: '600', color: '#3b82f6' }}>
+                                        {displayData.length > 0 ? getChartValue(displayData[displayData.length - 1]).toFixed(2) : 'N/A'}
+                                    </div>
+                                </div>
+                                <div>
+                                    <div style={{ color: '#9ca3af', fontSize: '0.75rem' }}>Average</div>
+                                    <div style={{ fontWeight: '600', color: '#9ca3af' }}>
+                                        {displayData.length > 0
+                                            ? (displayData.reduce((sum, e) => sum + getChartValue(e), 0) / displayData.length).toFixed(2)
+                                            : 'N/A'}
+                                    </div>
+                                </div>
+                                <div>
+                                    <div style={{ color: '#9ca3af', fontSize: '0.75rem' }}>Maximum</div>
+                                    <div style={{ fontWeight: '600', color: '#f87171' }}>
+                                        {maxValue.toFixed(2)}
+                                    </div>
+                                </div>
+                                <div>
+                                    <div style={{ color: '#9ca3af', fontSize: '0.75rem' }}>Minimum</div>
+                                    <div style={{ fontWeight: '600', color: '#4ade80' }}>
+                                        {minValue.toFixed(2)}
+                                    </div>
+                                </div>
+                                <div>
+                                    <div style={{ color: '#9ca3af', fontSize: '0.75rem' }}>Data Points</div>
+                                    <div style={{ fontWeight: '600', color: '#9ca3af' }}>
+                                        {displayData.length}
+                                    </div>
+                                </div>
+                            </div>
+
+                            {/* Legend for multi-miner view */}
+                            {selectedMiner === 'all' && Object.keys(processedData).length > 1 && (
+                                <div style={{ marginTop: '1rem', display: 'flex', flexWrap: 'wrap', gap: '1rem', fontSize: '0.75rem' }}>
+                                    {Object.entries(processedData).map(([minerIp, entries], idx) => {
+                                        const colors = ['#3b82f6', '#10b981', '#f59e0b', '#ef4444', '#8b5cf6'];
+                                        const color = colors[idx % colors.length];
+                                        const minerName = entries[0]?.minerName || minerIp;
+                                        return (
+                                            <div key={minerIp} style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                                                <div style={{ width: '16px', height: '3px', background: color }}></div>
+                                                <span>{minerName}</span>
+                                            </div>
+                                        );
+                                    })}
+                                </div>
+                            )}
+                        </>
+                    )}
+                </div>
+            );
+        }
+
         // Main Dashboard Component
         function Dashboard() {
             const [miners, setMiners] = useState([]);
@@ -1345,6 +1626,11 @@
                                 {/* 24-Hour Price Graph */}
                                 <div className="grid grid-cols-1" style={{ marginBottom: '1.5rem' }}>
                                     <PriceGraphCard electricity={globalData.electricity} config={config} />
+                                </div>
+
+                                {/* Historical Charts */}
+                                <div className="grid grid-cols-1" style={{ marginBottom: '1.5rem' }}>
+                                    <HistoricalChartsCard miners={minersStats} />
                                 </div>
 
                                 {/* Miners Grid */}

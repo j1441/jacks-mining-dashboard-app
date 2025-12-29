@@ -1827,10 +1827,12 @@ async function loadHistory() {
 async function saveHistoryEntry(stats) {
   try {
     const history = await loadHistory();
-    const maxEntries = 720;
-    
+    const maxEntries = 720; // 30 days at 1 entry per hour
+
     history.entries.push({
       timestamp: new Date().toISOString(),
+      minerIp: stats.minerIp,
+      minerName: stats.minerName,
       hashrate: stats.hashrate,
       power: stats.powerDraw,
       temperature: stats.temperature,
@@ -1840,11 +1842,11 @@ async function saveHistoryEntry(stats) {
       dailyProfit: stats.efficiency?.dailyProfit,
       effectiveSCOP: stats.efficiency?.effectiveSCOP
     });
-    
+
     if (history.entries.length > maxEntries) {
       history.entries = history.entries.slice(-maxEntries);
     }
-    
+
     await fs.writeFile(HISTORY_FILE, JSON.stringify(history, null, 2));
   } catch (err) {
     console.error('Failed to save history:', err);
@@ -2127,10 +2129,17 @@ app.get('/api/history', async (req, res) => {
   try {
     const history = await loadHistory();
     const days = parseInt(req.query.days) || 7;
+    const minerIp = req.query.minerIp;
     const cutoff = new Date();
     cutoff.setDate(cutoff.getDate() - days);
-    
-    const filtered = history.entries.filter(e => new Date(e.timestamp) >= cutoff);
+
+    let filtered = history.entries.filter(e => new Date(e.timestamp) >= cutoff);
+
+    // Filter by miner IP if specified
+    if (minerIp) {
+      filtered = filtered.filter(e => e.minerIp === minerIp);
+    }
+
     res.json({ entries: filtered });
   } catch (err) {
     res.status(500).json({ error: err.message });
