@@ -1139,15 +1139,15 @@
                     {/* Main Stats */}
                     <div className="grid grid-cols-2" style={{ gap: '1rem', marginBottom: '1rem' }}>
                         <div>
-                            <div style={{ color: '#9ca3af', fontSize: '0.75rem' }}>Hashrate (5s)</div>
+                            <div style={{ color: '#9ca3af', fontSize: '0.75rem' }}>Hashrate (1m)</div>
                             <div style={{ fontSize: '1.25rem', fontWeight: '600', color: '#60a5fa' }}>
-                                {formatHashrate(miner.hashrate)}
+                                {formatHashrate(miner.hashrate1m)}
                             </div>
                             {/* Additional hashrate time ranges */}
-                            {(miner.hashrate1m != null || miner.hashrate15m != null || miner.hashrate24h != null) && (
+                            {(miner.hashrate != null || miner.hashrate15m != null || miner.hashrate24h != null) && (
                                 <div style={{ fontSize: '0.625rem', color: '#6b7280', marginTop: '0.25rem' }}>
-                                    {miner.hashrate1m != null && miner.hashrate1m > 0 && (
-                                        <div>1m: {formatHashrate(miner.hashrate1m)}</div>
+                                    {miner.hashrate != null && miner.hashrate > 0 && (
+                                        <div>5s: {formatHashrate(miner.hashrate)}</div>
                                     )}
                                     {miner.hashrate15m != null && miner.hashrate15m > 0 && (
                                         <div>15m: {formatHashrate(miner.hashrate15m)}</div>
