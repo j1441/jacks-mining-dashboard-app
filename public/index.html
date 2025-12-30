@@ -621,8 +621,9 @@
         function PriceGraphCard({ electricity, config }) {
             if (!electricity?.prices || electricity.prices.length === 0) return null;
 
-            const { prices, priceMode, subsidyApplied, currency, zoneName, zone, vatRate } = electricity;
-            const isNorgespris = priceMode === 'norgespris';
+            const { prices, currency, zoneName, zone, vatRate } = electricity;
+            // Use priceMode from config, not from electricity data
+            const isNorgespris = config.priceMode === 'norgespris';
             const currentHour = new Date().getHours();
             const vatText = vatRate === 0 ? '(uten MVA)' : `(inkl. ${(vatRate * 100).toFixed(0)}% MVA)`;
 
