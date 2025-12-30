@@ -1408,17 +1408,17 @@
                             <div style={{ position: 'relative', height: '350px', marginBottom: '2rem' }}>
                                 {/* Y-axis labels */}
                                 <div style={{ position: 'absolute', left: 0, top: 0, bottom: '30px', display: 'flex', flexDirection: 'column', justifyContent: 'space-between', fontSize: '0.75rem', color: '#9ca3af', paddingRight: '0.5rem' }}>
-                                    <div>{maxValue.toFixed(1)}</div>
-                                    <div>{(minValue + valueRange * 0.75).toFixed(1)}</div>
-                                    <div>{(minValue + valueRange * 0.5).toFixed(1)}</div>
-                                    <div>{(minValue + valueRange * 0.25).toFixed(1)}</div>
-                                    <div>{minValue.toFixed(1)}</div>
+                                    <div>{rawMaxValue.toFixed(1)}</div>
+                                    <div>{(rawMinValue + rawRange * 0.75).toFixed(1)}</div>
+                                    <div>{(rawMinValue + rawRange * 0.5).toFixed(1)}</div>
+                                    <div>{(rawMinValue + rawRange * 0.25).toFixed(1)}</div>
+                                    <div>{rawMinValue.toFixed(1)}</div>
                                 </div>
 
                                 {/* Chart area */}
                                 <div
                                     id="chart-container"
-                                    style={{ marginLeft: '3.5rem', height: 'calc(100% - 30px)', position: 'relative', border: '1px solid rgba(255, 255, 255, 0.1)', borderRadius: '8px', padding: '1rem' }}
+                                    style={{ marginLeft: '3.5rem', height: 'calc(100% - 30px)', position: 'relative', border: '1px solid rgba(255, 255, 255, 0.1)', borderRadius: '8px', padding: '1rem', overflow: 'hidden' }}
                                     onMouseMove={(e) => {
                                         setMousePos({ x: e.clientX, y: e.clientY });
                                     }}
@@ -1432,7 +1432,7 @@
                                     </div>
 
                                     {/* Line chart */}
-                                    <svg style={{ width: '100%', height: '100%', position: 'absolute', inset: '1rem' }} viewBox="0 0 100 100" preserveAspectRatio="none">
+                                    <svg style={{ width: 'calc(100% - 2rem)', height: 'calc(100% - 2rem)', position: 'absolute', top: '1rem', left: '1rem' }} viewBox="0 0 100 100" preserveAspectRatio="none">
                                         {Object.entries(displayData).map(([minerKey, entries], idx) => {
                                             if (!entries || entries.length === 0) return null;
 
@@ -1505,9 +1505,8 @@
                                     {hoveredPoint && (
                                         <div style={{
                                             position: 'fixed',
-                                            left: `${mousePos.x}px`,
-                                            top: `${mousePos.y}px`,
-                                            transform: 'translate(10px, -50%)',
+                                            left: `${mousePos.x + 15}px`,
+                                            top: `${mousePos.y - 10}px`,
                                             background: 'rgba(0, 0, 0, 0.95)',
                                             border: `2px solid ${hoveredPoint.color}`,
                                             borderRadius: '8px',
@@ -1572,13 +1571,13 @@
                                 <div>
                                     <div style={{ color: '#9ca3af', fontSize: '0.75rem' }}>Maximum</div>
                                     <div style={{ fontWeight: '600', color: '#f87171' }}>
-                                        {maxValue.toFixed(2)} {chartUnit}
+                                        {rawMaxValue.toFixed(2)} {chartUnit}
                                     </div>
                                 </div>
                                 <div>
                                     <div style={{ color: '#9ca3af', fontSize: '0.75rem' }}>Minimum</div>
                                     <div style={{ fontWeight: '600', color: '#4ade80' }}>
-                                        {minValue.toFixed(2)} {chartUnit}
+                                        {rawMinValue.toFixed(2)} {chartUnit}
                                     </div>
                                 </div>
                                 <div>
