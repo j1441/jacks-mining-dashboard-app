@@ -807,6 +807,164 @@ async function fetchBraiinsHTTPApi(ip) {
 }
 
 // ============================================================================
+// Braiins OS Public REST API Functions
+// ============================================================================
+
+/**
+ * Authenticate with Braiins OS Public REST API
+ * Returns an auth token for subsequent requests
+ */
+async function braiinsRestAuth(ip, username = 'root', password = '') {
+  return new Promise((resolve, reject) => {
+    const postData = JSON.stringify({ username, password });
+
+    const options = {
+      hostname: ip,
+      port: 80,
+      path: '/api/v1/auth/login',
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Content-Length': Buffer.byteLength(postData)
+      },
+      timeout: 10000
+    };
+
+    const req = http.request(options, (res) => {
+      let data = '';
+      res.on('data', chunk => data += chunk);
+      res.on('end', () => {
+        try {
+          const parsed = JSON.parse(data);
+          if (parsed.token) {
+            console.log('Braiins REST API auth successful');
+            resolve(parsed.token);
+          } else {
+            console.log('No token in auth response:', data);
+            resolve(null);
+          }
+        } catch (err) {
+          console.error('Failed to parse REST auth response:', err.message);
+          resolve(null);
+        }
+      });
+    });
+
+    req.on('error', (err) => {
+      console.error('REST auth error:', err.message);
+      resolve(null);
+    });
+
+    req.on('timeout', () => {
+      req.destroy();
+      console.error('REST auth timeout');
+      resolve(null);
+    });
+
+    req.write(postData);
+    req.end();
+  });
+}
+
+/**
+ * Fetch data from Braiins OS Public REST API endpoint
+ */
+async function braiinsRestFetch(ip, endpoint, token = null) {
+  return new Promise((resolve, reject) => {
+    const headers = {
+      'Content-Type': 'application/json'
+    };
+
+    if (token) {
+      headers['Authorization'] = `Bearer ${token}`;
+    }
+
+    const options = {
+      hostname: ip,
+      port: 80,
+      path: endpoint,
+      method: 'GET',
+      headers,
+      timeout: 10000
+    };
+
+    const req = http.request(options, (res) => {
+      let data = '';
+      res.on('data', chunk => data += chunk);
+      res.on('end', () => {
+        try {
+          const parsed = JSON.parse(data);
+          resolve(parsed);
+        } catch (err) {
+          console.error(`Failed to parse REST response from ${endpoint}:`, err.message);
+          resolve(null);
+        }
+      });
+    });
+
+    req.on('error', (err) => {
+      console.error(`REST fetch error for ${endpoint}:`, err.message);
+      resolve(null);
+    });
+
+    req.on('timeout', () => {
+      req.destroy();
+      console.error(`REST fetch timeout for ${endpoint}`);
+      resolve(null);
+    });
+
+    req.end();
+  });
+}
+
+/**
+ * Fetch all available stats from Braiins OS Public REST API
+ * Returns comprehensive debug data
+ */
+async function fetchBraiinsRestApiStats(ip) {
+  try {
+    // Try to authenticate first
+    const token = await braiinsRestAuth(ip);
+
+    // Fetch from all documented endpoints (even without auth, some may work)
+    const [
+      minerStats,
+      hashboards,
+      coolingState,
+      errors,
+      pools,
+      performanceProfiles,
+      tunerState,
+      minerDetails
+    ] = await Promise.all([
+      braiinsRestFetch(ip, '/api/v1/miner/stats', token),
+      braiinsRestFetch(ip, '/api/v1/miner/hw/hashboards', token),
+      braiinsRestFetch(ip, '/api/v1/cooling/state', token),
+      braiinsRestFetch(ip, '/api/v1/miner/errors', token),
+      braiinsRestFetch(ip, '/api/v1/pools/', token),
+      braiinsRestFetch(ip, '/api/v1/performance/target-profiles', token),
+      braiinsRestFetch(ip, '/api/v1/performance/tuner-state', token),
+      braiinsRestFetch(ip, '/api/v1/miner/details', token)
+    ]);
+
+    return {
+      authenticated: !!token,
+      minerStats,
+      hashboards,
+      coolingState,
+      errors,
+      pools,
+      performanceProfiles,
+      tunerState,
+      minerDetails
+    };
+  } catch (err) {
+    console.error('Error fetching REST API stats:', err.message);
+    return null;
+  }
+}
+
+// ============================================================================
 // External API Functions
 // ============================================================================
 
@@ -1265,14 +1423,34 @@ async function getMinerStats(ip, config = {}) {
       }
     }
     
-    // Try to get devs data too - sometimes has temperature info
+    // Try to get all BOSminer data for debug stats
     let devs = null;
+    let tempsCmd = null;
+    let fansCmd = null;
+    let devdetailsCmd = null;
+    let tunerstatusCmd = null;
+    let restApiData = null;
+
     try {
-      devs = await sendCGMinerCommand(ip, { command: 'devs' });
+      // Fetch all BOSminer commands in parallel
+      [devs, tempsCmd, fansCmd, devdetailsCmd, tunerstatusCmd] = await Promise.all([
+        sendCGMinerCommand(ip, { command: 'devs' }).catch(e => { console.log('devs error:', e.message); return null; }),
+        sendCGMinerCommand(ip, { command: 'temps' }).catch(e => { console.log('temps error:', e.message); return null; }),
+        sendCGMinerCommand(ip, { command: 'fans' }).catch(e => { console.log('fans error:', e.message); return null; }),
+        sendCGMinerCommand(ip, { command: 'devdetails' }).catch(e => { console.log('devdetails error:', e.message); return null; }),
+        sendCGMinerCommand(ip, { command: 'tunerstatus' }).catch(e => { console.log('tunerstatus error:', e.message); return null; })
+      ]);
     } catch (e) {
-      console.log('devs command not available:', e.message);
+      console.log('Error fetching extended BOSminer commands:', e.message);
     }
-    
+
+    // Try to fetch REST API data
+    try {
+      restApiData = await fetchBraiinsRestApiStats(ip);
+    } catch (e) {
+      console.log('REST API not available:', e.message);
+    }
+
     const [summary, stats, pools] = await Promise.all([
       sendCGMinerCommand(ip, { command: 'summary' }),
       sendCGMinerCommand(ip, { command: 'stats' }),
@@ -1709,8 +1887,9 @@ async function getMinerStats(ip, config = {}) {
       // Efficiency metrics
       efficiency,
       
-      // Debug info (remove in production)
+      // Debug info - all available API data
       _debug: {
+        // GraphQL API
         graphqlAvailable: graphqlData?.data ? true : false,
         graphqlRootFields: graphqlData?._availableFields || [],
         graphqlBosminerFields: graphqlData?._bosminerFields || [],
@@ -1718,12 +1897,32 @@ async function getMinerStats(ip, config = {}) {
         graphqlTemps: graphqlData?.data?.temperatures || graphqlData?.data?.bosminer?.hashChains || [],
         graphqlFans: graphqlData?.data?.fans || graphqlData?.data?.bosminer?.fans || [],
         graphqlRawData: graphqlData?.data ? JSON.stringify(graphqlData.data).substring(0, 500) : null,
+
+        // HTTP API
         httpApiAvailable: httpApiData ? true : false,
+
+        // BOSminer Commands
+        bosminer: {
+          summary: summaryData,
+          stats: stats,
+          pools: pools,
+          devs: devs,
+          temps: tempsCmd,
+          fans: fansCmd,
+          devdetails: devdetailsCmd,
+          tunerstatus: tunerstatusCmd
+        },
+
+        // REST API
+        restApiAvailable: restApiData?.authenticated || false,
+        restApi: restApiData,
+
+        // Legacy debug fields
         statsEntryCount: stats.STATS?.length || 0,
         allNumericFields: Object.entries(allStatsData)
           .filter(([k, v]) => typeof v === 'number')
           .map(([k, v]) => `${k}=${v}`)
-          .slice(0, 30), // Limit to first 30
+          .slice(0, 30),
         devsNumericFields: Object.entries(devsData)
           .filter(([k, v]) => typeof v === 'number')
           .map(([k, v]) => `${k}=${v}`)
