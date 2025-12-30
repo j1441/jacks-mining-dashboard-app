@@ -1011,10 +1011,21 @@
                     {/* Main Stats */}
                     <div className="grid grid-cols-2" style={{ gap: '1rem', marginBottom: '1rem' }}>
                         <div>
-                            <div style={{ color: '#9ca3af', fontSize: '0.75rem' }}>Hashrate</div>
+                            <div style={{ color: '#9ca3af', fontSize: '0.75rem' }}>Hashrate (5s)</div>
                             <div style={{ fontSize: '1.25rem', fontWeight: '600', color: '#60a5fa' }}>
                                 {formatHashrate(miner.hashrate)}
                             </div>
+                            {/* Additional hashrate time ranges */}
+                            {(miner.hashrateAv != null || miner.hashrate30m != null) && (
+                                <div style={{ fontSize: '0.625rem', color: '#6b7280', marginTop: '0.25rem' }}>
+                                    {miner.hashrateAv != null && (
+                                        <div>Avg: {formatHashrate(miner.hashrateAv)}</div>
+                                    )}
+                                    {miner.hashrate30m != null && (
+                                        <div>30m: {formatHashrate(miner.hashrate30m)}</div>
+                                    )}
+                                </div>
+                            )}
                         </div>
                         <div>
                             <div style={{ color: '#9ca3af', fontSize: '0.75rem' }}>Temperature</div>
@@ -1030,6 +1041,12 @@
                             {miner.efficiency?.dailyKWh && (
                                 <div style={{ fontSize: '0.625rem', color: '#6b7280' }}>
                                     {miner.efficiency.dailyKWh.toFixed(1)} kWh/dag
+                                </div>
+                            )}
+                            {/* W/TH Efficiency */}
+                            {miner.efficiencyWPerTH != null && (
+                                <div style={{ fontSize: '0.625rem', color: '#a78bfa', fontWeight: '600' }}>
+                                    {miner.efficiencyWPerTH.toFixed(1)} W/TH
                                 </div>
                             )}
                         </div>

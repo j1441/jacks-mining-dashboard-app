@@ -1357,9 +1357,14 @@ async function getMinerStats(ip, config = {}) {
     
     const poolData = pools.POOLS?.[0] || {};
 
-    // Calculate hashrate in TH/s
+    // Calculate hashrate in TH/s - extract all available time ranges
     const ghs5s = summaryData['GHS 5s'] || (summaryData['MHS 5s'] ? summaryData['MHS 5s'] / 1000 : 0);
+    const ghsAv = summaryData['GHS av'] || 0;
+    const ghs30m = summaryData['GHS 30m'] || 0;
+
     const hashrate = ghs5s / 1000;
+    const hashrateAv = ghsAv / 1000;
+    const hashrate30m = ghs30m / 1000;
 
     // Extract temperatures - prefer GraphQL data, fall back to CGMiner
     let temps = { board1: null, board2: null, board3: null, chip: null };
@@ -1636,6 +1641,9 @@ async function getMinerStats(ip, config = {}) {
     return {
       // Basic stats
       hashrate,
+      hashrateAv,
+      hashrate30m,
+      efficiencyWPerTH: power / hashrate, // W/TH efficiency
       temperature: temps.chip,
       powerDraw: power,
       uptime: summaryData.Elapsed || 0,
