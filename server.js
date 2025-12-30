@@ -1536,13 +1536,19 @@ async function getMinerStats(ip, config = {}) {
     const poolData = pools.POOLS?.[0] || {};
 
     // Calculate hashrate in TH/s - extract all available time ranges
-    const ghs5s = summaryData['GHS 5s'] || (summaryData['MHS 5s'] ? summaryData['MHS 5s'] / 1000 : 0);
-    const ghsAv = summaryData['GHS av'] || 0;
-    const ghs30m = summaryData['GHS 30m'] || 0;
+    // Braiins OS uses MHS (megahash) format, not GHS
+    const mhs5s = summaryData['MHS 5s'] || 0;
+    const mhs1m = summaryData['MHS 1m'] || 0;
+    const mhs15m = summaryData['MHS 15m'] || 0;
+    const mhs24h = summaryData['MHS 24h'] || 0;
+    const mhsAv = summaryData['MHS av'] || 0;
 
-    const hashrate = ghs5s / 1000;
-    const hashrateAv = ghsAv / 1000;
-    const hashrate30m = ghs30m / 1000;
+    // Convert MHS to TH/s (divide by 1,000,000)
+    const hashrate = mhs5s / 1000000;
+    const hashrate1m = mhs1m / 1000000;
+    const hashrate15m = mhs15m / 1000000;
+    const hashrate24h = mhs24h / 1000000;
+    const hashrateAv = mhsAv / 1000000;
 
     // Extract temperatures - prefer GraphQL data, fall back to CGMiner
     let temps = { board1: null, board2: null, board3: null, chip: null };
@@ -1753,13 +1759,53 @@ async function getMinerStats(ip, config = {}) {
       if (httpApiData.fan2) fans.speed2 = httpApiData.fan2;
     }
     
+    // Try TEMPS command from BOSminer (most reliable for newer Braiins OS)
+    if (tempsCmd?.TEMPS && Array.isArray(tempsCmd.TEMPS)) {
+      console.log('=== PROCESSING TEMPS COMMAND ===');
+      console.log('TEMPS data:', JSON.stringify(tempsCmd.TEMPS));
+
+      const tempBoards = [];
+      const tempChips = [];
+
+      tempsCmd.TEMPS.forEach((tempEntry, idx) => {
+        if (tempEntry.Board !== undefined && tempEntry.Board !== null) {
+          temps[`board${idx + 1}`] = tempEntry.Board;
+          tempBoards.push(tempEntry.Board);
+        }
+        if (tempEntry.Chip !== undefined && tempEntry.Chip !== null) {
+          tempChips.push(tempEntry.Chip);
+        }
+      });
+
+      // Set chip temp to max of all chip temps
+      if (tempChips.length > 0) {
+        temps.chip = Math.max(...tempChips);
+      }
+
+      console.log('Extracted from TEMPS command - temps:', temps);
+    }
+
+    // Try FANS command from BOSminer (most reliable for newer Braiins OS)
+    if (fansCmd?.FANS && Array.isArray(fansCmd.FANS)) {
+      console.log('=== PROCESSING FANS COMMAND ===');
+      console.log('FANS data:', JSON.stringify(fansCmd.FANS));
+
+      fansCmd.FANS.forEach((fanEntry, idx) => {
+        if (fanEntry.RPM !== undefined && fanEntry.RPM !== null) {
+          fans[`speed${idx + 1}`] = fanEntry.RPM;
+        }
+      });
+
+      console.log('Extracted from FANS command - fans:', fans);
+    }
+
     // Fall back to CGMiner stats/devs data if GraphQL/HTTP API didn't provide temps
     if (temps.chip === null || temps.chip === 0) {
       console.log('=== FALLING BACK TO CGMINER DATA ===');
       temps = extractTemperatures(statsData, devsData, allStatsData);
       fans = extractFanSpeeds(statsData, devsData, allStatsData);
     }
-    
+
     console.log('Final temperatures:', temps);
     console.log('Final fans:', fans);
 
@@ -1819,16 +1865,18 @@ async function getMinerStats(ip, config = {}) {
     return {
       // Basic stats
       hashrate,
+      hashrate1m,
+      hashrate15m,
+      hashrate24h,
       hashrateAv,
-      hashrate30m,
       efficiencyWPerTH: power / hashrate, // W/TH efficiency
       temperature: temps.chip,
       powerDraw: power,
       uptime: summaryData.Elapsed || 0,
       boards: [
-        { temp: temps.board1 },
-        { temp: temps.board2 },
-        { temp: temps.board3 }
+        { temp: temps.board1, chipTemp: tempsCmd?.TEMPS?.[0]?.Chip || null },
+        { temp: temps.board2, chipTemp: tempsCmd?.TEMPS?.[1]?.Chip || null },
+        { temp: temps.board3, chipTemp: tempsCmd?.TEMPS?.[2]?.Chip || null }
       ],
       fans: {
         speed1: fans.speed1,

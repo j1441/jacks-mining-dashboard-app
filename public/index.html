@@ -1144,13 +1144,16 @@
                                 {formatHashrate(miner.hashrate)}
                             </div>
                             {/* Additional hashrate time ranges */}
-                            {(miner.hashrateAv != null || miner.hashrate30m != null) && (
+                            {(miner.hashrate1m != null || miner.hashrate15m != null || miner.hashrate24h != null) && (
                                 <div style={{ fontSize: '0.625rem', color: '#6b7280', marginTop: '0.25rem' }}>
-                                    {miner.hashrateAv != null && (
-                                        <div>Avg: {formatHashrate(miner.hashrateAv)}</div>
+                                    {miner.hashrate1m != null && miner.hashrate1m > 0 && (
+                                        <div>1m: {formatHashrate(miner.hashrate1m)}</div>
                                     )}
-                                    {miner.hashrate30m != null && (
-                                        <div>30m: {formatHashrate(miner.hashrate30m)}</div>
+                                    {miner.hashrate15m != null && miner.hashrate15m > 0 && (
+                                        <div>15m: {formatHashrate(miner.hashrate15m)}</div>
+                                    )}
+                                    {miner.hashrate24h != null && miner.hashrate24h > 0 && (
+                                        <div>24h: {formatHashrate(miner.hashrate24h)}</div>
                                     )}
                                 </div>
                             )}
@@ -1160,6 +1163,20 @@
                             <div style={{ fontSize: '1.25rem', fontWeight: '600', color: '#fb923c' }}>
                                 {formatTemp(miner.temperature)}
                             </div>
+                            {/* Per-board temperatures */}
+                            {miner.boards && miner.boards.some(b => b.temp != null || b.chipTemp != null) && (
+                                <div style={{ fontSize: '0.625rem', color: '#6b7280', marginTop: '0.25rem' }}>
+                                    {miner.boards.map((board, idx) => {
+                                        if (!board.temp && !board.chipTemp) return null;
+                                        return (
+                                            <div key={idx}>
+                                                Board {idx + 1}: {formatTemp(board.temp)}
+                                                {board.chipTemp && ` / Chip: ${formatTemp(board.chipTemp)}`}
+                                            </div>
+                                        );
+                                    })}
+                                </div>
+                            )}
                         </div>
                         <div>
                             <div style={{ color: '#9ca3af', fontSize: '0.75rem' }}>Power Draw</div>
@@ -1202,6 +1219,25 @@
                                         {miner.efficiency.effectiveSCOP?.toFixed(1)}
                                     </div>
                                 </div>
+                            </div>
+                        </div>
+                    )}
+
+                    {/* Fan Speeds */}
+                    {miner.fans && Object.values(miner.fans).some(rpm => rpm != null && rpm > 0) && (
+                        <div style={{ marginBottom: '1rem', padding: '0.75rem', background: 'rgba(255,255,255,0.05)', borderRadius: '0.5rem' }}>
+                            <div style={{ fontSize: '0.875rem', fontWeight: '600', marginBottom: '0.5rem', color: '#22d3ee' }}>Fan Speeds (RPM)</div>
+                            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '0.5rem', fontSize: '0.75rem' }}>
+                                {[1, 2, 3, 4].map(num => {
+                                    const rpm = miner.fans[`speed${num}`];
+                                    if (!rpm || rpm === 0) return null;
+                                    return (
+                                        <div key={num} style={{ textAlign: 'center' }}>
+                                            <div style={{ color: '#9ca3af' }}>Fan {num}</div>
+                                            <div style={{ fontWeight: '600', color: '#60a5fa' }}>{rpm.toLocaleString()}</div>
+                                        </div>
+                                    );
+                                })}
                             </div>
                         </div>
                     )}
