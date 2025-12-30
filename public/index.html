@@ -1098,9 +1098,12 @@
         function HistoricalChartsCard({ miners }) {
             const [historyData, setHistoryData] = useState([]);
             const [selectedMiner, setSelectedMiner] = useState('all');
+            const [aggregateMode, setAggregateMode] = useState('separate'); // 'separate' or 'sum'
             const [timeRange, setTimeRange] = useState(7);
             const [loading, setLoading] = useState(true);
             const [chartType, setChartType] = useState('hashrate');
+            const [hoveredPoint, setHoveredPoint] = useState(null);
+            const [mousePos, setMousePos] = useState({ x: 0, y: 0 });
 
             useEffect(() => {
                 fetchHistoryData();
@@ -1111,7 +1114,7 @@
             const fetchHistoryData = async () => {
                 try {
                     setLoading(true);
-                    const minerParam = selectedMiner !== 'all' ? `&minerIp=${selectedMiner}` : '';
+                    const minerParam = selectedMiner !== 'all' && selectedMiner !== 'sum' ? `&minerIp=${selectedMiner}` : '';
                     const response = await fetch(`/api/history?days=${timeRange}${minerParam}`);
                     const data = await response.json();
                     setHistoryData(data.entries || []);
@@ -1123,21 +1126,6 @@
             };
 
             if (!miners || miners.length === 0) return null;
-
-            // Group data by miner and time
-            const processedData = historyData.reduce((acc, entry) => {
-                const minerKey = entry.minerIp || 'unknown';
-                if (!acc[minerKey]) {
-                    acc[minerKey] = [];
-                }
-                acc[minerKey].push(entry);
-                return acc;
-            }, {});
-
-            // Get data for selected miner or all miners
-            const displayData = selectedMiner === 'all'
-                ? Object.values(processedData).flat().sort((a, b) => new Date(a.timestamp) - new Date(b.timestamp))
-                : (processedData[selectedMiner] || []).sort((a, b) => new Date(a.timestamp) - new Date(b.timestamp));
 
             // Calculate chart data
             const getChartValue = (entry) => {
@@ -1155,12 +1143,107 @@
                 power: 'Power Draw (W)'
             }[chartType];
 
-            const maxValue = displayData.length > 0
-                ? Math.max(...displayData.map(getChartValue))
-                : 100;
-            const minValue = displayData.length > 0
-                ? Math.min(...displayData.map(getChartValue))
-                : 0;
+            const chartUnit = {
+                hashrate: 'TH/s',
+                temperature: '°C',
+                power: 'W'
+            }[chartType];
+
+            // Group data by miner and timestamp
+            const processedData = historyData.reduce((acc, entry) => {
+                const minerKey = entry.minerIp || 'unknown';
+                if (!acc[minerKey]) {
+                    acc[minerKey] = [];
+                }
+                acc[minerKey].push(entry);
+                return acc;
+            }, {});
+
+            // Sort each miner's data by timestamp
+            Object.keys(processedData).forEach(minerKey => {
+                processedData[minerKey].sort((a, b) => new Date(a.timestamp) - new Date(b.timestamp));
+            });
+
+            // Prepare display data based on selection
+            let displayData = [];
+            let allTimestamps = [];
+
+            if (selectedMiner === 'all' && aggregateMode === 'separate') {
+                // Show all miners separately - use all data
+                displayData = processedData;
+                allTimestamps = [...new Set(historyData.map(e => e.timestamp))].sort();
+            } else if (selectedMiner === 'all' && aggregateMode === 'sum') {
+                // Sum all miners' values at each timestamp
+                const timestampMap = {};
+                historyData.forEach(entry => {
+                    const ts = entry.timestamp;
+                    if (!timestampMap[ts]) {
+                        timestampMap[ts] = { timestamp: ts, sum: 0, count: 0, entries: [] };
+                    }
+                    timestampMap[ts].sum += getChartValue(entry);
+                    timestampMap[ts].count += 1;
+                    timestampMap[ts].entries.push(entry);
+                });
+
+                displayData = {
+                    'sum': Object.values(timestampMap).map(t => ({
+                        timestamp: t.timestamp,
+                        hashrate: chartType === 'hashrate' ? t.sum : 0,
+                        temperature: chartType === 'temperature' ? t.sum / t.count : 0, // Average for temperature
+                        power: chartType === 'power' ? t.sum : 0,
+                        minerIp: 'sum',
+                        minerName: `Total (${t.count} miners)`,
+                        entries: t.entries
+                    })).sort((a, b) => new Date(a.timestamp) - new Date(b.timestamp))
+                };
+                allTimestamps = Object.keys(timestampMap).sort();
+            } else if (selectedMiner !== 'all') {
+                // Show single selected miner
+                displayData = { [selectedMiner]: processedData[selectedMiner] || [] };
+                allTimestamps = (processedData[selectedMiner] || []).map(e => e.timestamp);
+            }
+
+            // Calculate global min/max across ALL data to be displayed
+            let allValues = [];
+            Object.values(displayData).forEach(entries => {
+                entries.forEach(entry => {
+                    allValues.push(getChartValue(entry));
+                });
+            });
+
+            const maxValue = allValues.length > 0 ? Math.max(...allValues) : 100;
+            const minValue = allValues.length > 0 ? Math.min(...allValues) : 0;
+            const valueRange = maxValue - minValue || 1;
+
+            // Format timestamp for display
+            const formatTimestamp = (timestamp, index, total) => {
+                const date = new Date(timestamp);
+                if (timeRange === 1) {
+                    // For 24 hours, show hour
+                    return date.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' });
+                } else {
+                    // For longer periods, show date
+                    return date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+                }
+            };
+
+            // Get X-axis labels based on data range
+            const getXAxisLabels = () => {
+                if (allTimestamps.length === 0) return [];
+                const labels = [];
+                const labelCount = Math.min(6, allTimestamps.length);
+
+                for (let i = 0; i < labelCount; i++) {
+                    const idx = Math.floor((i / (labelCount - 1)) * (allTimestamps.length - 1));
+                    labels.push({
+                        position: (i / (labelCount - 1)) * 100,
+                        label: formatTimestamp(allTimestamps[idx], idx, allTimestamps.length)
+                    });
+                }
+                return labels;
+            };
+
+            const xAxisLabels = getXAxisLabels();
 
             return (
                 <div className="stat-card" style={{ gridColumn: '1 / -1' }}>
@@ -1208,6 +1291,25 @@
                                 ))}
                             </select>
 
+                            {/* Aggregate Mode (only show when "All Miners" selected) */}
+                            {selectedMiner === 'all' && (
+                                <select
+                                    value={aggregateMode}
+                                    onChange={(e) => setAggregateMode(e.target.value)}
+                                    style={{
+                                        background: 'rgba(255, 255, 255, 0.1)',
+                                        color: '#e0e0e0',
+                                        border: '1px solid rgba(255, 255, 255, 0.2)',
+                                        borderRadius: '6px',
+                                        padding: '0.5rem',
+                                        fontSize: '0.875rem'
+                                    }}
+                                >
+                                    <option value="separate">Show Separately</option>
+                                    <option value="sum">Show Sum/Total</option>
+                                </select>
+                            )}
+
                             {/* Time Range Selector */}
                             <select
                                 value={timeRange}
@@ -1235,7 +1337,7 @@
                         </div>
                     )}
 
-                    {!loading && displayData.length === 0 && (
+                    {!loading && allTimestamps.length === 0 && (
                         <div style={{ textAlign: 'center', padding: '3rem', color: '#9ca3af' }}>
                             <div style={{ fontSize: '3rem', marginBottom: '1rem' }}>📊</div>
                             <div>No historical data available yet.</div>
@@ -1245,124 +1347,182 @@
                         </div>
                     )}
 
-                    {!loading && displayData.length > 0 && (
+                    {!loading && allTimestamps.length > 0 && (
                         <>
                             {/* Chart */}
-                            <div style={{ position: 'relative', height: '300px', marginBottom: '1rem' }}>
+                            <div style={{ position: 'relative', height: '350px', marginBottom: '2rem' }}>
                                 {/* Y-axis labels */}
-                                <div style={{ position: 'absolute', left: 0, top: 0, bottom: 0, display: 'flex', flexDirection: 'column', justifyContent: 'space-between', fontSize: '0.75rem', color: '#9ca3af', paddingRight: '0.5rem' }}>
+                                <div style={{ position: 'absolute', left: 0, top: 0, bottom: '30px', display: 'flex', flexDirection: 'column', justifyContent: 'space-between', fontSize: '0.75rem', color: '#9ca3af', paddingRight: '0.5rem' }}>
                                     <div>{maxValue.toFixed(1)}</div>
-                                    <div>{((maxValue + minValue) / 2).toFixed(1)}</div>
+                                    <div>{(minValue + valueRange * 0.75).toFixed(1)}</div>
+                                    <div>{(minValue + valueRange * 0.5).toFixed(1)}</div>
+                                    <div>{(minValue + valueRange * 0.25).toFixed(1)}</div>
                                     <div>{minValue.toFixed(1)}</div>
                                 </div>
 
                                 {/* Chart area */}
-                                <div style={{ marginLeft: '3rem', height: '100%', position: 'relative', border: '1px solid rgba(255, 255, 255, 0.1)', borderRadius: '8px', padding: '1rem' }}>
+                                <div
+                                    style={{ marginLeft: '3.5rem', height: 'calc(100% - 30px)', position: 'relative', border: '1px solid rgba(255, 255, 255, 0.1)', borderRadius: '8px', padding: '1rem' }}
+                                    onMouseMove={(e) => {
+                                        const rect = e.currentTarget.getBoundingClientRect();
+                                        setMousePos({ x: e.clientX - rect.left, y: e.clientY - rect.top });
+                                    }}
+                                    onMouseLeave={() => setHoveredPoint(null)}
+                                >
                                     {/* Grid lines */}
-                                    <div style={{ position: 'absolute', inset: '1rem', display: 'flex', flexDirection: 'column', justifyContent: 'space-between' }}>
+                                    <div style={{ position: 'absolute', inset: '1rem', display: 'flex', flexDirection: 'column', justifyContent: 'space-between', pointerEvents: 'none' }}>
                                         {[0, 1, 2, 3, 4].map(i => (
                                             <div key={i} style={{ borderTop: '1px dashed rgba(255, 255, 255, 0.1)' }}></div>
                                         ))}
                                     </div>
 
                                     {/* Line chart */}
-                                    <svg style={{ width: '100%', height: '100%' }} preserveAspectRatio="none">
-                                        {selectedMiner === 'all' ? (
-                                            // Show multiple lines for all miners
-                                            Object.entries(processedData).map(([minerIp, entries], idx) => {
-                                                const colors = ['#3b82f6', '#10b981', '#f59e0b', '#ef4444', '#8b5cf6'];
-                                                const color = colors[idx % colors.length];
-                                                const sortedEntries = [...entries].sort((a, b) => new Date(a.timestamp) - new Date(b.timestamp));
+                                    <svg style={{ width: '100%', height: '100%', position: 'absolute', inset: '1rem' }}>
+                                        {Object.entries(displayData).map(([minerKey, entries], idx) => {
+                                            if (!entries || entries.length === 0) return null;
 
-                                                const points = sortedEntries.map((entry, i) => {
-                                                    const x = (i / (sortedEntries.length - 1 || 1)) * 100;
-                                                    const value = getChartValue(entry);
-                                                    const y = 100 - ((value - minValue) / (maxValue - minValue || 1)) * 100;
-                                                    return `${x},${y}`;
-                                                }).join(' ');
+                                            const colors = ['#3b82f6', '#10b981', '#f59e0b', '#ef4444', '#8b5cf6'];
+                                            const color = minerKey === 'sum' ? '#3b82f6' : colors[idx % colors.length];
 
-                                                return (
+                                            const points = entries.map((entry, i) => {
+                                                const x = (i / (entries.length - 1 || 1)) * 100;
+                                                const value = getChartValue(entry);
+                                                const y = 100 - ((value - minValue) / valueRange) * 100;
+                                                return { x, y, entry, i };
+                                            });
+
+                                            const pointsStr = points.map(p => `${p.x},${p.y}`).join(' ');
+
+                                            return (
+                                                <g key={minerKey}>
                                                     <polyline
-                                                        key={minerIp}
-                                                        points={points}
+                                                        points={pointsStr}
                                                         fill="none"
                                                         stroke={color}
                                                         strokeWidth="2"
                                                         vectorEffect="non-scaling-stroke"
                                                     />
-                                                );
-                                            })
-                                        ) : (
-                                            // Show single line for selected miner
-                                            (() => {
-                                                const points = displayData.map((entry, i) => {
-                                                    const x = (i / (displayData.length - 1 || 1)) * 100;
-                                                    const value = getChartValue(entry);
-                                                    const y = 100 - ((value - minValue) / (maxValue - minValue || 1)) * 100;
-                                                    return `${x},${y}`;
-                                                }).join(' ');
-
-                                                return (
-                                                    <polyline
-                                                        points={points}
-                                                        fill="none"
-                                                        stroke="#3b82f6"
-                                                        strokeWidth="2"
-                                                        vectorEffect="non-scaling-stroke"
-                                                    />
-                                                );
-                                            })()
-                                        )}
+                                                    {/* Invisible hover areas */}
+                                                    {points.map((point, i) => (
+                                                        <circle
+                                                            key={i}
+                                                            cx={`${point.x}%`}
+                                                            cy={`${point.y}%`}
+                                                            r="8"
+                                                            fill="transparent"
+                                                            style={{ cursor: 'pointer' }}
+                                                            onMouseEnter={() => setHoveredPoint({
+                                                                minerKey,
+                                                                entry: point.entry,
+                                                                x: point.x,
+                                                                y: point.y,
+                                                                color
+                                                            })}
+                                                        />
+                                                    ))}
+                                                </g>
+                                            );
+                                        })}
                                     </svg>
+
+                                    {/* Hover tooltip */}
+                                    {hoveredPoint && (
+                                        <div style={{
+                                            position: 'absolute',
+                                            left: `${hoveredPoint.x}%`,
+                                            top: `${hoveredPoint.y}%`,
+                                            transform: 'translate(-50%, -120%)',
+                                            background: 'rgba(0, 0, 0, 0.9)',
+                                            border: `2px solid ${hoveredPoint.color}`,
+                                            borderRadius: '8px',
+                                            padding: '0.75rem',
+                                            fontSize: '0.75rem',
+                                            color: '#e0e0e0',
+                                            pointerEvents: 'none',
+                                            whiteSpace: 'nowrap',
+                                            zIndex: 1000,
+                                            minWidth: '150px'
+                                        }}>
+                                            <div style={{ fontWeight: 'bold', marginBottom: '0.25rem', color: hoveredPoint.color }}>
+                                                {hoveredPoint.entry.minerName || hoveredPoint.minerKey}
+                                            </div>
+                                            <div>{new Date(hoveredPoint.entry.timestamp).toLocaleString()}</div>
+                                            <div style={{ marginTop: '0.5rem', fontSize: '0.9rem', fontWeight: 'bold' }}>
+                                                {chartLabel}: {getChartValue(hoveredPoint.entry).toFixed(2)} {chartUnit}
+                                            </div>
+                                            {hoveredPoint.entry.entries && (
+                                                <div style={{ marginTop: '0.25rem', fontSize: '0.7rem', color: '#9ca3af' }}>
+                                                    {hoveredPoint.entry.entries.length} miners combined
+                                                </div>
+                                            )}
+                                        </div>
+                                    )}
+                                </div>
+
+                                {/* X-axis labels */}
+                                <div style={{ marginLeft: '3.5rem', height: '30px', position: 'relative', marginTop: '0.5rem' }}>
+                                    <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.75rem', color: '#9ca3af' }}>
+                                        {xAxisLabels.map((label, i) => (
+                                            <div key={i} style={{ position: 'absolute', left: `${label.position}%`, transform: 'translateX(-50%)' }}>
+                                                {label.label}
+                                            </div>
+                                        ))}
+                                    </div>
                                 </div>
                             </div>
 
                             {/* Stats */}
-                            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(150px, 1fr))', gap: '1rem', fontSize: '0.875rem' }}>
+                            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(150px, 1fr))', gap: '1rem', fontSize: '0.875rem', marginBottom: '1rem' }}>
                                 <div>
                                     <div style={{ color: '#9ca3af', fontSize: '0.75rem' }}>Current</div>
                                     <div style={{ fontWeight: '600', color: '#3b82f6' }}>
-                                        {displayData.length > 0 ? getChartValue(displayData[displayData.length - 1]).toFixed(2) : 'N/A'}
+                                        {allValues.length > 0 ? allValues[allValues.length - 1].toFixed(2) : 'N/A'} {chartUnit}
                                     </div>
                                 </div>
                                 <div>
                                     <div style={{ color: '#9ca3af', fontSize: '0.75rem' }}>Average</div>
                                     <div style={{ fontWeight: '600', color: '#9ca3af' }}>
-                                        {displayData.length > 0
-                                            ? (displayData.reduce((sum, e) => sum + getChartValue(e), 0) / displayData.length).toFixed(2)
-                                            : 'N/A'}
+                                        {allValues.length > 0
+                                            ? (allValues.reduce((sum, v) => sum + v, 0) / allValues.length).toFixed(2)
+                                            : 'N/A'} {chartUnit}
                                     </div>
                                 </div>
                                 <div>
                                     <div style={{ color: '#9ca3af', fontSize: '0.75rem' }}>Maximum</div>
                                     <div style={{ fontWeight: '600', color: '#f87171' }}>
-                                        {maxValue.toFixed(2)}
+                                        {maxValue.toFixed(2)} {chartUnit}
                                     </div>
                                 </div>
                                 <div>
                                     <div style={{ color: '#9ca3af', fontSize: '0.75rem' }}>Minimum</div>
                                     <div style={{ fontWeight: '600', color: '#4ade80' }}>
-                                        {minValue.toFixed(2)}
+                                        {minValue.toFixed(2)} {chartUnit}
                                     </div>
                                 </div>
                                 <div>
                                     <div style={{ color: '#9ca3af', fontSize: '0.75rem' }}>Data Points</div>
                                     <div style={{ fontWeight: '600', color: '#9ca3af' }}>
-                                        {displayData.length}
+                                        {allTimestamps.length}
+                                    </div>
+                                </div>
+                                <div>
+                                    <div style={{ color: '#9ca3af', fontSize: '0.75rem' }}>Time Range</div>
+                                    <div style={{ fontWeight: '600', color: '#9ca3af' }}>
+                                        {timeRange === 1 ? '24 hours' : `${timeRange} days`}
                                     </div>
                                 </div>
                             </div>
 
                             {/* Legend for multi-miner view */}
-                            {selectedMiner === 'all' && Object.keys(processedData).length > 1 && (
-                                <div style={{ marginTop: '1rem', display: 'flex', flexWrap: 'wrap', gap: '1rem', fontSize: '0.75rem' }}>
-                                    {Object.entries(processedData).map(([minerIp, entries], idx) => {
+                            {selectedMiner === 'all' && aggregateMode === 'separate' && Object.keys(displayData).length > 1 && (
+                                <div style={{ display: 'flex', flexWrap: 'wrap', gap: '1rem', fontSize: '0.75rem' }}>
+                                    {Object.entries(displayData).map(([minerKey, entries], idx) => {
                                         const colors = ['#3b82f6', '#10b981', '#f59e0b', '#ef4444', '#8b5cf6'];
                                         const color = colors[idx % colors.length];
-                                        const minerName = entries[0]?.minerName || minerIp;
+                                        const minerName = entries[0]?.minerName || minerKey;
                                         return (
-                                            <div key={minerIp} style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-                                                <div style={{ width: '16px', height: '3px', background: color }}></div>
+                                            <div key={minerKey} style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                                                <div style={{ width: '24px', height: '3px', background: color }}></div>
                                                 <span>{minerName}</span>
                                             </div>
                                         );
