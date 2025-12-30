@@ -1150,7 +1150,7 @@
                 power: 'W'
             }[chartType];
 
-            // Group data by miner and timestamp
+            // Group data by miner
             const processedData = historyData.reduce((acc, entry) => {
                 const minerKey = entry.minerIp || 'unknown';
                 if (!acc[minerKey]) {
@@ -1168,11 +1168,17 @@
             // Prepare display data based on selection
             let displayData = [];
             let allTimestamps = [];
+            let timestampToIndex = {};
 
             if (selectedMiner === 'all' && aggregateMode === 'separate') {
                 // Show all miners separately - use all data
                 displayData = processedData;
+                // Get all unique timestamps (they should be identical across miners if saved at same time)
                 allTimestamps = [...new Set(historyData.map(e => e.timestamp))].sort();
+                // Create lookup map for O(1) timestamp index lookup
+                allTimestamps.forEach((ts, idx) => {
+                    timestampToIndex[ts] = idx;
+                });
             } else if (selectedMiner === 'all' && aggregateMode === 'sum') {
                 // Sum all miners' values at each timestamp
                 const timestampMap = {};
@@ -1212,8 +1218,15 @@
                 });
             });
 
-            const maxValue = allValues.length > 0 ? Math.max(...allValues) : 100;
-            const minValue = allValues.length > 0 ? Math.min(...allValues) : 0;
+            // Calculate min/max with slight padding for better visualization
+            const rawMaxValue = allValues.length > 0 ? Math.max(...allValues) : 100;
+            const rawMinValue = allValues.length > 0 ? Math.min(...allValues) : 0;
+            const rawRange = rawMaxValue - rawMinValue || 1;
+
+            // Add 5% padding top and bottom for better readability
+            const padding = rawRange * 0.05;
+            const maxValue = rawMaxValue + padding;
+            const minValue = Math.max(0, rawMinValue - padding); // Don't go below 0
             const valueRange = maxValue - minValue || 1;
 
             // Format timestamp for display
@@ -1389,9 +1402,15 @@
                                                 // For multi-miner view, position based on global timeline
                                                 let x;
                                                 if (selectedMiner === 'all' && aggregateMode === 'separate') {
-                                                    // Find position in global timeline
-                                                    const timestampIndex = allTimestamps.indexOf(entry.timestamp);
-                                                    x = (timestampIndex / (allTimestamps.length - 1 || 1)) * 100;
+                                                    // Find position in global timeline using exact timestamp and lookup map
+                                                    const timestampIndex = timestampToIndex[entry.timestamp];
+                                                    if (timestampIndex !== undefined) {
+                                                        x = (timestampIndex / (allTimestamps.length - 1 || 1)) * 100;
+                                                    } else {
+                                                        // Fallback: shouldn't happen but just in case
+                                                        console.warn('Timestamp not found in index:', entry.timestamp, 'Available:', Object.keys(timestampToIndex).slice(0, 5));
+                                                        x = (i / (entries.length - 1 || 1)) * 100;
+                                                    }
                                                 } else {
                                                     // For single miner or sum, use entry index
                                                     x = (i / (entries.length - 1 || 1)) * 100;
