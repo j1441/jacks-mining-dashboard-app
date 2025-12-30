@@ -1185,11 +1185,18 @@
             let allTimestamps = [];
             let timestampToIndex = {};
 
+            // Calculate time range boundaries based on selected timeRange
+            const now = new Date();
+            const startTime = new Date(now.getTime() - (timeRange * 24 * 60 * 60 * 1000));
+            const endTime = now;
+
             if (selectedMiner === 'all' && aggregateMode === 'separate') {
                 // Show all miners separately - use all data
                 displayData = processedData;
                 // Get all unique timestamps (they should be identical across miners if saved at same time)
-                allTimestamps = [...new Set(historyData.map(e => e.timestamp))].sort();
+                // Sort them chronologically
+                const uniqueTimestamps = [...new Set(historyData.map(e => e.timestamp))].sort((a, b) => new Date(a) - new Date(b));
+                allTimestamps = uniqueTimestamps;
                 // Create lookup map for O(1) timestamp index lookup
                 allTimestamps.forEach((ts, idx) => {
                     timestampToIndex[ts] = idx;
@@ -1256,17 +1263,19 @@
                 }
             };
 
-            // Get X-axis labels based on data range
+            // Get X-axis labels based on selected time range (not just available data)
             const getXAxisLabels = () => {
-                if (allTimestamps.length === 0) return [];
                 const labels = [];
-                const labelCount = Math.min(6, allTimestamps.length);
+                const labelCount = 6;
 
                 for (let i = 0; i < labelCount; i++) {
-                    const idx = Math.floor((i / (labelCount - 1)) * (allTimestamps.length - 1));
+                    const position = (i / (labelCount - 1)) * 100;
+                    const timeOffset = (i / (labelCount - 1)) * (endTime - startTime);
+                    const labelTime = new Date(startTime.getTime() + timeOffset);
+
                     labels.push({
-                        position: (i / (labelCount - 1)) * 100,
-                        label: formatTimestamp(allTimestamps[idx], idx, allTimestamps.length)
+                        position: position,
+                        label: formatTimestamp(labelTime.toISOString(), i, labelCount)
                     });
                 }
                 return labels;
@@ -1414,22 +1423,12 @@
                                             const color = minerKey === 'sum' ? '#3b82f6' : colors[idx % colors.length];
 
                                             const points = entries.map((entry, i) => {
-                                                // For multi-miner view, position based on global timeline
-                                                let x;
-                                                if (selectedMiner === 'all' && aggregateMode === 'separate') {
-                                                    // Find position in global timeline using exact timestamp and lookup map
-                                                    const timestampIndex = timestampToIndex[entry.timestamp];
-                                                    if (timestampIndex !== undefined) {
-                                                        x = (timestampIndex / (allTimestamps.length - 1 || 1)) * 100;
-                                                    } else {
-                                                        // Fallback: shouldn't happen but just in case
-                                                        console.warn('Timestamp not found in index:', entry.timestamp, 'Available:', Object.keys(timestampToIndex).slice(0, 5));
-                                                        x = (i / (entries.length - 1 || 1)) * 100;
-                                                    }
-                                                } else {
-                                                    // For single miner or sum, use entry index
-                                                    x = (i / (entries.length - 1 || 1)) * 100;
-                                                }
+                                                // Position based on actual timestamp within the full time range
+                                                const entryTime = new Date(entry.timestamp).getTime();
+                                                const totalTimeRange = endTime - startTime;
+                                                const timeFromStart = entryTime - startTime.getTime();
+                                                const x = (timeFromStart / totalTimeRange) * 100;
+
                                                 const value = getChartValue(entry);
                                                 const y = 100 - ((value - minValue) / valueRange) * 100;
                                                 return { x, y, entry, i };

@@ -417,26 +417,6 @@ mining-dashboard-app/
 - ReactDOM 18.2.0
 - Babel Standalone 7.23.5
 
----
-
-## Development Commands
-
-```bash
-# Install dependencies
-npm install
-
-# Start server (production)
-npm start
-
-# Start server (development)
-npm run dev
-
-# Docker build
-docker build -t mining-dashboard:1.2.11 .
-
-# Docker run
-docker run -d -p 3456:3456 -v $(pwd)/data:/data mining-dashboard:1.2.11
-```
 
 ---
 
