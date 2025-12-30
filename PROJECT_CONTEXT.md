@@ -3,7 +3,7 @@
 ## Overview
 A comprehensive web-based dashboard for monitoring and controlling Bitcoin Antminer miners running Braiins OS, specifically designed for home heating applications in Norway. The app tracks mining performance, electricity costs with Norwegian pricing (including state subsidies), and efficiency metrics comparing mining heat output vs traditional heat pumps.
 
-**Version:** 1.2.11
+**Version:** 1.2.17
 **Author:** j1441
 **License:** MIT
 **Platform:** Node.js/Express backend with React frontend (no build step - uses Babel standalone)
@@ -113,6 +113,31 @@ Each miner can be controlled independently:
   - Color-coded legend
   - Mode-specific information panels
 - Component: `PriceGraphCard` in index.html (lines 620-771)
+
+### 7. Historical Data Charts
+- **Interactive line charts** displaying historical trends over time
+- **Three chart types**:
+  - Hashrate (TH/s) - Mining performance over time
+  - Temperature (°C) - Thermal patterns and trends
+  - Power Draw (W) - Energy consumption history
+- **Multi-miner support**:
+  - View individual miner data
+  - View all miners separately (multi-colored lines)
+  - View aggregated sum/total (combined hashrate/power, averaged temperature)
+- **Time range selection**: 24 hours, 7 days, 14 days, or 30 days
+- **Features**:
+  - Unified Y-axis scaling for accurate comparison
+  - X-axis time graduations (hourly for 24h, daily for longer periods)
+  - Interactive hover tooltips showing exact values and timestamps
+  - Real-time statistics (current, average, max, min, data points)
+  - Color-coded legend for multi-miner view
+  - Auto-refresh every 60 seconds
+- **Data storage**:
+  - Hourly snapshots saved to `history.json`
+  - Retains 720 entries (30 days)
+  - Per-miner tracking with IP and name
+- Component: `HistoricalChartsCard` in index.html (lines 1097-1536)
+- API Endpoint: `GET /api/history?days=7&minerIp=192.168.1.100`
 
 ---
 
@@ -279,6 +304,20 @@ mining-dashboard-app/
   - Returns default config if not exists
 - `saveConfig()` - Lines 1789-1792
 
+#### Historical Data Management
+- `loadHistory()` - Lines 1815-1825
+  - Loads historical data from `history.json`
+  - Returns empty structure if file doesn't exist
+- `saveHistoryEntry(stats)` - Lines 1827-1854
+  - Saves hourly snapshot of miner stats
+  - Includes: timestamp, minerIp, minerName, hashrate, temperature, power, prices
+  - Maintains rolling 720-entry limit (30 days)
+  - Called hourly via WebSocket loop
+- API: `GET /api/history?days=7&minerIp=<ip>` - Lines 2128-2147
+  - Returns filtered historical entries
+  - Supports `days` parameter (default: 7)
+  - Optional `minerIp` filter for single-miner data
+
 ### Frontend (index.html)
 
 #### Components
@@ -294,31 +333,42 @@ mining-dashboard-app/
    - Interactive tooltips and price statistics
    - Current hour highlighting
 
-3. **AddMinerModal** (lines 773-943)
+3. **HistoricalChartsCard** (lines 1097-1536)
+   - Interactive line charts for hashrate, temperature, power
+   - Multi-miner support with separate or aggregated views
+   - Time range selection (24h, 7d, 14d, 30d)
+   - Unified Y-axis scaling across all miners
+   - X-axis time graduations (hourly/daily)
+   - Hover tooltips with exact values and timestamps
+   - Real-time statistics display
+   - Auto-refresh every 60 seconds
+   - Color-coded legend for multi-miner view
+
+4. **AddMinerModal** (lines ~773-943)
    - IP and name input
    - Connection test before adding
    - Error handling
 
-4. **MinerCard** (lines 945-1100)
+5. **MinerCard** (lines ~945-1100)
    - Individual miner display
    - Stats, efficiency, power profiles
    - Remove button
 
-5. **ElectricityCard** (lines 489-596)
+6. **ElectricityCard** (lines 489-596)
    - Shows spot prices, grid fees, total
    - Subsidy information display
    - Hourly price chart (simplified)
 
-6. **EfficiencyCard** (lines 393-485)
+7. **EfficiencyCard** (lines 393-485)
    - Daily costs and earnings
    - SCOP comparison
    - Heat pump cost comparison
 
-7. **Dashboard** (lines 1059-1184)
+8. **Dashboard** (lines ~1540+)
    - Main container
    - WebSocket connection
    - Miner management functions
-   - Layout with PriceGraphCard between global data and miners
+   - Layout: Global data → PriceGraphCard → HistoricalChartsCard → Miners grid
 
 ---
 
@@ -509,6 +559,19 @@ curl -X POST http://localhost:3456/api/miner/test \
 
 ## Recent Updates (December 2025)
 
+### Historical Data Charts (v1.3.1)
+- Added interactive line charts for hashrate, temperature, and power draw
+- Multi-miner support with separate or aggregated views
+- Time range selection: 24h, 7d, 14d, 30d
+- Hover tooltips showing exact values and timestamps
+- Unified Y-axis scaling for accurate multi-miner comparison
+- X-axis time graduations (hourly/daily based on range)
+- Auto-refresh every 60 seconds
+- Data persisted in `history.json` (720 entries, 30 days retention)
+- Per-miner tracking with IP and name identification
+- Component: `HistoricalChartsCard` (index.html lines 1097-1536)
+- API: `GET /api/history?days=7&minerIp=<ip>` (server.js lines 2128-2147)
+
 ### 24-Hour Electricity Price Graph (v1.3.0)
 - Added comprehensive price visualization showing next 24 hours
 - Stacked bar chart displays base price + time-varying grid fees
@@ -531,7 +594,7 @@ curl -X POST http://localhost:3456/api/miner/test \
 ## Future Enhancement Ideas
 
 - [ ] Multi-currency support beyond NOK/EUR/SEK/USD
-- [ ] Historical data charts (hashrate, temperature over time)
+- [x] ~~Historical data charts (hashrate, temperature over time)~~ - **Completed v1.3.1**
 - [ ] Alert system (high temp, low hashrate, disconnected miner)
 - [ ] Auto power profile switching based on electricity price
 - [ ] Mobile app or responsive improvements
@@ -540,6 +603,8 @@ curl -X POST http://localhost:3456/api/miner/test \
 - [ ] Energy usage tracking and reports
 - [ ] Integration with home automation systems
 - [ ] Support for more complex grid fee structures (seasonal, multiple time periods)
+- [ ] Export historical data to CSV/JSON
+- [ ] Customizable chart colors and themes
 
 ---
 

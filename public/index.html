@@ -1362,10 +1362,10 @@
 
                                 {/* Chart area */}
                                 <div
+                                    id="chart-container"
                                     style={{ marginLeft: '3.5rem', height: 'calc(100% - 30px)', position: 'relative', border: '1px solid rgba(255, 255, 255, 0.1)', borderRadius: '8px', padding: '1rem' }}
                                     onMouseMove={(e) => {
-                                        const rect = e.currentTarget.getBoundingClientRect();
-                                        setMousePos({ x: e.clientX - rect.left, y: e.clientY - rect.top });
+                                        setMousePos({ x: e.clientX, y: e.clientY });
                                     }}
                                     onMouseLeave={() => setHoveredPoint(null)}
                                 >
@@ -1402,22 +1402,44 @@
                                                         strokeWidth="2"
                                                         vectorEffect="non-scaling-stroke"
                                                     />
+                                                    {/* Data point markers */}
+                                                    {points.map((point, i) => (
+                                                        <circle
+                                                            key={`point-${i}`}
+                                                            cx={`${point.x}%`}
+                                                            cy={`${point.y}%`}
+                                                            r="3"
+                                                            fill={hoveredPoint?.entry === point.entry ? color : 'transparent'}
+                                                            stroke={hoveredPoint?.entry === point.entry ? 'white' : 'transparent'}
+                                                            strokeWidth="2"
+                                                        />
+                                                    ))}
                                                     {/* Invisible hover areas */}
                                                     {points.map((point, i) => (
                                                         <circle
-                                                            key={i}
+                                                            key={`hover-${i}`}
                                                             cx={`${point.x}%`}
                                                             cy={`${point.y}%`}
-                                                            r="8"
+                                                            r="12"
                                                             fill="transparent"
                                                             style={{ cursor: 'pointer' }}
-                                                            onMouseEnter={() => setHoveredPoint({
-                                                                minerKey,
-                                                                entry: point.entry,
-                                                                x: point.x,
-                                                                y: point.y,
-                                                                color
-                                                            })}
+                                                            onMouseEnter={(e) => {
+                                                                const container = document.getElementById('chart-container');
+                                                                const rect = container.getBoundingClientRect();
+                                                                const svgRect = e.currentTarget.ownerSVGElement.getBoundingClientRect();
+
+                                                                // Calculate pixel position from percentage
+                                                                const pixelX = (point.x / 100) * (svgRect.width);
+                                                                const pixelY = (point.y / 100) * (svgRect.height);
+
+                                                                setHoveredPoint({
+                                                                    minerKey,
+                                                                    entry: point.entry,
+                                                                    x: pixelX,
+                                                                    y: pixelY,
+                                                                    color
+                                                                });
+                                                            }}
                                                         />
                                                     ))}
                                                 </g>
@@ -1428,11 +1450,11 @@
                                     {/* Hover tooltip */}
                                     {hoveredPoint && (
                                         <div style={{
-                                            position: 'absolute',
-                                            left: `${hoveredPoint.x}%`,
-                                            top: `${hoveredPoint.y}%`,
-                                            transform: 'translate(-50%, -120%)',
-                                            background: 'rgba(0, 0, 0, 0.9)',
+                                            position: 'fixed',
+                                            left: `${mousePos.x}px`,
+                                            top: `${mousePos.y}px`,
+                                            transform: 'translate(10px, -50%)',
+                                            background: 'rgba(0, 0, 0, 0.95)',
                                             border: `2px solid ${hoveredPoint.color}`,
                                             borderRadius: '8px',
                                             padding: '0.75rem',
@@ -1440,19 +1462,25 @@
                                             color: '#e0e0e0',
                                             pointerEvents: 'none',
                                             whiteSpace: 'nowrap',
-                                            zIndex: 1000,
-                                            minWidth: '150px'
+                                            zIndex: 10000,
+                                            minWidth: '180px',
+                                            boxShadow: '0 4px 6px rgba(0, 0, 0, 0.3)'
                                         }}>
-                                            <div style={{ fontWeight: 'bold', marginBottom: '0.25rem', color: hoveredPoint.color }}>
+                                            <div style={{ fontWeight: 'bold', marginBottom: '0.5rem', color: hoveredPoint.color, fontSize: '0.85rem' }}>
                                                 {hoveredPoint.entry.minerName || hoveredPoint.minerKey}
                                             </div>
-                                            <div>{new Date(hoveredPoint.entry.timestamp).toLocaleString()}</div>
-                                            <div style={{ marginTop: '0.5rem', fontSize: '0.9rem', fontWeight: 'bold' }}>
-                                                {chartLabel}: {getChartValue(hoveredPoint.entry).toFixed(2)} {chartUnit}
+                                            <div style={{ fontSize: '0.7rem', color: '#9ca3af', marginBottom: '0.5rem' }}>
+                                                {new Date(hoveredPoint.entry.timestamp).toLocaleString()}
+                                            </div>
+                                            <div style={{ marginTop: '0.5rem', fontSize: '1rem', fontWeight: 'bold', color: hoveredPoint.color }}>
+                                                {getChartValue(hoveredPoint.entry).toFixed(2)} {chartUnit}
+                                            </div>
+                                            <div style={{ fontSize: '0.7rem', color: '#9ca3af', marginTop: '0.25rem' }}>
+                                                {chartLabel}
                                             </div>
                                             {hoveredPoint.entry.entries && (
-                                                <div style={{ marginTop: '0.25rem', fontSize: '0.7rem', color: '#9ca3af' }}>
-                                                    {hoveredPoint.entry.entries.length} miners combined
+                                                <div style={{ marginTop: '0.5rem', fontSize: '0.7rem', color: '#9ca3af', borderTop: '1px solid rgba(255, 255, 255, 0.1)', paddingTop: '0.5rem' }}>
+                                                    Combined data from {hoveredPoint.entry.entries.length} miners
                                                 </div>
                                             )}
                                         </div>
