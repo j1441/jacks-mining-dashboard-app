@@ -1796,6 +1796,78 @@
             const reconnectTimeoutRef = useRef(null);
             const wsRef = useRef(null);
 
+            const setupWebSocket = useCallback(() => {
+                // Close existing connection if any
+                if (wsRef.current && wsRef.current.readyState !== WebSocket.CLOSED) {
+                    wsRef.current.close();
+                }
+
+                // Clear any pending reconnection timeout
+                if (reconnectTimeoutRef.current) {
+                    clearTimeout(reconnectTimeoutRef.current);
+                    reconnectTimeoutRef.current = null;
+                }
+
+                setWsStatus('connecting');
+                const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+                const wsUrl = `${protocol}//${window.location.host}`;
+                const websocket = new WebSocket(wsUrl);
+
+                websocket.onopen = () => {
+                    console.log('WebSocket connected');
+                    setWsStatus('connected');
+                    setError(null);
+                    reconnectAttemptsRef.current = 0; // Reset reconnection attempts on successful connection
+                };
+
+                websocket.onmessage = (event) => {
+                    try {
+                        const data = JSON.parse(event.data);
+                        if (data.miners !== undefined) {
+                            setMinersStats(data.miners || []);
+                            setGlobalData({
+                                electricity: data.electricity,
+                                btcPrice: data.btcPrice,
+                                network: data.network
+                            });
+                            if (data.error) {
+                                setError(data.error);
+                            } else {
+                                setError(null);
+                            }
+                        }
+                    } catch (err) {
+                        console.error('Failed to parse WebSocket message:', err);
+                    }
+                };
+
+                websocket.onerror = (event) => {
+                    console.error('WebSocket error:', event);
+                    setWsStatus('error');
+                    setError('WebSocket connection error');
+                };
+
+                websocket.onclose = (event) => {
+                    console.log('WebSocket closed:', event.code, event.reason);
+                    setWsStatus('disconnected');
+
+                    // Exponential backoff: start at 1s, double each attempt, cap at 30s
+                    const baseDelay = 1000;
+                    const maxDelay = 30000;
+                    const delay = Math.min(baseDelay * Math.pow(2, reconnectAttemptsRef.current), maxDelay);
+
+                    console.log(`Reconnecting in ${delay}ms (attempt ${reconnectAttemptsRef.current + 1})`);
+                    reconnectAttemptsRef.current++;
+
+                    reconnectTimeoutRef.current = setTimeout(() => {
+                        setupWebSocket();
+                    }, delay);
+                };
+
+                wsRef.current = websocket;
+                setWs(websocket);
+            }, []);
+
             useEffect(() => {
                 loadConfig();
                 loadZones();
@@ -1940,78 +2012,6 @@
                     setError(err.message);
                 }
             };
-
-            const setupWebSocket = useCallback(() => {
-                // Close existing connection if any
-                if (wsRef.current && wsRef.current.readyState !== WebSocket.CLOSED) {
-                    wsRef.current.close();
-                }
-
-                // Clear any pending reconnection timeout
-                if (reconnectTimeoutRef.current) {
-                    clearTimeout(reconnectTimeoutRef.current);
-                    reconnectTimeoutRef.current = null;
-                }
-
-                setWsStatus('connecting');
-                const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-                const wsUrl = `${protocol}//${window.location.host}`;
-                const websocket = new WebSocket(wsUrl);
-
-                websocket.onopen = () => {
-                    console.log('WebSocket connected');
-                    setWsStatus('connected');
-                    setError(null);
-                    reconnectAttemptsRef.current = 0; // Reset reconnection attempts on successful connection
-                };
-
-                websocket.onmessage = (event) => {
-                    try {
-                        const data = JSON.parse(event.data);
-                        if (data.miners !== undefined) {
-                            setMinersStats(data.miners || []);
-                            setGlobalData({
-                                electricity: data.electricity,
-                                btcPrice: data.btcPrice,
-                                network: data.network
-                            });
-                            if (data.error) {
-                                setError(data.error);
-                            } else {
-                                setError(null);
-                            }
-                        }
-                    } catch (err) {
-                        console.error('Failed to parse WebSocket message:', err);
-                    }
-                };
-
-                websocket.onerror = (event) => {
-                    console.error('WebSocket error:', event);
-                    setWsStatus('error');
-                    setError('WebSocket connection error');
-                };
-
-                websocket.onclose = (event) => {
-                    console.log('WebSocket closed:', event.code, event.reason);
-                    setWsStatus('disconnected');
-
-                    // Exponential backoff: start at 1s, double each attempt, cap at 30s
-                    const baseDelay = 1000;
-                    const maxDelay = 30000;
-                    const delay = Math.min(baseDelay * Math.pow(2, reconnectAttemptsRef.current), maxDelay);
-
-                    console.log(`Reconnecting in ${delay}ms (attempt ${reconnectAttemptsRef.current + 1})`);
-                    reconnectAttemptsRef.current++;
-
-                    reconnectTimeoutRef.current = setTimeout(() => {
-                        setupWebSocket();
-                    }, delay);
-                };
-
-                wsRef.current = websocket;
-                setWs(websocket);
-            }, []);
 
             const setPowerProfile = async (minerIp, profile) => {
                 try {
