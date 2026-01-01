@@ -1811,7 +1811,7 @@
                         wsRef.current.close();
                     }
                 };
-            }, [setupWebSocket]);
+            }, []);
 
             // Handle page visibility changes (mobile app backgrounding/foregrounding)
             useEffect(() => {
@@ -1838,7 +1838,7 @@
                 return () => {
                     document.removeEventListener('visibilitychange', handleVisibilityChange);
                 };
-            }, [setupWebSocket]);
+            }, []);
 
             // Handle network changes (WiFi to cellular, network interruptions)
             useEffect(() => {
@@ -1866,7 +1866,7 @@
                     window.removeEventListener('online', handleOnline);
                     window.removeEventListener('offline', handleOffline);
                 };
-            }, [setupWebSocket]);
+            }, []);
 
             const loadZones = async () => {
                 try {
