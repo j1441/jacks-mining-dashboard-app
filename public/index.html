@@ -1791,12 +1791,82 @@
             const [showSettings, setShowSettings] = useState(false);
             const [showAddMiner, setShowAddMiner] = useState(false);
             const [globalData, setGlobalData] = useState({});
+            const [wsStatus, setWsStatus] = useState('connecting'); // 'connecting', 'connected', 'disconnected', 'error'
+            const reconnectAttemptsRef = useRef(0);
+            const reconnectTimeoutRef = useRef(null);
+            const wsRef = useRef(null);
 
             useEffect(() => {
                 loadConfig();
                 loadZones();
                 setupWebSocket();
-            }, []);
+
+                // Cleanup function to prevent memory leaks
+                return () => {
+                    console.log('Cleaning up WebSocket connection');
+                    if (reconnectTimeoutRef.current) {
+                        clearTimeout(reconnectTimeoutRef.current);
+                    }
+                    if (wsRef.current) {
+                        wsRef.current.close();
+                    }
+                };
+            }, [setupWebSocket]);
+
+            // Handle page visibility changes (mobile app backgrounding/foregrounding)
+            useEffect(() => {
+                const handleVisibilityChange = () => {
+                    if (document.hidden) {
+                        console.log('Page hidden - pausing WebSocket reconnection');
+                        // Don't actively reconnect while app is in background
+                        if (reconnectTimeoutRef.current) {
+                            clearTimeout(reconnectTimeoutRef.current);
+                            reconnectTimeoutRef.current = null;
+                        }
+                    } else {
+                        console.log('Page visible - resuming WebSocket connection');
+                        // When app comes back to foreground, reconnect if needed
+                        if (!wsRef.current || wsRef.current.readyState !== WebSocket.OPEN) {
+                            reconnectAttemptsRef.current = 0; // Reset attempts
+                            setupWebSocket();
+                        }
+                    }
+                };
+
+                document.addEventListener('visibilitychange', handleVisibilityChange);
+
+                return () => {
+                    document.removeEventListener('visibilitychange', handleVisibilityChange);
+                };
+            }, [setupWebSocket]);
+
+            // Handle network changes (WiFi to cellular, network interruptions)
+            useEffect(() => {
+                const handleOnline = () => {
+                    console.log('Network online - attempting reconnection');
+                    setError(null);
+                    reconnectAttemptsRef.current = 0; // Reset attempts
+                    setupWebSocket();
+                };
+
+                const handleOffline = () => {
+                    console.log('Network offline');
+                    setError('No network connection');
+                    setWsStatus('disconnected');
+                    if (reconnectTimeoutRef.current) {
+                        clearTimeout(reconnectTimeoutRef.current);
+                        reconnectTimeoutRef.current = null;
+                    }
+                };
+
+                window.addEventListener('online', handleOnline);
+                window.addEventListener('offline', handleOffline);
+
+                return () => {
+                    window.removeEventListener('online', handleOnline);
+                    window.removeEventListener('offline', handleOffline);
+                };
+            }, [setupWebSocket]);
 
             const loadZones = async () => {
                 try {
@@ -1872,9 +1942,28 @@
             };
 
             const setupWebSocket = useCallback(() => {
+                // Close existing connection if any
+                if (wsRef.current && wsRef.current.readyState !== WebSocket.CLOSED) {
+                    wsRef.current.close();
+                }
+
+                // Clear any pending reconnection timeout
+                if (reconnectTimeoutRef.current) {
+                    clearTimeout(reconnectTimeoutRef.current);
+                    reconnectTimeoutRef.current = null;
+                }
+
+                setWsStatus('connecting');
                 const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
                 const wsUrl = `${protocol}//${window.location.host}`;
                 const websocket = new WebSocket(wsUrl);
+
+                websocket.onopen = () => {
+                    console.log('WebSocket connected');
+                    setWsStatus('connected');
+                    setError(null);
+                    reconnectAttemptsRef.current = 0; // Reset reconnection attempts on successful connection
+                };
 
                 websocket.onmessage = (event) => {
                     try {
@@ -1897,13 +1986,30 @@
                     }
                 };
 
-                websocket.onerror = () => setError('WebSocket connection error');
-                websocket.onclose = () => {
-                    setTimeout(() => {
-                        setupWebSocket();
-                    }, 5000);
+                websocket.onerror = (event) => {
+                    console.error('WebSocket error:', event);
+                    setWsStatus('error');
+                    setError('WebSocket connection error');
                 };
 
+                websocket.onclose = (event) => {
+                    console.log('WebSocket closed:', event.code, event.reason);
+                    setWsStatus('disconnected');
+
+                    // Exponential backoff: start at 1s, double each attempt, cap at 30s
+                    const baseDelay = 1000;
+                    const maxDelay = 30000;
+                    const delay = Math.min(baseDelay * Math.pow(2, reconnectAttemptsRef.current), maxDelay);
+
+                    console.log(`Reconnecting in ${delay}ms (attempt ${reconnectAttemptsRef.current + 1})`);
+                    reconnectAttemptsRef.current++;
+
+                    reconnectTimeoutRef.current = setTimeout(() => {
+                        setupWebSocket();
+                    }, delay);
+                };
+
+                wsRef.current = websocket;
                 setWs(websocket);
             }, []);
 
@@ -1955,6 +2061,26 @@
                                         {connectedMiners} of {miners.length} miners connected
                                     </div>
                                 )}
+                                <div style={{
+                                    fontSize: '0.75rem',
+                                    marginTop: '0.25rem',
+                                    display: 'flex',
+                                    alignItems: 'center',
+                                    gap: '0.375rem',
+                                    color: wsStatus === 'connected' ? '#10b981' : wsStatus === 'connecting' ? '#f59e0b' : '#ef4444'
+                                }}>
+                                    <div style={{
+                                        width: '8px',
+                                        height: '8px',
+                                        borderRadius: '50%',
+                                        backgroundColor: wsStatus === 'connected' ? '#10b981' : wsStatus === 'connecting' ? '#f59e0b' : '#ef4444',
+                                        animation: wsStatus === 'connecting' ? 'pulse 2s cubic-bezier(0.4, 0, 0.6, 1) infinite' : 'none'
+                                    }}></div>
+                                    {wsStatus === 'connected' && 'Connected'}
+                                    {wsStatus === 'connecting' && 'Connecting...'}
+                                    {wsStatus === 'disconnected' && 'Disconnected'}
+                                    {wsStatus === 'error' && 'Connection Error'}
+                                </div>
                             </div>
                             <div style={{ display: 'flex', alignItems: 'center', gap: '1rem' }}>
                                 <div className="settings-icon" onClick={() => setShowSettings(true)} title="Settings">
