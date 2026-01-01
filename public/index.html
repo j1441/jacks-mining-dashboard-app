@@ -1797,8 +1797,14 @@
             const wsRef = useRef(null);
 
             const setupWebSocket = useCallback(() => {
-                // Close existing connection if any
-                if (wsRef.current && wsRef.current.readyState !== WebSocket.CLOSED) {
+                // Don't create a new connection if one is already open or connecting
+                if (wsRef.current && (wsRef.current.readyState === WebSocket.OPEN || wsRef.current.readyState === WebSocket.CONNECTING)) {
+                    console.log('WebSocket already open or connecting, skipping');
+                    return;
+                }
+
+                // Close existing connection if it's in a bad state
+                if (wsRef.current && wsRef.current.readyState === WebSocket.CLOSING) {
                     wsRef.current.close();
                 }
 
