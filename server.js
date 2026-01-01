@@ -65,6 +65,10 @@ let networkStatsCache = {
   fetchedAt: null
 };
 
+// Alert tracking
+let alertHistory = [];
+let lastAlertTimes = {}; // Track when each alert type last fired for cooldown
+
 // ============================================================================
 // Utility Functions
 // ============================================================================
@@ -1400,6 +1404,144 @@ function extractFanSpeeds(statsData, devsData = {}, allStatsData = {}) {
   return fans;
 }
 
+// ============================================================================
+// Alert System
+// ============================================================================
+
+/**
+ * Check miner stats against alert thresholds and create alerts
+ * @param {Object} stats - Miner statistics
+ * @param {Object} alertConfig - Alert configuration
+ * @param {string} minerName - Name of the miner
+ * @returns {Array} Array of triggered alerts
+ */
+function checkAlerts(stats, alertConfig, minerName) {
+  if (!alertConfig || !alertConfig.enabled) {
+    return [];
+  }
+
+  const alerts = [];
+  const now = Date.now();
+  const cooldownMs = (alertConfig.cooldownMinutes || 15) * 60 * 1000;
+
+  // Helper to check if we should fire an alert (respects cooldown)
+  const shouldAlert = (alertKey) => {
+    const lastTime = lastAlertTimes[alertKey];
+    if (!lastTime || (now - lastTime) > cooldownMs) {
+      lastAlertTimes[alertKey] = now;
+      return true;
+    }
+    return false;
+  };
+
+  // Check if miner is offline
+  if (alertConfig.minerOffline?.enabled && stats.error) {
+    const alertKey = `${stats.minerIp}_offline`;
+    if (shouldAlert(alertKey)) {
+      alerts.push({
+        id: Date.now() + Math.random(),
+        timestamp: new Date().toISOString(),
+        type: 'offline',
+        severity: 'critical',
+        minerName: minerName,
+        minerIp: stats.minerIp,
+        message: `Miner "${minerName}" is offline or unreachable`,
+        details: stats.error
+      });
+    }
+  }
+
+  // Only check other alerts if miner is online
+  if (!stats.error) {
+    // Check high temperature
+    if (alertConfig.highTemp?.enabled && stats.temperature) {
+      const threshold = alertConfig.highTemp.threshold || 80;
+      if (stats.temperature >= threshold) {
+        const alertKey = `${stats.minerIp}_hightemp`;
+        if (shouldAlert(alertKey)) {
+          alerts.push({
+            id: Date.now() + Math.random(),
+            timestamp: new Date().toISOString(),
+            type: 'highTemp',
+            severity: stats.temperature >= threshold + 5 ? 'critical' : 'warning',
+            minerName: minerName,
+            minerIp: stats.minerIp,
+            message: `High temperature on "${minerName}": ${stats.temperature}°C`,
+            details: `Temperature ${stats.temperature}°C exceeds threshold of ${threshold}°C`,
+            value: stats.temperature,
+            threshold: threshold
+          });
+        }
+      }
+    }
+
+    // Check low hashrate
+    if (alertConfig.lowHashrate?.enabled && stats.hashrate) {
+      const thresholdPercent = alertConfig.lowHashrate.threshold || 80;
+      // Estimate expected hashrate based on power profile
+      let expectedHashrate = 100; // Default TH/s
+      if (stats.powerDraw < 2500) expectedHashrate = 80;
+      else if (stats.powerDraw < 3000) expectedHashrate = 95;
+      else expectedHashrate = 110;
+
+      const minHashrate = expectedHashrate * (thresholdPercent / 100);
+      if (stats.hashrate < minHashrate) {
+        const alertKey = `${stats.minerIp}_lowhash`;
+        if (shouldAlert(alertKey)) {
+          alerts.push({
+            id: Date.now() + Math.random(),
+            timestamp: new Date().toISOString(),
+            type: 'lowHashrate',
+            severity: 'warning',
+            minerName: minerName,
+            minerIp: stats.minerIp,
+            message: `Low hashrate on "${minerName}": ${stats.hashrate.toFixed(1)} TH/s`,
+            details: `Hashrate ${stats.hashrate.toFixed(1)} TH/s is below ${thresholdPercent}% of expected (${minHashrate.toFixed(1)} TH/s)`,
+            value: stats.hashrate,
+            threshold: minHashrate
+          });
+        }
+      }
+    }
+
+    // Check high reject rate
+    if (alertConfig.highRejectRate?.enabled && stats.accepted !== undefined && stats.rejected !== undefined) {
+      const total = stats.accepted + stats.rejected;
+      if (total > 100) { // Only check if we have enough samples
+        const rejectRate = (stats.rejected / total) * 100;
+        const threshold = alertConfig.highRejectRate.threshold || 5;
+        if (rejectRate >= threshold) {
+          const alertKey = `${stats.minerIp}_rejects`;
+          if (shouldAlert(alertKey)) {
+            alerts.push({
+              id: Date.now() + Math.random(),
+              timestamp: new Date().toISOString(),
+              type: 'highRejectRate',
+              severity: rejectRate >= threshold * 2 ? 'critical' : 'warning',
+              minerName: minerName,
+              minerIp: stats.minerIp,
+              message: `High reject rate on "${minerName}": ${rejectRate.toFixed(1)}%`,
+              details: `Reject rate ${rejectRate.toFixed(1)}% exceeds threshold of ${threshold}%`,
+              value: rejectRate,
+              threshold: threshold
+            });
+          }
+        }
+      }
+    }
+  }
+
+  // Add new alerts to history (keep last 100)
+  if (alerts.length > 0) {
+    alertHistory.push(...alerts);
+    if (alertHistory.length > 100) {
+      alertHistory = alertHistory.slice(-100);
+    }
+  }
+
+  return alerts;
+}
+
 async function getMinerStats(ip, config = {}) {
   try {
     console.log(`Getting stats from miner at ${ip}`);
@@ -2046,11 +2188,32 @@ async function loadConfig() {
       await saveConfig(config);
     }
 
+    // Add default alert settings if not present
+    if (!config.alerts) {
+      config.alerts = {
+        enabled: true,
+        highTemp: { enabled: true, threshold: 80 },
+        lowHashrate: { enabled: true, threshold: 80 }, // % of expected hashrate
+        minerOffline: { enabled: true },
+        highRejectRate: { enabled: true, threshold: 5 }, // % rejects
+        cooldownMinutes: 15 // Don't re-alert for same issue within this time
+      };
+      await saveConfig(config);
+    }
+
     return config;
   } catch (err) {
     if (err.code === 'ENOENT') {
       return {
         miners: [], // Array of {ip, name, powerProfile}
+        alerts: {
+          enabled: true,
+          highTemp: { enabled: true, threshold: 80 },
+          lowHashrate: { enabled: true, threshold: 80 },
+          minerOffline: { enabled: true },
+          highRejectRate: { enabled: true, threshold: 5 },
+          cooldownMinutes: 15
+        },
         country: 'norway',
         electricityZone: 'NO5',
         gridFeeWeekdayDay: 0.50,
@@ -2401,6 +2564,41 @@ app.get('/api/history', async (req, res) => {
   }
 });
 
+// Get alert history
+app.get('/api/alerts/history', async (req, res) => {
+  try {
+    const limit = parseInt(req.query.limit) || 50;
+    res.json({ alerts: alertHistory.slice(-limit) });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Update alert settings
+app.post('/api/alerts/config', async (req, res) => {
+  try {
+    const config = await loadConfig();
+    config.alerts = {
+      ...config.alerts,
+      ...req.body
+    };
+    await saveConfig(config);
+    res.json({ success: true, alerts: config.alerts });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Clear alert history
+app.post('/api/alerts/clear', async (req, res) => {
+  try {
+    alertHistory = [];
+    res.json({ success: true });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // ============================================================================
 // Server Startup
 // ============================================================================
@@ -2484,11 +2682,22 @@ async function start() {
 
         const minersStats = await Promise.all(minerStatsPromises);
 
+        // Check for alerts on all miners
+        const newAlerts = [];
+        if (config.alerts) {
+          for (const stats of minersStats) {
+            const alerts = checkAlerts(stats, config.alerts, stats.minerName);
+            newAlerts.push(...alerts);
+          }
+        }
+
         const response = {
           miners: minersStats,
           electricity: electricityPriceCache,
           btcPrice: btcPriceCache,
-          network: networkStatsCache
+          network: networkStatsCache,
+          alerts: newAlerts, // Send new alerts to frontend
+          alertHistory: alertHistory.slice(-20) // Send last 20 alerts
         };
 
         ws.send(JSON.stringify(response));

@@ -1125,6 +1125,20 @@
                         </button>
                     </div>
 
+                    {/* Alert Indicators */}
+                    {!miner.error && miner.temperature >= 80 && (
+                        <div style={{
+                            marginBottom: '0.75rem', padding: '0.5rem 0.75rem',
+                            backgroundColor: 'rgba(245, 158, 11, 0.2)',
+                            border: '1px solid #f59e0b', borderRadius: '0.375rem',
+                            color: '#fbbf24', fontSize: '0.75rem',
+                            display: 'flex', alignItems: 'center', gap: '0.5rem'
+                        }}>
+                            <span>🌡️</span>
+                            <span>Temperature warning: {miner.temperature}°C</span>
+                        </div>
+                    )}
+
                     {miner.error && (
                         <div style={{
                             marginBottom: '1rem', padding: '0.75rem',
@@ -1780,6 +1794,214 @@
             );
         }
 
+        // Alert Settings Modal Component
+        function AlertSettingsModal({ isOpen, onClose, config, onSave }) {
+            const [enabled, setEnabled] = useState(config?.alerts?.enabled ?? true);
+            const [highTempEnabled, setHighTempEnabled] = useState(config?.alerts?.highTemp?.enabled ?? true);
+            const [highTempThreshold, setHighTempThreshold] = useState(config?.alerts?.highTemp?.threshold ?? 80);
+            const [lowHashEnabled, setLowHashEnabled] = useState(config?.alerts?.lowHashrate?.enabled ?? true);
+            const [lowHashThreshold, setLowHashThreshold] = useState(config?.alerts?.lowHashrate?.threshold ?? 80);
+            const [offlineEnabled, setOfflineEnabled] = useState(config?.alerts?.minerOffline?.enabled ?? true);
+            const [rejectEnabled, setRejectEnabled] = useState(config?.alerts?.highRejectRate?.enabled ?? true);
+            const [rejectThreshold, setRejectThreshold] = useState(config?.alerts?.highRejectRate?.threshold ?? 5);
+            const [cooldown, setCooldown] = useState(config?.alerts?.cooldownMinutes ?? 15);
+            const [saving, setSaving] = useState(false);
+
+            useEffect(() => {
+                if (config?.alerts) {
+                    setEnabled(config.alerts.enabled ?? true);
+                    setHighTempEnabled(config.alerts.highTemp?.enabled ?? true);
+                    setHighTempThreshold(config.alerts.highTemp?.threshold ?? 80);
+                    setLowHashEnabled(config.alerts.lowHashrate?.enabled ?? true);
+                    setLowHashThreshold(config.alerts.lowHashrate?.threshold ?? 80);
+                    setOfflineEnabled(config.alerts.minerOffline?.enabled ?? true);
+                    setRejectEnabled(config.alerts.highRejectRate?.enabled ?? true);
+                    setRejectThreshold(config.alerts.highRejectRate?.threshold ?? 5);
+                    setCooldown(config.alerts.cooldownMinutes ?? 15);
+                }
+            }, [config]);
+
+            const handleSave = async () => {
+                setSaving(true);
+                try {
+                    const response = await fetch('/api/alerts/config', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({
+                            enabled,
+                            highTemp: { enabled: highTempEnabled, threshold: parseFloat(highTempThreshold) },
+                            lowHashrate: { enabled: lowHashEnabled, threshold: parseFloat(lowHashThreshold) },
+                            minerOffline: { enabled: offlineEnabled },
+                            highRejectRate: { enabled: rejectEnabled, threshold: parseFloat(rejectThreshold) },
+                            cooldownMinutes: parseInt(cooldown)
+                        })
+                    });
+                    const data = await response.json();
+                    if (data.success) {
+                        await onSave();
+                        onClose();
+                    }
+                } catch (err) {
+                    console.error('Failed to save alert settings:', err);
+                } finally {
+                    setSaving(false);
+                }
+            };
+
+            if (!isOpen) return null;
+
+            return (
+                <div className="modal-overlay" onClick={onClose}>
+                    <div className="modal" onClick={e => e.stopPropagation()}>
+                        <h2 style={{ marginTop: 0, marginBottom: '1.5rem' }}>🔔 Alert Settings</h2>
+
+                        <div style={{ marginBottom: '1.5rem' }}>
+                            <label style={{ display: 'flex', alignItems: 'center', cursor: 'pointer' }}>
+                                <input type="checkbox" checked={enabled} onChange={(e) => setEnabled(e.target.checked)} style={{ marginRight: '0.5rem' }} />
+                                <span>Enable Alerts</span>
+                            </label>
+                        </div>
+
+                        <div style={{ opacity: enabled ? 1 : 0.5, pointerEvents: enabled ? 'auto' : 'none' }}>
+                            <div style={{ marginBottom: '1.5rem', padding: '1rem', background: 'rgba(255, 255, 255, 0.05)', borderRadius: '8px' }}>
+                                <label style={{ display: 'flex', alignItems: 'center', marginBottom: '0.75rem', cursor: 'pointer' }}>
+                                    <input type="checkbox" checked={highTempEnabled} onChange={(e) => setHighTempEnabled(e.target.checked)} style={{ marginRight: '0.5rem' }} />
+                                    <span style={{ fontWeight: '600' }}>High Temperature Alert</span>
+                                </label>
+                                <label style={{ display: 'block', marginBottom: '0.5rem', color: '#9ca3af', fontSize: '0.875rem' }}>
+                                    Threshold (°C)
+                                </label>
+                                <input type="number" step="1" min="60" max="100" value={highTempThreshold} onChange={(e) => setHighTempThreshold(e.target.value)} disabled={!highTempEnabled} />
+                            </div>
+
+                            <div style={{ marginBottom: '1.5rem', padding: '1rem', background: 'rgba(255, 255, 255, 0.05)', borderRadius: '8px' }}>
+                                <label style={{ display: 'flex', alignItems: 'center', marginBottom: '0.75rem', cursor: 'pointer' }}>
+                                    <input type="checkbox" checked={lowHashEnabled} onChange={(e) => setLowHashEnabled(e.target.checked)} style={{ marginRight: '0.5rem' }} />
+                                    <span style={{ fontWeight: '600' }}>Low Hashrate Alert</span>
+                                </label>
+                                <label style={{ display: 'block', marginBottom: '0.5rem', color: '#9ca3af', fontSize: '0.875rem' }}>
+                                    Threshold (% of expected)
+                                </label>
+                                <input type="number" step="5" min="50" max="95" value={lowHashThreshold} onChange={(e) => setLowHashThreshold(e.target.value)} disabled={!lowHashEnabled} />
+                            </div>
+
+                            <div style={{ marginBottom: '1.5rem', padding: '1rem', background: 'rgba(255, 255, 255, 0.05)', borderRadius: '8px' }}>
+                                <label style={{ display: 'flex', alignItems: 'center', cursor: 'pointer' }}>
+                                    <input type="checkbox" checked={offlineEnabled} onChange={(e) => setOfflineEnabled(e.target.checked)} style={{ marginRight: '0.5rem' }} />
+                                    <span style={{ fontWeight: '600' }}>Miner Offline Alert</span>
+                                </label>
+                                <div style={{ fontSize: '0.75rem', color: '#9ca3af', marginTop: '0.5rem' }}>
+                                    Alert when miner is unreachable or disconnected
+                                </div>
+                            </div>
+
+                            <div style={{ marginBottom: '1.5rem', padding: '1rem', background: 'rgba(255, 255, 255, 0.05)', borderRadius: '8px' }}>
+                                <label style={{ display: 'flex', alignItems: 'center', marginBottom: '0.75rem', cursor: 'pointer' }}>
+                                    <input type="checkbox" checked={rejectEnabled} onChange={(e) => setRejectEnabled(e.target.checked)} style={{ marginRight: '0.5rem' }} />
+                                    <span style={{ fontWeight: '600' }}>High Reject Rate Alert</span>
+                                </label>
+                                <label style={{ display: 'block', marginBottom: '0.5rem', color: '#9ca3af', fontSize: '0.875rem' }}>
+                                    Threshold (%)
+                                </label>
+                                <input type="number" step="1" min="1" max="20" value={rejectThreshold} onChange={(e) => setRejectThreshold(e.target.value)} disabled={!rejectEnabled} />
+                            </div>
+
+                            <div style={{ marginBottom: '1.5rem' }}>
+                                <label style={{ display: 'block', marginBottom: '0.5rem', color: '#9ca3af', fontSize: '0.875rem' }}>
+                                    Alert Cooldown (minutes)
+                                </label>
+                                <input type="number" step="5" min="5" max="120" value={cooldown} onChange={(e) => setCooldown(e.target.value)} />
+                                <div style={{ fontSize: '0.75rem', color: '#9ca3af', marginTop: '0.5rem' }}>
+                                    Don't re-alert for the same issue within this time
+                                </div>
+                            </div>
+                        </div>
+
+                        <div style={{ display: 'flex', gap: '0.75rem', marginTop: '1.5rem' }}>
+                            <button onClick={handleSave} disabled={saving} style={{ flex: 1, padding: '0.75rem', backgroundColor: '#2563eb', color: 'white', border: 'none', borderRadius: '0.5rem', cursor: 'pointer', fontSize: '0.875rem', fontWeight: '600' }}>
+                                {saving ? 'Saving...' : 'Save Settings'}
+                            </button>
+                            <button onClick={onClose} style={{ flex: 1, padding: '0.75rem', backgroundColor: 'rgba(255, 255, 255, 0.1)', color: '#e0e0e0', border: 'none', borderRadius: '0.5rem', cursor: 'pointer', fontSize: '0.875rem' }}>
+                                Cancel
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            );
+        }
+
+        // Alert History Card Component
+        function AlertHistoryCard({ alerts, onClearHistory }) {
+            const getAlertIcon = (type) => {
+                const icons = {
+                    highTemp: '🌡️',
+                    lowHashrate: '📉',
+                    offline: '⚠️',
+                    highRejectRate: '❌'
+                };
+                return icons[type] || '🔔';
+            };
+
+            const getSeverityColor = (severity) => {
+                return severity === 'critical' ? '#ef4444' : '#facc15';
+            };
+
+            const formatTimestamp = (timestamp) => {
+                const date = new Date(timestamp);
+                const now = new Date();
+                const diff = now - date;
+                const minutes = Math.floor(diff / 60000);
+
+                if (minutes < 1) return 'Just now';
+                if (minutes < 60) return `${minutes}m ago`;
+                if (minutes < 1440) return `${Math.floor(minutes / 60)}h ago`;
+                return date.toLocaleDateString() + ' ' + date.toLocaleTimeString();
+            };
+
+            return (
+                <div className="stat-card">
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1rem' }}>
+                        <h3 style={{ margin: 0, fontSize: '1.125rem' }}>🔔 Recent Alerts</h3>
+                        {alerts && alerts.length > 0 && (
+                            <button onClick={onClearHistory} style={{ padding: '0.25rem 0.75rem', fontSize: '0.75rem', background: 'rgba(255, 255, 255, 0.1)', border: 'none', borderRadius: '4px', color: '#9ca3af', cursor: 'pointer' }}>
+                                Clear
+                            </button>
+                        )}
+                    </div>
+
+                    {!alerts || alerts.length === 0 ? (
+                        <div style={{ textAlign: 'center', padding: '2rem', color: '#9ca3af' }}>
+                            <div style={{ fontSize: '2rem', marginBottom: '0.5rem' }}>✓</div>
+                            <div style={{ fontSize: '0.875rem' }}>No alerts - all systems normal</div>
+                        </div>
+                    ) : (
+                        <div style={{ maxHeight: '400px', overflowY: 'auto' }}>
+                            {[...alerts].reverse().map((alert, idx) => (
+                                <div key={idx} style={{ padding: '0.75rem', marginBottom: '0.5rem', background: 'rgba(255, 255, 255, 0.05)', borderLeft: `3px solid ${getSeverityColor(alert.severity)}`, borderRadius: '4px' }}>
+                                    <div style={{ display: 'flex', alignItems: 'flex-start', gap: '0.75rem' }}>
+                                        <div style={{ fontSize: '1.25rem' }}>{getAlertIcon(alert.type)}</div>
+                                        <div style={{ flex: 1 }}>
+                                            <div style={{ fontWeight: '600', marginBottom: '0.25rem', fontSize: '0.875rem' }}>
+                                                {alert.message}
+                                            </div>
+                                            {alert.details && (
+                                                <div style={{ fontSize: '0.75rem', color: '#9ca3af', marginBottom: '0.25rem' }}>
+                                                    {alert.details}
+                                                </div>
+                                            )}
+                                            <div style={{ fontSize: '0.7rem', color: '#6b7280' }}>
+                                                {formatTimestamp(alert.timestamp)}
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+                            ))}
+                        </div>
+                    )}
+                </div>
+            );
+        }
+
         // Main Dashboard Component
         function Dashboard() {
             const [miners, setMiners] = useState([]);
@@ -1790,11 +2012,48 @@
             const [zones, setZones] = useState({});
             const [showSettings, setShowSettings] = useState(false);
             const [showAddMiner, setShowAddMiner] = useState(false);
+            const [showAlertSettings, setShowAlertSettings] = useState(false);
             const [globalData, setGlobalData] = useState({});
+            const [alertHistory, setAlertHistory] = useState([]);
+            const [notificationsEnabled, setNotificationsEnabled] = useState(false);
             const [wsStatus, setWsStatus] = useState('connecting'); // 'connecting', 'connected', 'disconnected', 'error'
             const reconnectAttemptsRef = useRef(0);
             const reconnectTimeoutRef = useRef(null);
             const wsRef = useRef(null);
+
+            // Request browser notification permission on mount
+            useEffect(() => {
+                if ('Notification' in window && Notification.permission === 'default') {
+                    Notification.requestPermission().then(permission => {
+                        setNotificationsEnabled(permission === 'granted');
+                    });
+                } else if (Notification.permission === 'granted') {
+                    setNotificationsEnabled(true);
+                }
+            }, []);
+
+            // Function to show browser notification
+            const showNotification = useCallback((alert) => {
+                if (!notificationsEnabled || !('Notification' in window)) return;
+
+                const severityEmoji = {
+                    critical: '🚨',
+                    warning: '⚠️',
+                    info: 'ℹ️'
+                };
+
+                const notification = new Notification(`${severityEmoji[alert.severity] || '🔔'} Mining Alert`, {
+                    body: alert.message,
+                    icon: '/favicon.ico',
+                    tag: `alert-${alert.type}-${alert.minerIp}`, // Prevent duplicate notifications
+                    requireInteraction: alert.severity === 'critical'
+                });
+
+                notification.onclick = () => {
+                    window.focus();
+                    notification.close();
+                };
+            }, [notificationsEnabled]);
 
             const setupWebSocket = useCallback(() => {
                 // Don't create a new connection if one is already open or connecting
@@ -1841,6 +2100,18 @@
                             } else {
                                 setError(null);
                             }
+                        }
+
+                        // Handle alerts
+                        if (data.alerts && data.alerts.length > 0) {
+                            data.alerts.forEach(alert => {
+                                showNotification(alert);
+                            });
+                        }
+
+                        // Update alert history
+                        if (data.alertHistory) {
+                            setAlertHistory(data.alertHistory);
                         }
                     } catch (err) {
                         console.error('Failed to parse WebSocket message:', err);
@@ -2055,6 +2326,13 @@
                         onSave={saveSettings}
                     />
 
+                    <AlertSettingsModal
+                        isOpen={showAlertSettings}
+                        onClose={() => setShowAlertSettings(false)}
+                        config={config}
+                        onSave={loadConfig}
+                    />
+
                     <AddMinerModal
                         isOpen={showAddMiner}
                         onClose={() => setShowAddMiner(false)}
@@ -2094,6 +2372,9 @@
                                 </div>
                             </div>
                             <div style={{ display: 'flex', alignItems: 'center', gap: '1rem' }}>
+                                <div className="settings-icon" onClick={() => setShowAlertSettings(true)} title="Alert Settings" style={{ cursor: 'pointer', padding: '0.5rem 1rem', background: 'rgba(255, 255, 255, 0.1)', borderRadius: '0.5rem', fontSize: '0.875rem' }}>
+                                    🔔 Alerts
+                                </div>
                                 <div className="settings-icon" onClick={() => setShowSettings(true)} title="Settings">
                                     Settings
                                 </div>
@@ -2168,6 +2449,21 @@
                                 {/* 24-Hour Price Graph */}
                                 <div className="grid grid-cols-1" style={{ marginBottom: '1.5rem' }}>
                                     <PriceGraphCard electricity={globalData.electricity} config={config} />
+                                </div>
+
+                                {/* Alert History */}
+                                <div className="grid grid-cols-1" style={{ marginBottom: '1.5rem' }}>
+                                    <AlertHistoryCard
+                                        alerts={alertHistory}
+                                        onClearHistory={async () => {
+                                            try {
+                                                await fetch('/api/alerts/clear', { method: 'POST' });
+                                                setAlertHistory([]);
+                                            } catch (err) {
+                                                console.error('Failed to clear alerts:', err);
+                                            }
+                                        }}
+                                    />
                                 </div>
 
                                 {/* Historical Charts */}
