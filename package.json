@@ -5,7 +5,10 @@
   "main": "server.js",
   "scripts": {
     "start": "node server.js",
-    "dev": "NODE_ENV=development node server.js"
+    "dev": "NODE_ENV=development node server.js",
+    "generate:icons": "node scripts/generate-icons.js",
+    "generate:favicon": "node scripts/generate-favicon.js",
+    "generate:pwa-assets": "npm run generate:icons && npm run generate:favicon"
   },
   "keywords": [
     "antminer",
@@ -35,5 +38,8 @@
   "bugs": {
     "url": "https://github.com/j1441/jacks-mining-dashboard-app/issues"
   },
-  "homepage": "https://github.com/j1441/jacks-mining-dashboard-app#readme"
+  "homepage": "https://github.com/j1441/jacks-mining-dashboard-app#readme",
+  "devDependencies": {
+    "sharp": "^0.34.5"
+  }
 }
