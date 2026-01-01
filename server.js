@@ -65,6 +65,14 @@ let networkStatsCache = {
   fetchedAt: null
 };
 
+// Miner stats cache - populated by background polling
+let minerStatsCache = {
+  miners: [],
+  alerts: [],
+  fetchedAt: null,
+  isPolling: false
+};
+
 // Alert tracking
 let alertHistory = [];
 let lastAlertTimes = {}; // Track when each alert type last fired for cooldown
@@ -2600,6 +2608,88 @@ app.post('/api/alerts/clear', async (req, res) => {
 });
 
 // ============================================================================
+// Background Miner Polling
+// ============================================================================
+
+const MINER_POLL_INTERVAL = 5000; // Poll miners every 5 seconds
+
+async function pollMiners() {
+  if (minerStatsCache.isPolling) {
+    return; // Skip if already polling
+  }
+
+  minerStatsCache.isPolling = true;
+
+  try {
+    const config = await loadConfig();
+
+    if (!config.miners || config.miners.length === 0) {
+      minerStatsCache.miners = [];
+      minerStatsCache.alerts = [];
+      minerStatsCache.fetchedAt = Date.now();
+      return;
+    }
+
+    // Fetch stats for all miners in parallel
+    const minerStatsPromises = config.miners.map(async (miner) => {
+      try {
+        const stats = await getMinerStats(miner.ip, config);
+        return {
+          ...stats,
+          minerIp: miner.ip,
+          minerName: miner.name,
+          powerProfile: miner.powerProfile
+        };
+      } catch (err) {
+        console.error(`Error fetching stats for ${miner.name} (${miner.ip}):`, err.message);
+        return {
+          minerIp: miner.ip,
+          minerName: miner.name,
+          error: err.message,
+          powerProfile: miner.powerProfile
+        };
+      }
+    });
+
+    const minersStats = await Promise.all(minerStatsPromises);
+
+    // Check for alerts on all miners
+    const newAlerts = [];
+    if (config.alerts) {
+      for (const stats of minersStats) {
+        const alerts = checkAlerts(stats, config.alerts, stats.minerName);
+        newAlerts.push(...alerts);
+      }
+    }
+
+    // Update the cache
+    minerStatsCache.miners = minersStats;
+    minerStatsCache.alerts = newAlerts;
+    minerStatsCache.fetchedAt = Date.now();
+
+    // Log connection status on first successful poll or status changes
+    const onlineCount = minersStats.filter(m => !m.error).length;
+    const totalCount = minersStats.length;
+    console.log(`⛏️  Miner poll complete: ${onlineCount}/${totalCount} miners online`);
+
+  } catch (err) {
+    console.error('Background miner polling error:', err);
+  } finally {
+    minerStatsCache.isPolling = false;
+  }
+}
+
+function startBackgroundMinerPolling() {
+  console.log('🔄 Starting background miner polling...');
+
+  // Initial poll
+  pollMiners();
+
+  // Set up recurring poll
+  setInterval(pollMiners, MINER_POLL_INTERVAL);
+}
+
+// ============================================================================
 // Server Startup
 // ============================================================================
 
@@ -2616,12 +2706,15 @@ async function start() {
   ]);
   
   setInterval(() => fetchElectricityPrices(
-    electricityPriceCache.country || 'norway', 
+    electricityPriceCache.country || 'norway',
     electricityPriceCache.zone || 'NO5'
   ), 30 * 60 * 1000);
   setInterval(fetchBTCPrice, 5 * 60 * 1000);
   setInterval(fetchNetworkStats, 10 * 60 * 1000);
-  
+
+  // Start background miner polling immediately (miners connect before any client opens the dashboard)
+  startBackgroundMinerPolling();
+
   const server = app.listen(PORT, '0.0.0.0', () => {
     console.log('='.repeat(60));
     console.log(`Jack's Mining Dashboard v2.2`);
@@ -2644,69 +2737,26 @@ async function start() {
   wss.on('connection', async (ws) => {
     console.log('🔌 WebSocket client connected');
     let interval;
-    
-    const sendStats = async () => {
+
+    const sendCachedStats = () => {
       try {
-        const config = await loadConfig();
-
-        if (!config.miners || config.miners.length === 0) {
-          ws.send(JSON.stringify({
-            miners: [],
-            electricity: electricityPriceCache,
-            btcPrice: btcPriceCache,
-            network: networkStatsCache
-          }));
-          return;
-        }
-
-        // Fetch stats for all miners in parallel
-        const minerStatsPromises = config.miners.map(async (miner) => {
-          try {
-            const stats = await getMinerStats(miner.ip, config);
-            return {
-              ...stats,
-              minerIp: miner.ip,
-              minerName: miner.name,
-              powerProfile: miner.powerProfile
-            };
-          } catch (err) {
-            console.error(`Error fetching stats for ${miner.name} (${miner.ip}):`, err.message);
-            return {
-              minerIp: miner.ip,
-              minerName: miner.name,
-              error: err.message,
-              powerProfile: miner.powerProfile
-            };
-          }
-        });
-
-        const minersStats = await Promise.all(minerStatsPromises);
-
-        // Check for alerts on all miners
-        const newAlerts = [];
-        if (config.alerts) {
-          for (const stats of minersStats) {
-            const alerts = checkAlerts(stats, config.alerts, stats.minerName);
-            newAlerts.push(...alerts);
-          }
-        }
-
+        // Send cached stats immediately - no waiting for miner polling
         const response = {
-          miners: minersStats,
+          miners: minerStatsCache.miners,
           electricity: electricityPriceCache,
           btcPrice: btcPriceCache,
           network: networkStatsCache,
-          alerts: newAlerts, // Send new alerts to frontend
-          alertHistory: alertHistory.slice(-20) // Send last 20 alerts
+          alerts: minerStatsCache.alerts,
+          alertHistory: alertHistory.slice(-20)
         };
 
         ws.send(JSON.stringify(response));
 
+        // Save history periodically
         if (Date.now() - lastHistorySave > historySaveInterval) {
-          // Save history for all miners
-          for (const stats of minersStats) {
+          for (const stats of minerStatsCache.miners) {
             if (!stats.error) {
-              await saveHistoryEntry(stats);
+              saveHistoryEntry(stats);
             }
           }
           lastHistorySave = Date.now();
@@ -2723,11 +2773,13 @@ async function start() {
       }
     };
 
-    await sendStats();
+    // Send cached stats immediately on connection
+    sendCachedStats();
 
-    interval = setInterval(async () => {
+    // Send updated stats to client every 5 seconds (synced with background polling)
+    interval = setInterval(() => {
       if (ws.readyState === WebSocket.OPEN) {
-        await sendStats();
+        sendCachedStats();
       } else {
         clearInterval(interval);
       }
