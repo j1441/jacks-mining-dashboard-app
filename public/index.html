@@ -1896,9 +1896,10 @@
                             reconnectTimeoutRef.current = null;
                         }
                     } else {
-                        console.log('Page visible - resuming WebSocket connection');
-                        // When app comes back to foreground, reconnect if needed
-                        if (!wsRef.current || wsRef.current.readyState !== WebSocket.OPEN) {
+                        console.log('Page visible - checking WebSocket connection');
+                        // When app comes back to foreground, only reconnect if disconnected
+                        if (wsRef.current && wsRef.current.readyState === WebSocket.CLOSED) {
+                            console.log('Page visible and WebSocket closed - reconnecting');
                             reconnectAttemptsRef.current = 0; // Reset attempts
                             setupWebSocket();
                         }
@@ -1915,10 +1916,14 @@
             // Handle network changes (WiFi to cellular, network interruptions)
             useEffect(() => {
                 const handleOnline = () => {
-                    console.log('Network online - attempting reconnection');
+                    console.log('Network online - checking WebSocket connection');
                     setError(null);
-                    reconnectAttemptsRef.current = 0; // Reset attempts
-                    setupWebSocket();
+                    // Only reconnect if actually disconnected
+                    if (!wsRef.current || wsRef.current.readyState === WebSocket.CLOSED) {
+                        console.log('Network online and WebSocket closed - reconnecting');
+                        reconnectAttemptsRef.current = 0; // Reset attempts
+                        setupWebSocket();
+                    }
                 };
 
                 const handleOffline = () => {
