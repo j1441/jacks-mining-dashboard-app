@@ -1,143 +1,105 @@
-# Mining Dashboard App - Project Context
+# Mining Dashboard App - Complete Technical Documentation
 
 ## Overview
+
 A comprehensive web-based dashboard for monitoring and controlling Bitcoin Antminer miners running Braiins OS, specifically designed for home heating applications in Norway. The app tracks mining performance, electricity costs with Norwegian pricing (including state subsidies), and efficiency metrics comparing mining heat output vs traditional heat pumps.
 
-**Version:** 1.2.17
+**Version:** 1.2.11
 **Author:** j1441
 **License:** MIT
+**Repository:** https://github.com/j1441/jacks-mining-dashboard-app
 **Platform:** Node.js/Express backend with React frontend (no build step - uses Babel standalone)
 
 ---
 
-## Architecture
+## Table of Contents
 
-### Backend (server.js)
-- **Framework:** Express.js
-- **WebSocket:** ws library for real-time updates (every 5 seconds)
-- **Port:** 3456 (default)
-- **Data Storage:** JSON files in `/data` directory
-  - `config.json` - User configuration (miners, pricing mode, grid fees)
-  - `history.json` - Historical mining data
-
-### Frontend (public/index.html)
-- **Framework:** React 18 (CDN-loaded, no build process)
-- **Transpiler:** Babel Standalone
-- **Styling:** Inline CSS with custom classes, dark gradient theme
-- **Components:** Modular React components (Settings, AddMiner, MinerCard, ElectricityCard, etc.)
-
-### External APIs
-1. **hvakosterstrommen.no** - Norwegian electricity spot prices (by zone)
-2. **CoinGecko** - Bitcoin price in multiple currencies (NOK, EUR, SEK, USD)
-3. **blockchain.info** - Bitcoin network stats (difficulty, hashrate, block height)
-
-### Miner Communication
-- **Protocol:** CGMiner JSON-RPC API (port 4028)
-- **GraphQL:** Braiins OS GraphQL API support for enhanced temperature/fan data
-- **Commands:** Summary, Stats, Pools data + power profile control
+1. [Architecture Overview](#architecture-overview)
+2. [Technology Stack](#technology-stack)
+3. [File Structure](#file-structure)
+4. [Backend Implementation](#backend-implementation)
+5. [Frontend Implementation](#frontend-implementation)
+6. [External API Integrations](#external-api-integrations)
+7. [Miner Communication Protocols](#miner-communication-protocols)
+8. [Data Flow & Caching](#data-flow--caching)
+9. [Feature Documentation](#feature-documentation)
+10. [Configuration Schema](#configuration-schema)
+11. [API Reference](#api-reference)
+12. [Deployment](#deployment)
+13. [Security Considerations](#security-considerations)
+14. [Troubleshooting](#troubleshooting)
 
 ---
 
-## Key Features
+## Architecture Overview
 
-### 1. Multi-Miner Support
-- Monitor multiple miners simultaneously
-- Each miner has independent:
-  - Power profile (Low/Medium/High)
-  - Status tracking
-  - Statistics display
-- Add/remove miners via UI
-- Automatic config migration from single-miner to multi-miner format
+```
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                              MINING DASHBOARD                                │
+├─────────────────────────────────────────────────────────────────────────────┤
+│                                                                              │
+│  ┌──────────────────┐    WebSocket (5s)    ┌──────────────────────────────┐ │
+│  │                  │◄────────────────────►│                              │ │
+│  │  React Frontend  │                      │    Express.js Backend        │ │
+│  │  (Browser/CDN)   │    REST API          │    (Node.js 18+)             │ │
+│  │                  │◄────────────────────►│                              │ │
+│  └──────────────────┘                      └──────────────┬───────────────┘ │
+│                                                           │                  │
+│                           ┌───────────────────────────────┼──────────────┐  │
+│                           │                               │              │  │
+│                           ▼                               ▼              ▼  │
+│              ┌────────────────────┐    ┌─────────────────────┐  ┌───────┐  │
+│              │   Braiins Miners   │    │   External APIs      │  │ JSON  │  │
+│              │   ┌─────────────┐  │    │   ┌───────────────┐  │  │ Files │  │
+│              │   │ CGMiner API │  │    │   │ hvakoster     │  │  │       │  │
+│              │   │ (port 4028) │  │    │   │ strommen.no   │  │  │config │  │
+│              │   ├─────────────┤  │    │   ├───────────────┤  │  │.json  │  │
+│              │   │ GraphQL API │  │    │   │ CoinGecko     │  │  │       │  │
+│              │   │ (port 80)   │  │    │   ├───────────────┤  │  │history│  │
+│              │   ├─────────────┤  │    │   │ blockchain    │  │  │.json  │  │
+│              │   │ REST API    │  │    │   │ .info         │  │  │       │  │
+│              │   │ (port 80)   │  │    │   └───────────────┘  │  └───────┘  │
+│              │   └─────────────┘  │    └─────────────────────┘              │
+│              └────────────────────┘                                          │
+│                                                                              │
+└─────────────────────────────────────────────────────────────────────────────┘
+```
 
-### 2. Norwegian Electricity Pricing
-Two pricing modes with accurate calculations and time-of-day grid fees:
+### Key Architectural Decisions
 
-#### **Norgespris Mode**
-- Fixed base price: **0.50 NOK/kWh**
-- Plus time-of-day grid fees
-- Formula: `Total = 0.50 + Grid Fee (Time-dependent)`
-- Use case: Simplified fixed-rate contract
+1. **No Build Step**: Frontend uses React via CDN with Babel transpilation in-browser
+2. **Single-File Backend**: All server logic in `server.js` (~2800 lines)
+3. **JSON File Storage**: Lightweight persistence without database dependencies
+4. **Background Polling**: Server polls miners every 5 seconds, pushes via WebSocket
+5. **Multi-Protocol Miner Support**: CGMiner API + GraphQL + REST API fallbacks
 
-#### **Strømstøtteavtale Mode** (with State Subsidy)
-- Spot price with 90% state subsidy above threshold
-- Threshold: **93.75 øre/kWh (0.9375 NOK/kWh)**
-- Plus time-of-day grid fees
-- Formula when spot > threshold:
-  ```
-  Subsidy = (Spot - 0.9375) × 0.90
-  Effective Spot = Spot - Subsidy
-  Total = Effective Spot + Grid Fee (Time-dependent)
-  ```
-- Example: Spot 2.00 kr → Subsidy 0.956 kr → Effective 1.044 kr → Total 1.544 kr (with 0.50 grid fee)
+---
 
-#### **Time-of-Day Grid Fees**
-- **Weekday Day Rate** (Mon–Fri 06:00–22:00): Default 0.50 kr/kWh
-- **Weekend/Night Rate** (Sat, Sun, Mon–Fri 22:00–06:00): Default 0.30 kr/kWh
-- Configurable separately in settings
-- Automatically applied based on current time
-- Grid fee calculation function: `getGridFeeForTime()` in server.js (lines 933-952)
+## Technology Stack
 
-### 3. Real-time Monitoring
-- **Hashrate** - Mining speed in TH/s
-- **Temperature** - Chip and board temperatures (°C)
-- **Power Draw** - Current power consumption (Watts)
-- **Uptime** - Miner operational time
-- **Pool Stats** - Accepted/rejected shares, reject rate
-- **Efficiency Metrics** - Daily profit, effective SCOP, cost comparisons
+### Backend
+| Technology | Version | Purpose |
+|------------|---------|---------|
+| Node.js | 18+ | Runtime environment |
+| Express.js | 4.18.2 | HTTP server framework |
+| ws | 8.14.2 | WebSocket server for real-time updates |
+| net (built-in) | - | TCP connections to CGMiner API |
+| https/http (built-in) | - | External API requests |
+| fs (built-in) | - | JSON file storage |
 
-### 4. Heating Efficiency Analysis
-- **Effective SCOP** calculation comparing miner heat vs heat pump (SCOP 3.5)
-- Daily cost comparisons:
-  - Daily electricity cost (with chosen pricing mode)
-  - Daily BTC earnings
-  - Daily profit/loss
-  - Equivalent heat pump cost
-  - Savings/extra cost vs heat pump
-- Breakeven BTC price calculation
+### Frontend
+| Technology | Version | Purpose |
+|------------|---------|---------|
+| React | 18.2.0 | UI component framework (CDN) |
+| ReactDOM | 18.2.0 | React DOM rendering (CDN) |
+| Babel Standalone | 7.23.5 | JSX transpilation in browser |
 
-### 5. Power Profile Management
-Each miner can be controlled independently:
-- **Low:** ~2000W (~48 kWh/day) - Minimal heating
-- **Medium:** ~3250W (~78 kWh/day) - Balanced (default)
-- **High:** ~3500W (~84 kWh/day) - Maximum heating
-
-### 6. 24-Hour Electricity Price Visualization
-- **Stacked bar chart** showing next 24 hours of electricity prices
-- **Two-layer visualization**:
-  - Blue bars (bottom): Base price (0.50 kr/kWh for Norgespris OR subsidized spot for Strømstøtteavtale)
-  - Orange bars (top): Grid fees (varies by time-of-day)
-- **Features**:
-  - Current hour highlighted in yellow
-  - Interactive tooltips with detailed breakdown per hour
-  - Price statistics (lowest, average, highest)
-  - Color-coded legend
-  - Mode-specific information panels
-- Component: `PriceGraphCard` in index.html (lines 620-771)
-
-### 7. Historical Data Charts
-- **Interactive line charts** displaying historical trends over time
-- **Three chart types**:
-  - Hashrate (TH/s) - Mining performance over time
-  - Temperature (°C) - Thermal patterns and trends
-  - Power Draw (W) - Energy consumption history
-- **Multi-miner support**:
-  - View individual miner data
-  - View all miners separately (multi-colored lines)
-  - View aggregated sum/total (combined hashrate/power, averaged temperature)
-- **Time range selection**: 24 hours, 7 days, 14 days, or 30 days
-- **Features**:
-  - Unified Y-axis scaling for accurate comparison
-  - X-axis time graduations (hourly for 24h, daily for longer periods)
-  - Interactive hover tooltips showing exact values and timestamps
-  - Real-time statistics (current, average, max, min, data points)
-  - Color-coded legend for multi-miner view
-  - Auto-refresh every 60 seconds
-- **Data storage**:
-  - Hourly snapshots saved to `history.json`
-  - Retains 720 entries (30 days)
-  - Per-miner tracking with IP and name
-- Component: `HistoricalChartsCard` in index.html (lines 1097-1536)
-- API Endpoint: `GET /api/history?days=7&minerIp=192.168.1.100`
+### Infrastructure
+| Technology | Purpose |
+|------------|---------|
+| Docker | Containerization (Node 18 Alpine) |
+| Umbrel | Target deployment platform |
+| Tailscale | Recommended VPN for remote access |
 
 ---
 
@@ -145,26 +107,510 @@ Each miner can be controlled independently:
 
 ```
 mining-dashboard-app/
-├── server.js                 # Backend Express server (2200+ lines)
+├── server.js                    # Backend Express server (2800+ lines)
+│                                # - All API endpoints
+│                                # - Miner communication logic
+│                                # - External API integrations
+│                                # - WebSocket server
+│                                # - Background polling
+│
 ├── public/
-│   └── index.html           # Frontend React app (1200+ lines)
-├── package.json             # Dependencies and metadata
-├── Dockerfile               # Container build instructions
-├── docker-compose.yaml      # Docker compose config
-├── umbrel-app.yaml         # Umbrel app manifest
-├── data/                    # Runtime data directory
-│   ├── config.json         # User configuration (auto-created)
-│   └── history.json        # Historical data (auto-created)
-├── README.md               # User documentation
-├── LICENSE                 # MIT License
-└── PROJECT_CONTEXT.md      # This file
+│   └── index.html               # Complete React frontend (2000+ lines)
+│                                # - All React components
+│                                # - Styling (inline CSS)
+│                                # - WebSocket client
+│
+├── package.json                 # NPM configuration
+│                                # - Dependencies: express, ws
+│                                # - Scripts: start, dev
+│
+├── Dockerfile                   # Docker build configuration
+│                                # - Base: node:18-alpine
+│                                # - Non-root user
+│                                # - Health checks
+│
+├── docker-compose.yaml          # Docker Compose for Umbrel
+├── umbrel-app.yaml              # Umbrel app manifest
+│
+├── data/                        # Runtime data (Docker volume)
+│   ├── config.json              # User configuration (auto-created)
+│   └── history.json             # Historical data (auto-created)
+│
+├── README.md                    # User documentation
+├── PROJECT_CONTEXT.md           # This technical documentation
+├── LICENSE                      # MIT License
+├── icon.svg                     # App icon
+│
+└── .github/
+    └── workflows/               # GitHub Actions (CI/CD)
 ```
+
+---
+
+## Backend Implementation
+
+### Core Server Setup (server.js:1-17)
+
+```javascript
+const express = require('express');
+const WebSocket = require('ws');
+const net = require('net');
+const PORT = process.env.PORT || 3456;
+const DATA_DIR = process.env.DATA_DIR || '/data';
+```
+
+### Cache Objects (server.js:39-78)
+
+The server maintains several in-memory caches to reduce API calls and improve response times:
+
+| Cache | Purpose | Refresh Interval |
+|-------|---------|------------------|
+| `electricityPriceCache` | Norwegian electricity spot prices | 30 minutes |
+| `btcPriceCache` | Bitcoin price in multiple currencies | 5 minutes |
+| `networkStatsCache` | Bitcoin difficulty, hashrate, block height | 10 minutes |
+| `minerStatsCache` | Current stats for all configured miners | 5 seconds |
+| `alertHistory` | Log of triggered alerts | Persistent |
+
+### Key Backend Functions
+
+#### Miner Communication
+
+| Function | Location | Purpose |
+|----------|----------|---------|
+| `sendCGMinerCommand(ip, command)` | Line 1184 | TCP connection to CGMiner API (port 4028) |
+| `fetchBraiinsGraphQL(ip)` | Line 120 | GraphQL queries with schema introspection |
+| `fetchBraiinsRestApiStats(ip)` | Line 936 | REST API data fetch with authentication |
+| `graphqlRequest(ip, query, sessionCookie)` | Line 714 | Execute GraphQL query |
+| `luciLogin(ip, username, password)` | Line 493 | LuCI session authentication |
+| `getSessionViaWebUI(ip, username, password)` | Line 662 | Web UI session handling |
+| `braiinsRestAuth(ip, username, password)` | Line 829 | REST API authentication |
+
+#### Data Extraction
+
+| Function | Location | Purpose |
+|----------|----------|---------|
+| `extractTemperatures(statsData, devsData, allStatsData)` | Line 1225 | Parse temperatures from 7+ field patterns |
+| `extractFanSpeeds(statsData, devsData, allStatsData)` | Line 1346 | Parse fan RPM from various formats |
+| `getMinerStats(ip, config)` | Line 1553 | Aggregate all miner stats from all APIs |
+
+#### External Data
+
+| Function | Location | Purpose |
+|----------|----------|---------|
+| `fetchElectricityPrices(country, zone)` | Line 983 | Fetch hourly prices with VAT calculation |
+| `fetchBTCPrice()` | Line 1050 | Bitcoin price in NOK, USD, EUR, SEK |
+| `fetchNetworkStats()` | Line 1074 | Bitcoin difficulty and network hashrate |
+
+#### Efficiency & Pricing
+
+| Function | Location | Purpose |
+|----------|----------|---------|
+| `calculateEfficiency(hashrate, power, price, btcPrice, currency)` | Line 1128 | Full profitability metrics |
+| `getGridFeeForTime(config, date)` | Line 1109 | Time-based grid fee calculation |
+| `checkAlerts(stats, config, minerName)` | Line 1426 | Alert threshold detection with cooldown |
+
+#### Configuration & Storage
+
+| Function | Location | Purpose |
+|----------|----------|---------|
+| `loadConfig()` | Line 2174 | Load config with backward compatibility |
+| `saveConfig(config)` | Line 2236 | Persist configuration to JSON |
+| `loadHistory()` | Line 2241 | Load historical data points |
+| `saveHistoryEntry(stats)` | Line 2253 | Append new data point (720 max) |
+
+#### Background Tasks
+
+| Function | Location | Purpose |
+|----------|----------|---------|
+| `pollMiners()` | Line 2616 | Fetch stats for all miners |
+| `startBackgroundMinerPolling()` | Line 2682 | Initialize 5-second polling loop |
+| `start()` | Line 2696 | Main startup sequence |
+
+---
+
+## Frontend Implementation
+
+### Component Hierarchy
+
+```
+Dashboard (Main App)
+├── Header
+│   ├── Settings Button → SettingsModal
+│   └── Add Miner Button → AddMinerModal
+│
+├── Global Stats Row
+│   ├── BTCPriceCard
+│   ├── NetworkCard
+│   └── ElectricityCard
+│
+├── PriceGraphCard (24-hour electricity visualization)
+│
+├── HistoricalChartsCard (hashrate/temp/power over time)
+│
+├── EfficiencyCard (aggregate profitability)
+│
+└── Miners Grid
+    └── MinerCard (one per miner)
+        ├── Stats Display
+        ├── Power Profile Buttons
+        └── Remove Button
+```
+
+### Modal Components
+
+#### SettingsModal
+- Pricing mode toggle (Norgespris vs Strømstøtteavtale)
+- Electricity zone selection (NO1-NO5)
+- Dual grid fee configuration (weekday day / weekend-night)
+- Alert threshold configuration
+
+#### AddMinerModal
+- IP address input with validation
+- Miner name input
+- Connection test before adding
+- Error display
+
+### Data Visualization Components
+
+#### PriceGraphCard
+- 24-hour stacked bar chart
+- Base price (blue) + Grid fees (orange)
+- Current hour highlighting
+- Interactive tooltips
+- Min/Avg/Max statistics
+
+#### HistoricalChartsCard
+- Line charts for hashrate, temperature, power
+- Multi-miner support with separate/aggregated views
+- Time range selection: 24h, 7d, 14d, 30d
+- Hover tooltips with exact values
+- Auto-refresh every 60 seconds
+
+### State Management
+
+```javascript
+// Main App state hooks
+const [miners, setMiners] = useState([]);
+const [electricity, setElectricity] = useState(null);
+const [btcPrice, setBtcPrice] = useState(null);
+const [network, setNetwork] = useState(null);
+const [alerts, setAlerts] = useState([]);
+const [config, setConfig] = useState(null);
+const [wsConnected, setWsConnected] = useState(false);
+```
+
+### WebSocket Connection
+
+```javascript
+// Reconnection logic with 5-second retry
+const connectWebSocket = useCallback(() => {
+  const ws = new WebSocket(`ws://${window.location.host}`);
+  ws.onmessage = (event) => {
+    const data = JSON.parse(event.data);
+    setMiners(data.miners);
+    setElectricity(data.electricity);
+    setBtcPrice(data.btcPrice);
+    setNetwork(data.network);
+    setAlerts(data.alerts);
+  };
+  ws.onclose = () => setTimeout(connectWebSocket, 5000);
+}, []);
+```
+
+---
+
+## External API Integrations
+
+### 1. hvakosterstrommen.no (Norwegian Electricity Prices)
+
+**Purpose:** Hourly spot electricity prices for Norwegian zones
+
+**Endpoint Pattern:**
+```
+https://www.hvakosterstrommen.no/api/v1/prices/{YYYY}/{MM-DD}_{ZONE}.json
+```
+
+**Response Format:**
+```json
+[
+  {
+    "NOK_per_kWh": 0.85,
+    "EUR_per_kWh": 0.075,
+    "time_start": "2025-12-30T00:00:00+01:00",
+    "time_end": "2025-12-30T01:00:00+01:00"
+  }
+]
+```
+
+**VAT Handling:**
+- Standard zones (NO1, NO2, NO3, NO5): 25% MVA added
+- Tromsø (NO4): 0% VAT
+
+**Refresh:** Every 30 minutes
+
+### 2. CoinGecko API (Bitcoin Price)
+
+**Endpoint:**
+```
+https://api.coingecko.com/api/v3/simple/price?ids=bitcoin&vs_currencies=usd,nok,eur,sek
+```
+
+**Response Format:**
+```json
+{
+  "bitcoin": {
+    "usd": 95000,
+    "nok": 1050000,
+    "eur": 88000,
+    "sek": 1020000
+  }
+}
+```
+
+**Refresh:** Every 5 minutes
+
+### 3. blockchain.info (Network Stats)
+
+**Endpoint:**
+```
+https://api.blockchain.info/stats
+```
+
+**Response Format:**
+```json
+{
+  "difficulty": 72000000000000,
+  "hash_rate": 600000000000000000,
+  "n_blocks_total": 820000,
+  "market_price_usd": 95000
+}
+```
+
+**Refresh:** Every 10 minutes
+
+---
+
+## Miner Communication Protocols
+
+### 1. CGMiner JSON-RPC API (Port 4028)
+
+**Protocol:** TCP socket with JSON commands
+
+**Implementation:** `sendCGMinerCommand()` at line 1184
+
+**Commands Used:**
+
+| Command | Purpose | Response Fields |
+|---------|---------|-----------------|
+| `summary` | Overall mining stats | `SUMMARY.MHS 5s`, `SUMMARY.Elapsed` |
+| `stats` | Detailed statistics | Temperature, fan, hashboard data |
+| `devs` | Device information | Per-device hashrate and temp |
+| `pools` | Pool connections | Status, accepted/rejected shares |
+| `fans` | Fan speeds | RPM values |
+| `temps` | Temperature data | Board and chip temps |
+| `tunerstatus` | Tuner state | Power target, efficiency |
+
+**Power Control:**
+```javascript
+{ command: 'ascset', parameter: '0,power,WATTS' }
+```
+
+### 2. Braiins OS GraphQL API (Port 80)
+
+**Implementation:** `fetchBraiinsGraphQL()` at line 120
+
+**Authentication:** LuCI session token via web login
+
+**Schema Discovery:** Full introspection to find available fields
+
+**Example Query:**
+```graphql
+{
+  bosminer {
+    info {
+      tempCtrl { targetC, hotC, dangerousC }
+      fans { name, speed, rpm }
+      workSolver {
+        temperatures { name, degreesC }
+      }
+    }
+  }
+}
+```
+
+### 3. Braiins REST API (Port 80)
+
+**Implementation:** `fetchBraiinsRestApiStats()` at line 936
+
+**Endpoints:**
+| Endpoint | Purpose |
+|----------|---------|
+| `/api/v1/auth/login` | Authentication |
+| `/api/v1/miner/stats` | Mining statistics |
+| `/api/v1/miner/hw/hashboards` | Hashboard details |
+| `/api/v1/cooling/state` | Cooling status |
+| `/api/v1/performance/target-profiles` | Power profiles |
+
+### Temperature Detection Patterns
+
+The system tries 7+ patterns to extract temperatures (line 1225):
+
+1. `temp_chip_X` / `temp_pcb_X` (Braiins S19 format)
+2. `temp1`, `temp2`, `temp3` (older format)
+3. `temp2_1`, `temp2_2`, `temp2_3` (some Antminers)
+4. `Temperature` field from devs
+5. `chain_tempX` patterns
+6. Search for any field containing 'temp'
+7. Value range detection (20-100°C)
+
+### Fan Speed Detection Patterns
+
+Similar multi-pattern detection (line 1346):
+
+1. `fan1`, `fan2`, `fan3`, `fan4`
+2. `fan_speed_in`, `fan_speed_out`
+3. Capitalized variants (`Fan1`, `Fan2`)
+4. `Fan Speed In`, `Fan Speed Out`
+5. Search for 'fan' or 'rpm' in field names
+
+---
+
+## Data Flow & Caching
+
+### Startup Sequence
+
+```
+1. ensureDataDir()         → Create /data directory
+2. loadConfig()            → Load user configuration
+3. fetchElectricityPrices()→ Initial price data
+4. fetchBTCPrice()         → Initial BTC price
+5. fetchNetworkStats()     → Initial network stats
+6. startBackgroundPolling()→ Begin 5-second miner polling
+7. app.listen(3456)        → Start HTTP server
+8. WebSocket server init   → Ready for clients
+```
+
+### Background Polling Loop
+
+```
+Every 5 seconds:
+┌─────────────────────────────────────────────────────┐
+│ pollMiners()                                         │
+├─────────────────────────────────────────────────────┤
+│ 1. Load current config                              │
+│ 2. For each miner in parallel:                      │
+│    ├─ sendCGMinerCommand('summary')                 │
+│    ├─ sendCGMinerCommand('stats')                   │
+│    ├─ sendCGMinerCommand('pools')                   │
+│    ├─ fetchBraiinsGraphQL() (for temps/fans)        │
+│    └─ calculateEfficiency()                         │
+│ 3. Check alerts for each miner                      │
+│ 4. Update minerStatsCache                           │
+│ 5. Broadcast to all WebSocket clients               │
+│ 6. Every hour: saveHistoryEntry()                   │
+└─────────────────────────────────────────────────────┘
+```
+
+### WebSocket Data Broadcast
+
+```javascript
+{
+  miners: [{
+    minerIp, minerName, hashrate, temperature, power,
+    uptime, boards, fans, poolStatus, acceptedShares,
+    rejectedShares, rejectRate, powerProfile, efficiency, error
+  }],
+  electricity: {
+    rawSpotPrice, basePrice, gridFee, effectivePrice,
+    subsidyApplied, subsidyAmount, priceMode, zone, zoneName,
+    currency, prices[]
+  },
+  btcPrice: { nok, eur, sek, usd },
+  network: { difficulty, hashrate, hashrateFormatted, blockHeight, blockReward },
+  alerts: [{ type, severity, message, minerName, timestamp }],
+  alertHistory: [last 20 alerts]
+}
+```
+
+---
+
+## Feature Documentation
+
+### 1. Multi-Miner Management
+
+- Add/remove miners via UI
+- Each miner tracked independently
+- Parallel polling for performance
+- Per-miner power profile control
+- Automatic config migration from single-miner format
+
+### 2. Norwegian Electricity Pricing
+
+#### Norgespris Mode
+- Fixed base price: **0.50 NOK/kWh**
+- Plus time-of-day grid fees
+- Formula: `Total = 0.50 + GridFee`
+
+#### Strømstøtteavtale Mode (with State Subsidy)
+- Spot price with 90% subsidy above threshold
+- Threshold: **93.75 øre/kWh (0.9375 NOK/kWh)**
+- Formula: `Effective = Spot - ((Spot - 0.9375) × 0.90) + GridFee`
+
+#### Time-of-Day Grid Fees
+- **Weekday Day** (Mon-Fri 06:00-22:00): Default 0.50 kr/kWh
+- **Weekend/Night** (all other times): Default 0.30 kr/kWh
+- Configurable in settings
+
+### 3. Power Profile Control
+
+| Profile | Power Target | Daily kWh | Use Case |
+|---------|--------------|-----------|----------|
+| Low | ~2000W | ~48 kWh | Minimal heating |
+| Medium | ~3250W | ~78 kWh | Balanced (default) |
+| High | ~3500W | ~84 kWh | Maximum heating |
+
+Implementation uses CGMiner `ascset` command.
+
+### 4. Efficiency Metrics
+
+```javascript
+// Daily BTC estimate
+dailyBTC = (minerHashrate / networkHashrate) × blockReward × blocksPerDay
+
+// Daily electricity cost
+dailyCost = (power / 1000) × 24 × electricityPrice
+
+// Effective SCOP (vs heat pump)
+effectiveSCOP = 1 / (1 - (btcEarnings / electricityCost))
+
+// Heating savings
+savings = heatPumpCost - electricityCost + btcEarnings
+```
+
+### 5. Alert System
+
+| Alert Type | Default Threshold | Cooldown |
+|------------|-------------------|----------|
+| High Temperature | 80°C | 15 minutes |
+| Low Hashrate | 80% of expected | 15 minutes |
+| Miner Offline | N/A | 15 minutes |
+| High Reject Rate | 5% | 15 minutes |
+
+Alerts are persisted in `alertHistory` array (last 100).
+
+### 6. Historical Data
+
+- Hourly snapshots saved to `history.json`
+- Retains 720 entries (30 days)
+- Fields: timestamp, minerIp, minerName, hashrate, power, temperature, electricityPrice, btcPrice, networkDifficulty, dailyProfit, effectiveSCOP
+- API: `GET /api/history?days=7&minerIp=X.X.X.X`
 
 ---
 
 ## Configuration Schema
 
 ### config.json Structure
+
 ```json
 {
   "miners": [
@@ -179,435 +625,268 @@ mining-dashboard-app/
   "gridFeeWeekdayDay": 0.50,
   "gridFeeWeekendNight": 0.30,
   "priceMode": "stromstotteavtale",
-  "updatedAt": "2025-12-29T..."
+  "alerts": {
+    "enabled": true,
+    "highTemp": { "enabled": true, "threshold": 80 },
+    "lowHashrate": { "enabled": true, "threshold": 80 },
+    "minerOffline": { "enabled": true },
+    "highRejectRate": { "enabled": true, "threshold": 5 },
+    "cooldownMinutes": 15
+  },
+  "updatedAt": "2025-12-30T..."
 }
 ```
-
-**Note:** Old configs with `gridFeePerKwh` are automatically migrated to the dual grid fee format on load.
 
 ### Available Electricity Zones
-- **NO1:** Oslo / Øst-Norge
-- **NO2:** Kristiansand / Sør-Norge
-- **NO3:** Trondheim / Midt-Norge
-- **NO4:** Tromsø / Nord-Norge (0% VAT)
-- **NO5:** Bergen / Vest-Norge
 
----
-
-## API Endpoints
-
-### Configuration
-- `GET /api/config` - Load configuration
-- `POST /api/config` - Save configuration
-
-### Miner Management
-- `POST /api/miners/add` - Add new miner (`{ip, name}`)
-- `POST /api/miners/remove` - Remove miner (`{ip}`)
-- `POST /api/miners/update` - Update miner details (`{ip, name?, powerProfile?}`)
-- `POST /api/miner/test` - Test miner connection (`{minerIP}`)
-
-### Miner Control
-- `POST /api/miner/power` - Set power profile (`{ip, profile}`)
-  - Profiles: "low", "medium", "high"
-
-### Data Endpoints
-- `GET /api/electricity/prices` - Get electricity prices for zone
-- `GET /api/electricity/zones` - Get available zones/countries
-
-### WebSocket
-- `ws://localhost:3456` - Real-time data stream
-- Sends every 5 seconds:
-```json
-{
-  "miners": [
-    {
-      "minerIp": "192.168.1.100",
-      "minerName": "Miner 1",
-      "hashrate": 100.5,
-      "temperature": 65,
-      "powerDraw": 3250,
-      "uptime": 86400,
-      "boards": [...],
-      "fans": {...},
-      "poolStatus": "Connected",
-      "acceptedShares": 1000,
-      "rejectedShares": 5,
-      "rejectRate": 0.5,
-      "powerProfile": "medium",
-      "efficiency": {...},
-      "error": null
-    }
-  ],
-  "electricity": {
-    "rawSpotPrice": 1.50,
-    "basePrice": 0.994,
-    "gridFee": 0.50,
-    "effectivePrice": 1.494,
-    "subsidyApplied": true,
-    "subsidyAmount": 0.506,
-    "priceMode": "stromstotteavtale",
-    "zone": "NO5",
-    "zoneName": "Bergen / Vest-Norge",
-    "currency": "NOK",
-    "prices": [...]
-  },
-  "btcPrice": {
-    "nok": 1000000,
-    "eur": 90000,
-    "sek": 1000000,
-    "usd": 95000
-  },
-  "network": {
-    "difficulty": 72000000000000,
-    "hashrate": 600000000,
-    "hashrateFormatted": "600 EH/s",
-    "blockHeight": 820000,
-    "blockReward": 3.125
-  }
-}
-```
-
----
-
-## Key Functions & Logic
-
-### Backend (server.js)
-
-#### Miner Statistics (`getMinerStats`)
-- Lines 1520-1690
-- Fetches data from CGMiner API + GraphQL
-- Calculates efficiency metrics
-- Returns complete stats object with pricing
-
-#### Grid Fee Calculation (`getGridFeeForTime`)
-- Lines 933-952
-- Determines applicable grid fee based on day of week and hour
-- Returns weekday day rate (Mon–Fri 06:00–22:00) or weekend/night rate
-- Used by `getMinerStats()` for current pricing
-
-#### Electricity Pricing (`calculateEfficiency`)
-- Lines 954-1000+
-- Implements Norgespris vs Strømstøtteavtale logic
-- Applies state subsidy calculation
-- Returns effective price and efficiency metrics
-
-#### CGMiner Communication (`sendCGMinerCommand`)
-- Lines 1378-1420
-- JSON-RPC protocol over TCP
-- Timeout handling (10s default)
-- Returns parsed response
-
-#### Configuration Management
-- `loadConfig()` - Lines 1748-1787
-  - Auto-migrates old single-miner format to multi-miner
-  - Auto-migrates old `gridFeePerKwh` to dual grid fee format
-  - Returns default config if not exists
-- `saveConfig()` - Lines 1789-1792
-
-#### Historical Data Management
-- `loadHistory()` - Lines 1815-1825
-  - Loads historical data from `history.json`
-  - Returns empty structure if file doesn't exist
-- `saveHistoryEntry(stats)` - Lines 1827-1854
-  - Saves hourly snapshot of miner stats
-  - Includes: timestamp, minerIp, minerName, hashrate, temperature, power, prices
-  - Maintains rolling 720-entry limit (30 days)
-  - Called hourly via WebSocket loop
-- API: `GET /api/history?days=7&minerIp=<ip>` - Lines 2128-2147
-  - Returns filtered historical entries
-  - Supports `days` parameter (default: 7)
-  - Optional `minerIp` filter for single-miner data
-
-### Frontend (index.html)
-
-#### Components
-1. **SettingsModal** (lines 174-335)
-   - Pricing mode toggle (Norgespris/Strømstøtteavtale)
-   - Dual grid fee inputs (weekday day & weekend/night)
-   - Country/zone selection
-
-2. **PriceGraphCard** (lines 620-771)
-   - 24-hour electricity price visualization
-   - Stacked bar chart with base price + grid fees
-   - Time-of-day grid fee calculation per hour
-   - Interactive tooltips and price statistics
-   - Current hour highlighting
-
-3. **HistoricalChartsCard** (lines 1097-1536)
-   - Interactive line charts for hashrate, temperature, power
-   - Multi-miner support with separate or aggregated views
-   - Time range selection (24h, 7d, 14d, 30d)
-   - Unified Y-axis scaling across all miners
-   - X-axis time graduations (hourly/daily)
-   - Hover tooltips with exact values and timestamps
-   - Real-time statistics display
-   - Auto-refresh every 60 seconds
-   - Color-coded legend for multi-miner view
-
-4. **AddMinerModal** (lines ~773-943)
-   - IP and name input
-   - Connection test before adding
-   - Error handling
-
-5. **MinerCard** (lines ~945-1100)
-   - Individual miner display
-   - Stats, efficiency, power profiles
-   - Remove button
-
-6. **ElectricityCard** (lines 489-596)
-   - Shows spot prices, grid fees, total
-   - Subsidy information display
-   - Hourly price chart (simplified)
-
-7. **EfficiencyCard** (lines 393-485)
-   - Daily costs and earnings
-   - SCOP comparison
-   - Heat pump cost comparison
-
-8. **Dashboard** (lines ~1540+)
-   - Main container
-   - WebSocket connection
-   - Miner management functions
-   - Layout: Global data → PriceGraphCard → HistoricalChartsCard → Miners grid
-
----
-
-## Common Customization Points
-
-### Modifying Grid Fee Time Periods
-1. Update `getGridFeeForTime()` in server.js (lines 933-952) - Backend calculation
-2. Update `getGridFeeForHour()` in PriceGraphCard (lines 629-644) - Frontend visualization
-3. Adjust hour ranges and day-of-week logic as needed
-
-### Adding New Pricing Modes
-1. Update `server.js` lines 1604-1627 (pricing calculation in getMinerStats)
-2. Update `public/index.html` lines 218-238 (settings modal toggle)
-3. Update PriceGraphCard display logic (lines 631-663)
-4. Update ElectricityCard display logic (lines 489-596)
-
-### Adding New Miner Metrics
-1. Extract data in `getMinerStats()` function
-2. Add to returned stats object (lines 1615-1680)
-3. Display in MinerCard component (lines 808-838)
-
-### Changing Power Profiles
-1. Backend: `setPowerProfile()` function (lines 1434-1518)
-2. Frontend: Profile buttons in MinerCard (lines 860-892)
-3. Update power/kWh estimates in labels
-
-### Adding New Countries/Zones
-1. Update `ELECTRICITY_ZONES` object (lines 23-37)
-2. Add API integration for that country's pricing
-3. Update currency handling throughout
-
----
-
-## Dependencies
-
-### Backend (package.json)
-```json
-{
-  "express": "^4.18.2",
-  "ws": "^8.14.2"
-}
-```
-
-### Frontend (CDN)
-- React 18.2.0
-- ReactDOM 18.2.0
-- Babel Standalone 7.23.5
-
-
----
-
-## Development Workflow
-
-### Automated Deployment to Umbrel
-- Changes pushed to GitHub automatically trigger deployment to Umbrel server
-- Testing is performed directly on the Umbrel instance after deployment
-- No local testing required - production testing workflow
-- Allows for rapid iteration and testing in the actual deployment environment
-
-### Workflow Steps
-1. Make code changes locally
-2. Commit and push to GitHub repository
-3. Automated workflow deploys to Umbrel server
-4. Test functionality on Umbrel instance
-5. Iterate as needed
-
----
-
-## Environment Variables
-
-- `PORT` - Server port (default: 3456)
-- `DATA_DIR` - Data directory path (default: /data)
-- `NODE_ENV` - Environment (development/production)
-
----
-
-## Important Notes
+| Zone | Name | VAT Rate |
+|------|------|----------|
+| NO1 | Oslo / Øst-Norge | 25% |
+| NO2 | Kristiansand / Sør-Norge | 25% |
+| NO3 | Trondheim / Midt-Norge | 25% |
+| NO4 | Tromsø / Nord-Norge | 0% |
+| NO5 | Bergen / Vest-Norge | 25% |
 
 ### Migration Behavior
-- Old single-miner configs automatically migrate to multi-miner format
-  - Migration happens in `loadConfig()` at lines 1754-1763
-  - Original config is preserved with new `miners` array
-- Old `gridFeePerKwh` configs automatically migrate to dual grid fee format
-  - Migration happens in `loadConfig()` at lines 1765-1771
-  - Weekday day rate set to old value
-  - Weekend/night rate set to 60% of old value as default
 
-### WebSocket Reconnection
-- Auto-reconnects every 5 seconds on disconnect
-- Handles connection errors gracefully
-- No manual reconnect needed
+**Single-miner to multi-miner:**
+```javascript
+// Old format with minerIP
+{ minerIP: "192.168.1.100", ... }
+// Migrated to
+{ miners: [{ ip: "192.168.1.100", name: "Miner 1" }], ... }
+```
 
-### Error Handling
-- Per-miner errors don't affect other miners
-- Global data (electricity/BTC) fetched independently
-- Errors displayed in UI with context
-
-### Data Persistence
-- Config saved to `/data/config.json` on changes
-- History saved hourly to `/data/history.json`
-- Both created automatically if missing
-
----
-
-## Common Issues & Solutions
-
-### "Cannot read properties of undefined (reading 'some')"
-- **Cause:** `config.miners` is undefined
-- **Fix:** Added null check at line 1944-1946
-- Ensure `loadConfig()` always returns `miners: []`
-
-### Miners not connecting
-- Check CGMiner API port 4028 is accessible
-- Verify Braiins OS is running (not stock firmware)
-- Test with `/api/miner/test` endpoint first
-
-### Incorrect electricity pricing
-- Verify `priceMode` is set correctly
-- Check `gridFeePerKwh` value (in NOK/kWh)
-- Ensure spot price API is accessible
-- Subsidy only applies when spot > 0.9375 NOK/kWh
-
-### WebSocket disconnects
-- Normal behavior - auto-reconnects
-- Check firewall/proxy settings
-- Verify port 3456 is accessible
-
----
-
-## Code Style & Patterns
-
-### Backend
-- Async/await for all async operations
-- Try-catch error handling with logging
-- Express middleware for JSON parsing
-- WebSocket for real-time updates
-
-### Frontend
-- React functional components with hooks
-- useState for local state
-- useEffect for lifecycle
-- useCallback for WebSocket setup
-- Inline styles (no CSS files)
-- ES6+ syntax via Babel
-
----
-
-## Testing
-
-### Manual Testing
-1. Add miner via UI
-2. Verify connection in miner card
-3. Change power profile
-4. Check settings modal (pricing modes and dual grid fees)
-5. Monitor WebSocket updates
-6. View 24-hour price graph
-7. Test time-of-day grid fee calculations
-8. Remove miner
-
-### Test Connection Endpoint
-```bash
-curl -X POST http://localhost:3456/api/miner/test \
-  -H "Content-Type: application/json" \
-  -d '{"minerIP": "192.168.1.100"}'
+**Single grid fee to dual:**
+```javascript
+// Old format
+{ gridFeePerKwh: 0.50 }
+// Migrated to
+{ gridFeeWeekdayDay: 0.50, gridFeeWeekendNight: 0.30 }
 ```
 
 ---
 
-## Recent Updates (December 2025)
+## API Reference
 
-### Historical Data Charts (v1.3.1)
-- Added interactive line charts for hashrate, temperature, and power draw
-- Multi-miner support with separate or aggregated views
-- Time range selection: 24h, 7d, 14d, 30d
-- Hover tooltips showing exact values and timestamps
-- Unified Y-axis scaling for accurate multi-miner comparison
-- X-axis time graduations (hourly/daily based on range)
-- Auto-refresh every 60 seconds
-- Data persisted in `history.json` (720 entries, 30 days retention)
-- Per-miner tracking with IP and name identification
-- Component: `HistoricalChartsCard` (index.html lines 1097-1536)
-- API: `GET /api/history?days=7&minerIp=<ip>` (server.js lines 2128-2147)
+### Health & Configuration
 
-### 24-Hour Electricity Price Graph (v1.3.0)
-- Added comprehensive price visualization showing next 24 hours
-- Stacked bar chart displays base price + time-varying grid fees
-- Current hour highlighted for easy reference
-- Interactive tooltips with detailed price breakdown per hour
-- Price statistics (min/avg/max) displayed below graph
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| GET | `/health` | Health check (returns 200) |
+| GET | `/api/config` | Load user configuration |
+| POST | `/api/config` | Save configuration |
 
-### Time-of-Day Grid Fees (v1.3.0)
-- Replaced single grid fee with dual rate system:
-  - Weekday day rate (Mon–Fri 06:00–22:00)
-  - Weekend/night rate (Sat, Sun, Mon–Fri 22:00–06:00)
-- Automatic calculation based on current time
-- Backend function: `getGridFeeForTime()` (server.js)
-- Frontend visualization updates per hour in graph
-- Settings UI updated with separate inputs for each rate
-- Automatic migration from old single-rate configs
+### Miner Management
+
+| Method | Endpoint | Body | Description |
+|--------|----------|------|-------------|
+| GET | `/api/miner/stats?ip=X.X.X.X` | - | Get single miner stats |
+| POST | `/api/miner/power` | `{ip, profile}` | Set power profile |
+| POST | `/api/miner/test` | `{minerIP}` | Test miner connection |
+| POST | `/api/miners/add` | `{ip, name}` | Add new miner |
+| POST | `/api/miners/remove` | `{ip}` | Remove miner |
+| POST | `/api/miners/update` | `{ip, name?, powerProfile?}` | Update miner |
+
+### Market Data
+
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| GET | `/api/electricity/zones` | Get available zones |
+| GET | `/api/electricity/prices` | Get current hourly prices |
+| GET | `/api/btc/price` | Get Bitcoin price |
+| GET | `/api/network/stats` | Get network stats |
+
+### History & Alerts
+
+| Method | Endpoint | Query Params | Description |
+|--------|----------|--------------|-------------|
+| GET | `/api/history` | `days`, `minerIp` | Get historical data |
+| GET | `/api/alerts/history` | `limit` | Get alert history |
+| POST | `/api/alerts/config` | Alert settings | Update alert config |
+| POST | `/api/alerts/clear` | - | Clear alert history |
+
+### WebSocket
+
+**Endpoint:** `ws://host:3456/`
+
+**Data Format:** See [WebSocket Data Broadcast](#websocket-data-broadcast)
+
+**Reconnection:** Client auto-reconnects every 5 seconds
 
 ---
 
-## Future Enhancement Ideas
+## Deployment
 
-- [ ] Multi-currency support beyond NOK/EUR/SEK/USD
-- [x] ~~Historical data charts (hashrate, temperature over time)~~ - **Completed v1.3.1**
-- [ ] Alert system (high temp, low hashrate, disconnected miner)
-- [ ] Auto power profile switching based on electricity price
-- [ ] Mobile app or responsive improvements
-- [ ] Multiple mining pools support
-- [ ] Profitability calculator with custom scenarios
-- [ ] Energy usage tracking and reports
-- [ ] Integration with home automation systems
-- [ ] Support for more complex grid fee structures (seasonal, multiple time periods)
-- [ ] Export historical data to CSV/JSON
-- [ ] Customizable chart colors and themes
+### Docker Configuration
+
+```dockerfile
+FROM node:18-alpine
+WORKDIR /app
+COPY package*.json ./
+RUN npm ci --only=production
+COPY . .
+USER 1000
+EXPOSE 3456
+HEALTHCHECK --interval=30s CMD wget -q --spider http://localhost:3456/health
+CMD ["node", "server.js"]
+```
+
+### Environment Variables
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `PORT` | 3456 | Server port |
+| `DATA_DIR` | /data | Data storage directory |
+| `NODE_ENV` | production | Environment mode |
+
+### Umbrel Deployment
+
+The app includes `umbrel-app.yaml` manifest for easy installation on Umbrel home servers.
+
+### Docker Compose
+
+```yaml
+services:
+  mining-dashboard:
+    image: jacks-mining-dashboard:latest
+    ports:
+      - "3456:3456"
+    volumes:
+      - ./data:/data
+    restart: unless-stopped
+```
 
 ---
 
 ## Security Considerations
 
-- No authentication (relies on network security)
-- Designed for private networks + Tailscale VPN
-- No external data transmission
-- Config stored locally in Docker volume
-- CGMiner API is local network only
-- Consider adding auth if exposing to internet
+### Implemented
+
+- Non-root Docker user (UID 1000)
+- HTTPS for external API calls
+- LuCI session authentication for miner APIs
+- No sensitive data stored in code
+- Local network assumption
+
+### Not Implemented
+
+- User authentication for dashboard
+- API key validation
+- Rate limiting
+- Input sanitization
+- HTTPS for dashboard itself
+
+### Recommendations
+
+- Run on private network only
+- Use Tailscale VPN for remote access
+- Consider adding authentication if exposing to internet
+- Default miner credentials (root:root) should be changed
 
 ---
 
-## Performance Notes
+## Troubleshooting
 
-- WebSocket updates: 5 seconds interval
-- Electricity prices: Cached 30 minutes
-- BTC price: Cached 5 minutes
-- Network stats: Cached 10 minutes
-- Multiple miners fetched in parallel (Promise.all)
-- Historical data saved hourly
+### Miner Connection Issues
+
+```bash
+# Test CGMiner API connectivity
+nc -zv [miner-ip] 4028
+
+# Test with curl
+curl -X POST http://localhost:3456/api/miner/test \
+  -H "Content-Type: application/json" \
+  -d '{"minerIP": "192.168.1.100"}'
+```
+
+**Common causes:**
+- Miner not running Braiins OS
+- Firewall blocking port 4028
+- Incorrect IP address
+- CGMiner API disabled
+
+### WebSocket Disconnects
+
+Auto-reconnects every 5 seconds. If persistent:
+- Check port 3456 accessibility
+- Verify no proxy interference
+- Clear browser cache
+
+### Incorrect Pricing
+
+- Verify `priceMode` setting
+- Check `electricityZone` matches your location
+- Confirm grid fee values
+- Subsidy only applies when spot > 0.9375 NOK/kWh
+
+### Docker Issues
+
+```bash
+# View logs
+docker logs jacks-mining-dashboard
+
+# Restart container
+docker restart jacks-mining-dashboard
+
+# Check health
+curl http://localhost:3456/health
+```
 
 ---
 
-This context document should provide a complete picture of the project for LLM-assisted development. When requesting changes, reference this document and specify which components/functions need modification.
+## Development Workflow
+
+### Local Development
+
+```bash
+npm install
+npm run dev  # NODE_ENV=development
+```
+
+### Automated Deployment
+
+Changes pushed to GitHub trigger automatic deployment to Umbrel server. Testing is performed directly on the Umbrel instance.
+
+### Code Style
+
+- **Backend:** Async/await, try-catch error handling, extensive logging
+- **Frontend:** React functional components, hooks, inline CSS
+- **No TypeScript:** Plain JavaScript throughout
+
+---
+
+## Performance Characteristics
+
+| Metric | Value |
+|--------|-------|
+| Memory footprint | ~50-100MB |
+| Miner poll interval | 5 seconds |
+| WebSocket broadcast | 5 seconds |
+| Electricity price refresh | 30 minutes |
+| BTC price refresh | 5 minutes |
+| Network stats refresh | 10 minutes |
+| History retention | 720 entries (30 days) |
+
+---
+
+## Version History
+
+### v1.2.11 (Current)
+- Background miner polling system
+- Alert system with configurable thresholds
+- Multi-miner parallel polling
+
+### v1.3.1
+- Historical data charts (hashrate, temperature, power)
+- Multi-miner aggregated views
+- Time range selection
+
+### v1.3.0
+- 24-hour electricity price graph
+- Time-of-day grid fees (weekday/weekend)
+- Stacked bar visualization
+
+---
+
+*This documentation provides complete technical context for LLM-assisted development. When requesting changes, reference specific sections, functions, or line numbers.*
