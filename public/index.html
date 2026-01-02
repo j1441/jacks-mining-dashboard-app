@@ -20,11 +20,15 @@
     <link rel="icon" type="image/png" sizes="16x16" href="/icons/icon-72x72.png">
 
     <!-- Apple Touch Icons (iOS requires exact sizes, no transparency) -->
+    <!-- Default icon (no size) - iOS uses this as fallback -->
     <link rel="apple-touch-icon" href="/apple-touch-icon.png">
-    <link rel="apple-touch-icon" sizes="180x180" href="/icons/apple-touch-icon-180x180.png">
+    <!-- Sized icons for specific devices -->
+    <link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon.png">
     <link rel="apple-touch-icon" sizes="167x167" href="/icons/apple-touch-icon-167x167.png">
     <link rel="apple-touch-icon" sizes="152x152" href="/icons/apple-touch-icon-152x152.png">
     <link rel="apple-touch-icon" sizes="120x120" href="/icons/apple-touch-icon-120x120.png">
+    <!-- Precomposed variant (tells iOS not to add effects) -->
+    <link rel="apple-touch-icon-precomposed" href="/apple-touch-icon.png">
     <script crossorigin src="https://cdnjs.cloudflare.com/ajax/libs/react/18.2.0/umd/react.production.min.js"></script>
     <script crossorigin src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.2.0/umd/react-dom.production.min.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/babel-standalone/7.23.5/babel.min.js"></script>
