@@ -19,6 +19,14 @@ const path = require('path');
 const sizes = [72, 96, 128, 144, 152, 192, 384, 512];
 const maskableSizes = [192, 512];
 
+// iOS-specific sizes (Apple requires exact sizes)
+const iosSizes = [
+    { size: 180, name: 'apple-touch-icon-180x180' },  // iPhone retina
+    { size: 167, name: 'apple-touch-icon-167x167' },  // iPad Pro
+    { size: 152, name: 'apple-touch-icon-152x152' },  // iPad retina
+    { size: 120, name: 'apple-touch-icon-120x120' },  // iPhone
+];
+
 const svgSource = path.join(__dirname, '..', 'icon.svg');
 const outputDir = path.join(__dirname, '..', 'public', 'icons');
 
@@ -46,7 +54,30 @@ async function generateIcons() {
             console.log(`  Created: icon-${size}x${size}.png`);
         }
 
+        // Generate iOS-specific icons (Apple Touch Icons)
+        // iOS requires NO transparency and NO rounded corners (iOS adds those)
+        console.log('\nGenerating iOS icons...');
+        for (const { size, name } of iosSizes) {
+            const outputPath = path.join(outputDir, `${name}.png`);
+            await sharp(Buffer.from(svgContent))
+                .resize(size, size)
+                .flatten({ background: { r: 26, g: 26, b: 46 } }) // Remove transparency
+                .png()
+                .toFile(outputPath);
+            console.log(`  Created: ${name}.png`);
+        }
+
+        // Also create the default apple-touch-icon.png (180x180) in public root
+        const defaultAppleIcon = path.join(__dirname, '..', 'public', 'apple-touch-icon.png');
+        await sharp(Buffer.from(svgContent))
+            .resize(180, 180)
+            .flatten({ background: { r: 26, g: 26, b: 46 } })
+            .png()
+            .toFile(defaultAppleIcon);
+        console.log('  Created: apple-touch-icon.png (in public root)');
+
         // Generate maskable icons (with padding for safe zone)
+        console.log('\nGenerating maskable icons...');
         for (const size of maskableSizes) {
             const outputPath = path.join(outputDir, `icon-maskable-${size}x${size}.png`);
             const innerSize = Math.floor(size * 0.8); // 80% of total size for safe zone
