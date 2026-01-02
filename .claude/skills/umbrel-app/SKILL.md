@@ -7,6 +7,17 @@ description: Helps build, configure, debug, and troubleshoot Umbrel OS applicati
 
 This skill provides expert guidance for developing applications for Umbrel OS, based on real-world experience and the official Umbrel app framework.
 
+## 🚨 IMPORTANT: Jack's Community Store Context
+
+**We are building apps for Jack's Community Store (non-official community apps), NOT the official Umbrel App Store.**
+
+Key differences:
+- **Repository**: Apps live in `/Users/james/Jack-s-Community-Store/`
+- **App naming**: Prefix all apps with `jacks-` (e.g., `jacks-mining-dashboard`)
+- **Architecture**: Build for **AMD64 ONLY** (linux/amd64), NOT ARM64
+- **Deployment**: Commit directly to our repository, no PR to official Umbrel store
+- **Docker platform**: Always use `--platform linux/amd64`
+
 ## When to Use This Skill
 
 Use this skill when you need help with:
@@ -87,23 +98,25 @@ services:
 
 ## Common Tasks & Solutions
 
-### 1. Creating a New Umbrel App
+### 1. Creating a New Umbrel App for Jack's Community Store
 
-**Step 1: Fork the umbrel-apps repository**
+**IMPORTANT**: We are building apps for Jack's Community Store (non-official apps), NOT the official Umbrel App Store.
+
+**Step 1: Navigate to Jack's Community Store repository**
 ```bash
-git clone https://github.com/YOUR-USERNAME/umbrel-apps.git
-cd umbrel-apps
+cd /Users/james/Jack-s-Community-Store
 ```
 
 **Step 2: Choose an app ID**
 - Use lowercase letters and dashes only
+- Prefix with "jacks-" for Jack's Community Store apps
 - Make it human-readable and recognizable
-- Example: `btc-rpc-explorer`, `mining-dashboard`
+- Example: `jacks-mining-dashboard`, `jacks-aiostreams`
 
 **Step 3: Create app directory**
 ```bash
-mkdir your-app-id
-cd your-app-id
+mkdir jacks-your-app-name
+cd jacks-your-app-name
 ```
 
 **Step 4: Create required files**
@@ -113,27 +126,27 @@ cd your-app-id
 
 For complete examples, see [EXAMPLES.md](EXAMPLES.md).
 
-### 2. Building Multi-Architecture Docker Images
+### 2. Building Docker Images (AMD64 Only)
 
-Umbrel supports both ARM64 and AMD64 architectures. Build and push multi-arch images:
+**IMPORTANT**: We only build for AMD64 architecture (linux/amd64), NOT ARM64.
 
 ```bash
 # Enable Docker buildx
 docker buildx create --use
 
-# Build and push multi-architecture image
+# Build and push AMD64-only image
 docker buildx build \
-  --platform linux/arm64,linux/amd64 \
+  --platform linux/amd64 \
   --tag your-dockerhub-user/app:v1.0.0 \
   --output "type=registry" \
   .
 
-# Get the multi-arch digest for docker-compose.yml
+# Get the AMD64 digest for docker-compose.yml
 docker buildx imagetools inspect your-dockerhub-user/app:v1.0.0 --raw | \
   sha256sum | awk '{print $1}'
 ```
 
-**CRITICAL**: Use the multi-architecture digest in docker-compose.yml, not a single-arch digest!
+**CRITICAL**: Use the AMD64 digest in docker-compose.yml!
 
 ### 3. Debugging Common Issues
 
@@ -275,11 +288,12 @@ Umbrel provides these variables to your app:
 - Pin images with sha256 digests
 - Add health checks
 - Use proper stop grace periods
+- Build for linux/amd64 platform (Jack's Community Store apps)
 
 ❌ **DON'T:**
 - Run as root user
 - Expose unnecessary ports
-- Skip multi-architecture builds
+- Build for ARM64 (we only support AMD64 for Jack's Community Store)
 - Use `latest` tag without digest
 - Include development dependencies in final image
 
@@ -340,39 +354,29 @@ docker logs <container-id>
 docker inspect <container-id>
 ```
 
-## Submitting Your App
+## Publishing Your App to Jack's Community Store
 
-When ready to submit to the Umbrel App Store:
+**IMPORTANT**: We are publishing to Jack's Community Store, NOT the official Umbrel App Store.
 
-1. **Prepare your pull request**:
+When ready to publish:
+
+1. **Prepare your app**:
    ```bash
-   git add .
-   git commit -m "Add Your App Name"
-   git push origin your-branch-name
+   cd /Users/james/Jack-s-Community-Store
+   git add jacks-your-app-name/
+   git commit -m "Add jacks-your-app-name"
+   git push
    ```
 
-2. **Open PR** on [getumbrel/umbrel-apps](https://github.com/getumbrel/umbrel-apps)
+2. **App location**: Apps are stored in `/Users/james/Jack-s-Community-Store/`
 
-3. **Use this PR template**:
-   ```markdown
-   # App Submission
+3. **No PR required**: Since this is our own community store, we commit directly to the repository
 
-   ### App name
-   Your App Name
-
-   ### 256x256 SVG icon
-   (Upload icon with no rounded corners - will be styled with CSS)
-
-   ### Gallery images
-   (3-5 high-quality images at 1440x900px in PNG format)
-
-   ### I have tested my app on:
-   - [ ] umbrelOS on a Raspberry Pi
-   - [ ] umbrelOS on an Umbrel Home
-   - [ ] umbrelOS on Linux VM
-   ```
-
-4. **Wait for review** - Umbrel team will review and may request changes
+4. **Testing requirements**:
+   - [ ] Tested on umbrelOS with AMD64 architecture
+   - [ ] Docker image built for linux/amd64 only
+   - [ ] App starts and runs correctly
+   - [ ] Data persists after restart
 
 For more detailed information, see:
 - [MANIFEST_REFERENCE.md](MANIFEST_REFERENCE.md) - Complete umbrel-app.yml field reference
@@ -414,14 +418,23 @@ npm run dev                                          # Start umbrel-dev
 npm run dev client -- apps.install.mutate -- --appId <id>   # Install app
 npm run dev client -- apps.uninstall.mutate -- --appId <id> # Uninstall app
 
-# Docker
-docker buildx build --platform linux/arm64,linux/amd64 --tag user/image:tag --output "type=registry" .
+# Docker (AMD64 only for Jack's Community Store)
+docker buildx build --platform linux/amd64 --tag user/image:tag --output "type=registry" .
 docker buildx imagetools inspect user/image:tag --raw | sha256sum
 
 # Testing
 rsync -av --exclude=".gitkeep" ./app-dir umbrel@umbrel.local:/home/umbrel/umbrel/app-stores/.../
 ssh umbrel@umbrel.local
 umbreld client apps.install.mutate --appId <app-id>
+
+# Jack's Community Store workflow
+cd /Users/james/Jack-s-Community-Store
+mkdir jacks-new-app
+# Create umbrel-app.yml and docker-compose.yml
+docker buildx build --platform linux/amd64 --tag user/image:tag --output "type=registry" .
+git add jacks-new-app/
+git commit -m "Add jacks-new-app"
+git push
 ```
 
 ---
