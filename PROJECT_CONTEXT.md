@@ -4,7 +4,7 @@
 
 A comprehensive web-based dashboard for monitoring and controlling Bitcoin Antminer miners running Braiins OS, specifically designed for home heating applications in Norway. The app tracks mining performance, electricity costs with Norwegian pricing (including state subsidies), and efficiency metrics comparing mining heat output vs traditional heat pumps.
 
-**Version:** 1.2.11
+**Version:** 1.3.0
 **Author:** j1441
 **License:** MIT
 **Repository:** https://github.com/j1441/jacks-mining-dashboard-app
@@ -68,10 +68,11 @@ A comprehensive web-based dashboard for monitoring and controlling Bitcoin Antmi
 ### Key Architectural Decisions
 
 1. **No Build Step**: Frontend uses React via CDN with Babel transpilation in-browser
-2. **Single-File Backend**: All server logic in `server.js` (~2800 lines)
+2. **Single-File Backend**: All server logic in `server.js` (~3200 lines)
 3. **JSON File Storage**: Lightweight persistence without database dependencies
 4. **Background Polling**: Server polls miners every 5 seconds, pushes via WebSocket
 5. **Multi-Protocol Miner Support**: CGMiner API + GraphQL + REST API fallbacks
+6. **Miner Control**: Pause/resume mining via Braiins OS REST API with SCOP-based auto-control
 
 ---
 
@@ -107,15 +108,17 @@ A comprehensive web-based dashboard for monitoring and controlling Bitcoin Antmi
 
 ```
 mining-dashboard-app/
-├── server.js                    # Backend Express server (2800+ lines)
+├── server.js                    # Backend Express server (3200+ lines)
 │                                # - All API endpoints
 │                                # - Miner communication logic
 │                                # - External API integrations
 │                                # - WebSocket server
 │                                # - Background polling
+│                                # - Miner control (pause/resume)
+│                                # - SCOP-based auto-control
 │
 ├── public/
-│   └── index.html               # Complete React frontend (2000+ lines)
+│   └── index.html               # Complete React frontend (2800+ lines)
 │                                # - All React components
 │                                # - Styling (inline CSS)
 │                                # - WebSocket client
@@ -170,6 +173,7 @@ The server maintains several in-memory caches to reduce API calls and improve re
 | `networkStatsCache` | Bitcoin difficulty, hashrate, block height | 10 minutes |
 | `minerStatsCache` | Current stats for all configured miners | 5 seconds |
 | `alertHistory` | Log of triggered alerts | Persistent |
+| `minerControlState` | Miner pause/resume state, auth tokens, SCOP check times | Runtime |
 
 ### Key Backend Functions
 
@@ -177,13 +181,24 @@ The server maintains several in-memory caches to reduce API calls and improve re
 
 | Function | Location | Purpose |
 |----------|----------|---------|
-| `sendCGMinerCommand(ip, command)` | Line 1184 | TCP connection to CGMiner API (port 4028) |
-| `fetchBraiinsGraphQL(ip)` | Line 120 | GraphQL queries with schema introspection |
-| `fetchBraiinsRestApiStats(ip)` | Line 936 | REST API data fetch with authentication |
-| `graphqlRequest(ip, query, sessionCookie)` | Line 714 | Execute GraphQL query |
-| `luciLogin(ip, username, password)` | Line 493 | LuCI session authentication |
-| `getSessionViaWebUI(ip, username, password)` | Line 662 | Web UI session handling |
-| `braiinsRestAuth(ip, username, password)` | Line 829 | REST API authentication |
+| `sendCGMinerCommand(ip, command)` | Line ~1500 | TCP connection to CGMiner API (port 4028) |
+| `fetchBraiinsGraphQL(ip)` | Line ~400 | GraphQL queries with schema introspection |
+| `fetchBraiinsRestApiStats(ip)` | Line ~1200 | REST API data fetch with authentication |
+| `graphqlRequest(ip, query, sessionCookie)` | Line ~1000 | Execute GraphQL query |
+| `luciLogin(ip, username, password)` | Line ~760 | LuCI session authentication |
+| `getSessionViaWebUI(ip, username, password)` | Line ~930 | Web UI session handling |
+| `braiinsRestAuth(ip, username, password)` | Line ~1100 | REST API authentication |
+
+#### Miner Control (Braiins OS REST API)
+
+| Function | Location | Purpose |
+|----------|----------|---------|
+| `braiinsLogin(ip, username, password)` | Line ~94 | Authenticate with Braiins OS REST API |
+| `getMinerAuthToken(ip, minerConfig)` | Line ~144 | Get/refresh auth token with caching |
+| `pauseMining(ip, minerConfig)` | Line ~175 | Pause mining via PUT /api/v1/actions/pause |
+| `resumeMining(ip, minerConfig)` | Line ~226 | Resume mining via PUT /api/v1/actions/resume |
+| `getMiningStatus(ip)` | Line ~276 | Check if miner is paused (via hashrate) |
+| `checkSCOPThresholds(minerIp, stats, minerConfig)` | Line ~298 | Auto-control based on SCOP and board temp |
 
 #### Data Extraction
 
@@ -236,6 +251,7 @@ The server maintains several in-memory caches to reduce API calls and improve re
 Dashboard (Main App)
 ├── Header
 │   ├── Settings Button → SettingsModal
+│   ├── Alerts Button → AlertSettingsModal
 │   └── Add Miner Button → AddMinerModal
 │
 ├── Global Stats Row
@@ -251,8 +267,17 @@ Dashboard (Main App)
 │
 └── Miners Grid
     └── MinerCard (one per miner)
-        ├── Stats Display
-        ├── Power Profile Buttons
+        ├── Stats Display (hashrate, temp, power, uptime)
+        ├── Efficiency Info (daily profit, SCOP)
+        ├── Fan Speeds
+        ├── Miner Control Section
+        │   ├── ON/OFF Buttons (manual pause/resume)
+        │   └── SCOP Auto-Control Panel
+        │       ├── Enable/Disable Toggle
+        │       ├── SCOP Threshold Setting
+        │       ├── Min Board Temp Setting
+        │       └── Save Settings Button
+        ├── Pool Stats
         └── Remove Button
 ```
 
@@ -440,9 +465,9 @@ https://api.blockchain.info/stats
 
 ### 3. Braiins REST API (Port 80)
 
-**Implementation:** `fetchBraiinsRestApiStats()` at line 936
+**Implementation:** `fetchBraiinsRestApiStats()` at line ~1200
 
-**Endpoints:**
+**Stats Endpoints:**
 | Endpoint | Purpose |
 |----------|---------|
 | `/api/v1/auth/login` | Authentication |
@@ -450,6 +475,31 @@ https://api.blockchain.info/stats
 | `/api/v1/miner/hw/hashboards` | Hashboard details |
 | `/api/v1/cooling/state` | Cooling status |
 | `/api/v1/performance/target-profiles` | Power profiles |
+
+**Control Endpoints (NEW):**
+| Endpoint | Method | Purpose |
+|----------|--------|---------|
+| `/api/v1/auth/login` | POST | Get auth token (body: `{username, password}`) |
+| `/api/v1/actions/pause` | PUT | Pause mining (requires Bearer token) |
+| `/api/v1/actions/resume` | PUT | Resume mining (requires Bearer token) |
+
+**Authentication Flow:**
+```javascript
+// 1. Login to get token
+POST /api/v1/auth/login
+Body: { "username": "root", "password": "root" }
+Response: { "token": "abc123...", "timeout_s": 3600 }
+
+// 2. Use token for control actions
+PUT /api/v1/actions/pause
+Header: Authorization: Bearer abc123...
+Response: true/false (was already paused)
+```
+
+**Token Management:**
+- Tokens cached in `minerControlState[ip]`
+- Auto-refresh 60 seconds before expiry
+- Default timeout: 3600 seconds
 
 ### Temperature Detection Patterns
 
@@ -518,7 +568,14 @@ Every 5 seconds:
   miners: [{
     minerIp, minerName, hashrate, temperature, power,
     uptime, boards, fans, poolStatus, acceptedShares,
-    rejectedShares, rejectRate, powerProfile, efficiency, error
+    rejectedShares, rejectRate, powerProfile, efficiency, error,
+    // NEW: Miner control fields
+    isPaused,           // boolean - is miner currently paused
+    autoControl: {      // Auto-control configuration
+      enabled,          // boolean - is auto-control active
+      scopThreshold,    // number - SCOP threshold for pausing
+      minTemperature    // number - min board temp override (optional)
+    }
   }],
   electricity: {
     rawSpotPrice, basePrice, gridFee, effectivePrice,
@@ -571,7 +628,55 @@ Every 5 seconds:
 
 Implementation uses CGMiner `ascset` command.
 
-### 4. Efficiency Metrics
+### 4. Miner Control (Pause/Resume)
+
+**Manual Control:**
+- ON button: Resume mining immediately
+- OFF button: Pause mining immediately
+- Visual indicator shows current state (PAUSED badge)
+
+**Implementation:**
+- Uses Braiins OS REST API (`/api/v1/actions/pause` and `/api/v1/actions/resume`)
+- Requires authentication (default: root/root)
+- State tracked in `minerControlState` cache
+
+### 5. SCOP-Based Auto-Control
+
+Automatically pause/resume mining based on efficiency thresholds and heating needs.
+
+**Configuration (per miner):**
+| Setting | Description | Default |
+|---------|-------------|---------|
+| `enabled` | Enable auto-control | false |
+| `scopThreshold` | Pause if SCOP drops below this | 2.0 |
+| `minTemperature` | Keep ON if board temp below this | (not set) |
+
+**Control Logic:**
+```
+Every poll cycle (when auto-control enabled):
+├── If miner is RUNNING and SCOP < threshold:
+│   ├── If minTemp set AND boardTemp < minTemp:
+│   │   └── Keep running (heating needed)
+│   └── Else:
+│       └── PAUSE miner (not efficient)
+│
+└── If miner is PAUSED:
+    ├── If SCOP >= threshold:
+    │   └── RESUME miner (efficient now)
+    └── If minTemp set AND boardTemp < minTemp:
+        └── RESUME miner (heating needed)
+```
+
+**Board Temperature:**
+- Uses average of all available board temps (not chip temp)
+- Board temp better reflects room temperature
+- Falls back to chip temp if no board temps available
+
+**Check Frequency:**
+- Maximum once per minute to prevent rapid cycling
+- Tracked via `lastSCOPCheck` in `minerControlState`
+
+### 6. Efficiency Metrics
 
 ```javascript
 // Daily BTC estimate
@@ -587,7 +692,7 @@ effectiveSCOP = 1 / (1 - (btcEarnings / electricityCost))
 savings = heatPumpCost - electricityCost + btcEarnings
 ```
 
-### 5. Alert System
+### 7. Alert System
 
 | Alert Type | Default Threshold | Cooldown |
 |------------|-------------------|----------|
@@ -598,7 +703,7 @@ savings = heatPumpCost - electricityCost + btcEarnings
 
 Alerts are persisted in `alertHistory` array (last 100).
 
-### 6. Historical Data
+### 8. Historical Data
 
 - Hourly snapshots saved to `history.json`
 - Retains 720 entries (30 days)
@@ -617,7 +722,12 @@ Alerts are persisted in `alertHistory` array (last 100).
     {
       "ip": "192.168.1.100",
       "name": "Living Room Miner",
-      "powerProfile": "medium"
+      "powerProfile": "medium",
+      "autoControl": {
+        "enabled": false,
+        "scopThreshold": 2.0,
+        "minTemperature": 35
+      }
     }
   ],
   "country": "norway",
@@ -636,6 +746,14 @@ Alerts are persisted in `alertHistory` array (last 100).
   "updatedAt": "2025-12-30T..."
 }
 ```
+
+### Per-Miner Auto-Control Settings
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `autoControl.enabled` | boolean | Enable SCOP-based auto-control |
+| `autoControl.scopThreshold` | number | Pause mining if SCOP drops below this value |
+| `autoControl.minTemperature` | number | Keep mining if board temp drops below this (°C) |
 
 ### Available Electricity Zones
 
@@ -687,6 +805,15 @@ Alerts are persisted in `alertHistory` array (last 100).
 | POST | `/api/miners/add` | `{ip, name}` | Add new miner |
 | POST | `/api/miners/remove` | `{ip}` | Remove miner |
 | POST | `/api/miners/update` | `{ip, name?, powerProfile?}` | Update miner |
+
+### Miner Control (NEW)
+
+| Method | Endpoint | Body | Description |
+|--------|----------|------|-------------|
+| POST | `/api/miner/pause` | `{ip}` | Pause mining on miner |
+| POST | `/api/miner/resume` | `{ip}` | Resume mining on miner |
+| GET | `/api/miner/status?ip=X.X.X.X` | - | Get mining status (paused/running) |
+| POST | `/api/miner/auto-control` | `{ip, enabled, scopThreshold, minTemperature}` | Update auto-control settings |
 
 ### Market Data
 
@@ -872,17 +999,20 @@ Changes pushed to GitHub trigger automatic deployment to Umbrel server. Testing 
 
 ## Version History
 
-### v1.2.11 (Current)
+### v1.3.0 (Current)
+- **Miner Control**: Manual ON/OFF buttons to pause/resume mining
+- **SCOP-Based Auto-Control**: Automatically pause mining when SCOP drops below threshold
+- **Minimum Temperature Override**: Keep miner running for heating when board temp drops below set value
+- **Braiins OS REST API Integration**: Authentication and control via `/api/v1/actions/pause` and `/api/v1/actions/resume`
+- Board temperature used for room temp estimation (not chip temp)
+
+### v1.2.11
 - Background miner polling system
 - Alert system with configurable thresholds
 - Multi-miner parallel polling
-
-### v1.3.1
 - Historical data charts (hashrate, temperature, power)
 - Multi-miner aggregated views
 - Time range selection
-
-### v1.3.0
 - 24-hour electricity price graph
 - Time-of-day grid fees (weekday/weekend)
 - Stacked bar visualization
