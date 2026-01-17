@@ -2027,18 +2027,31 @@ async function getMinerStats(ip, config = {}) {
     console.log('Final temperatures:', temps);
     console.log('Final fans:', fans);
 
-    // Get power from various sources - prioritize GraphQL (most accurate), then CGMiner API
+    // Get power from various sources - prioritize tunerstatus (most accurate), then GraphQL, then CGMiner API
     // DO NOT use fake estimates based on assumed W/TH - only show real data
     let power = null;
+    let powerLimit = null; // The configured power target
     let powerSource = 'unavailable';
 
-    // Priority 1: GraphQL tuner data (most accurate - actual measured power)
-    if (graphqlPower !== null && graphqlPower > 0) {
+    // Extract tuner status data
+    const tunerStatus = tunerstatusCmd?.TUNERSTATUS?.[0];
+    if (tunerStatus) {
+      console.log('Found TUNERSTATUS data:', JSON.stringify(tunerStatus));
+    }
+
+    // Priority 1: CGMiner tunerstatus command (most accurate - actual measured power from BOSer)
+    if (tunerStatus?.ApproximateMinerPowerConsumption > 0) {
+      power = tunerStatus.ApproximateMinerPowerConsumption;
+      powerSource = 'tunerstatus';
+      console.log('Using power from tunerstatus ApproximateMinerPowerConsumption:', power);
+    }
+    // Priority 2: GraphQL tuner data
+    else if (graphqlPower !== null && graphqlPower > 0) {
       power = graphqlPower;
       powerSource = 'graphql';
       console.log('Using power from GraphQL:', power);
     }
-    // Priority 2: CGMiner stats API
+    // Priority 3: CGMiner stats API
     else if (statsData.Power && statsData.Power > 0) {
       power = statsData.Power;
       powerSource = 'cgminer-stats';
@@ -2049,7 +2062,7 @@ async function getMinerStats(ip, config = {}) {
       powerSource = 'cgminer-stats';
       console.log('Using power from CGMiner stats (lowercase):', power);
     }
-    // Priority 3: CGMiner summary API
+    // Priority 4: CGMiner summary API
     else if (summaryData.Power && summaryData.Power > 0) {
       power = summaryData.Power;
       powerSource = 'cgminer-summary';
@@ -2058,6 +2071,15 @@ async function getMinerStats(ip, config = {}) {
     // No fake fallbacks - if we can't get real power, leave it null
     else {
       console.log('WARNING: No real power data available from miner API');
+    }
+
+    // Extract power limit (configured target) from tunerstatus
+    if (tunerStatus?.PowerLimit > 0) {
+      powerLimit = tunerStatus.PowerLimit;
+      console.log('Power limit from tunerstatus:', powerLimit);
+    } else if (tunerStatus?.DynamicPowerScaling?.ScaledPowerLimit > 0) {
+      powerLimit = tunerStatus.DynamicPowerScaling.ScaledPowerLimit;
+      console.log('Power limit from DynamicPowerScaling:', powerLimit);
     }
 
     const powerProfile = config.currentProfile || 'medium';
@@ -2121,7 +2143,8 @@ async function getMinerStats(ip, config = {}) {
       hashrateAv,
       efficiencyWPerTH, // W/TH efficiency (null if power unavailable)
       temperature: temps.chip,
-      powerDraw: power, // null if unavailable
+      powerDraw: power, // Actual power consumption in watts (null if unavailable)
+      powerLimit, // Configured power target in watts (null if unavailable)
       powerSource, // indicates where power data came from
       uptime: summaryData.Elapsed || 0,
       boards: [
@@ -2190,7 +2213,9 @@ async function getMinerStats(ip, config = {}) {
       _debug: {
         // Power source tracking
         powerSource,
+        powerLimit,
         graphqlPower,
+        tunerStatusPower: tunerStatus?.ApproximateMinerPowerConsumption || null,
 
         // GraphQL API
         graphqlAvailable: graphqlData?.data ? true : false,

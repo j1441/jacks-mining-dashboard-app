@@ -1218,13 +1218,19 @@
                             )}
                         </div>
                         <div>
-                            <div style={{ color: '#9ca3af', fontSize: '0.75rem' }}>Power Draw</div>
+                            <div style={{ color: '#9ca3af', fontSize: '0.75rem' }}>Power</div>
                             <div style={{ fontSize: '1.25rem', fontWeight: '600', color: '#4ade80' }}>
                                 {miner.powerDraw ? `${miner.powerDraw}W` : 'N/A'}
                             </div>
+                            {/* Power limit (configured target) */}
+                            {miner.powerLimit != null && (
+                                <div style={{ fontSize: '0.625rem', color: '#6b7280' }}>
+                                    Target: {miner.powerLimit}W
+                                </div>
+                            )}
                             {miner.efficiency?.dailyKWh && (
                                 <div style={{ fontSize: '0.625rem', color: '#6b7280' }}>
-                                    {miner.efficiency.dailyKWh.toFixed(1)} kWh/dag
+                                    {miner.efficiency.dailyKWh.toFixed(1)} kWh/day
                                 </div>
                             )}
                             {/* W/TH Efficiency */}
