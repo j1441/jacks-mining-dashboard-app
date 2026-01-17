@@ -2528,6 +2528,15 @@ async function getMinerStats(ip, config = {}) {
         graphqlPower,
         tunerStatusPower: tunerStatus?.ApproximateMinerPowerConsumption || null,
 
+        // Miner Control State (DPS = Dynamic Power Scaling)
+        minerControl: {
+          isPaused: minerControlState[ip]?.isPaused || false,
+          dpsCooldownSeconds: tunerStatus?.DynamicPowerScaling?.CoolingDownEndsInDuration || 0,
+          tunerMode: tunerStatus?.TunerMode || null,
+          tunerRunning: tunerStatus?.TunerChainStatus?.[0]?.TunerRunning || false,
+          tunerStatus: tunerStatus?.TunerChainStatus?.[0]?.Status || null
+        },
+
         // GraphQL API
         graphqlAvailable: graphqlData?.data ? true : false,
         graphqlRootFields: graphqlData?._availableFields || [],
