@@ -470,43 +470,62 @@ https://api.blockchain.info/stats
 }
 ```
 
-### 3. Braiins REST API (Port 80)
+### 3. Braiins REST API (Port 80) - Stats Only
 
 **Implementation:** `fetchBraiinsRestApiStats()` at line ~1200
 
 **Stats Endpoints:**
 | Endpoint | Purpose |
 |----------|---------|
-| `/api/v1/auth/login` | Authentication |
 | `/api/v1/miner/stats` | Mining statistics |
 | `/api/v1/miner/hw/hashboards` | Hashboard details |
 | `/api/v1/cooling/state` | Cooling status |
 | `/api/v1/performance/target-profiles` | Power profiles |
 
-**Control Endpoints (NEW):**
-| Endpoint | Method | Purpose |
-|----------|--------|---------|
-| `/api/v1/auth/login` | POST | Get auth token (body: `{username, password}`) |
-| `/api/v1/actions/pause` | PUT | Pause mining (requires Bearer token) |
-| `/api/v1/actions/resume` | PUT | Resume mining (requires Bearer token) |
+### 4. Braiins gRPC API (Port 50051) - Miner Control
+
+**Implementation:** Lines ~90-310 in server.js
+
+**Protocol:** gRPC with Protocol Buffers (proto files in `proto/bos/v1/`)
+
+**Port:** 50051 (enabled by default on Braiins OS 23.03.1+)
+
+**Services Used:**
+| Service | Method | Purpose |
+|---------|--------|---------|
+| `AuthenticationService` | `Login` | Get auth token |
+| `ActionsService` | `PauseMining` | Pause mining |
+| `ActionsService` | `ResumeMining` | Resume mining |
 
 **Authentication Flow:**
 ```javascript
-// 1. Login to get token
-POST /api/v1/auth/login
-Body: { "username": "root", "password": "root" }
-Response: { "token": "abc123...", "timeout_s": 3600 }
+// 1. Login via gRPC to get token
+const client = new AuthenticationService('192.168.1.89:50051', grpc.credentials.createInsecure());
+client.Login({ username: 'root', password: 'root' }, (err, response) => {
+  // response.token = "abc123..."
+  // response.timeout_s = 3600
+});
 
-// 2. Use token for control actions
-PUT /api/v1/actions/pause
-Header: Authorization: Bearer abc123...
-Response: true/false (was already paused)
+// 2. Use token in metadata for control actions
+const metadata = new grpc.Metadata();
+metadata.add('authorization', token);
+actionsClient.PauseMining({}, metadata, { deadline }, callback);
 ```
 
 **Token Management:**
 - Tokens cached in `minerControlState[ip]`
 - Auto-refresh 60 seconds before expiry
 - Default timeout: 3600 seconds
+
+**Key Functions:**
+| Function | Purpose |
+|----------|---------|
+| `loadProtos()` | Load .proto files on startup |
+| `getGrpcClient(ip, service)` | Get/create cached gRPC client |
+| `braiinsLogin(ip, user, pass)` | Authenticate via gRPC |
+| `getMinerAuthToken(ip, config)` | Get/refresh cached auth token |
+| `pauseMining(ip, config)` | Pause mining via gRPC |
+| `resumeMining(ip, config)` | Resume mining via gRPC |
 
 ### Temperature Detection Patterns
 
@@ -1006,11 +1025,17 @@ Changes pushed to GitHub trigger automatic deployment to Umbrel server. Testing 
 
 ## Version History
 
-### v1.3.0 (Current)
+### v1.3.1 (Current)
+- **gRPC API Migration**: Switched miner control from REST API to gRPC API (port 50051)
+- Added `@grpc/grpc-js` and `@grpc/proto-loader` dependencies
+- Added Braiins OS proto files (`proto/bos/v1/authentication.proto`, `proto/bos/v1/actions.proto`)
+- Improved reliability of pause/resume commands
+- Requires Braiins OS 23.03.1+ with gRPC port 50051 enabled (default)
+
+### v1.3.0
 - **Miner Control**: Manual ON/OFF buttons to pause/resume mining
 - **SCOP-Based Auto-Control**: Automatically pause mining when SCOP drops below threshold
 - **Minimum Temperature Override**: Keep miner running for heating when board temp drops below set value
-- **Braiins OS REST API Integration**: Authentication and control via `/api/v1/actions/pause` and `/api/v1/actions/resume`
 - Board temperature used for room temp estimation (not chip temp)
 
 ### v1.2.11
