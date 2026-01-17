@@ -104,15 +104,32 @@ let actionsProto = null;
 
 function loadProtos() {
   try {
+    console.log('Loading Braiins OS proto files from:', PROTO_PATH_AUTH);
     const authPackageDef = protoLoader.loadSync(PROTO_PATH_AUTH, protoOptions);
-    authProto = grpc.loadPackageDefinition(authPackageDef).braiins.bos.v1;
+    const authDef = grpc.loadPackageDefinition(authPackageDef);
+    authProto = authDef.braiins?.bos?.v1;
 
+    if (!authProto || !authProto.AuthenticationService) {
+      console.error('Failed to load AuthenticationService from proto. Package structure:', JSON.stringify(Object.keys(authDef), null, 2));
+      return;
+    }
+
+    console.log('Loading Braiins OS proto files from:', PROTO_PATH_ACTIONS);
     const actionsPackageDef = protoLoader.loadSync(PROTO_PATH_ACTIONS, protoOptions);
-    actionsProto = grpc.loadPackageDefinition(actionsPackageDef).braiins.bos.v1;
+    const actionsDef = grpc.loadPackageDefinition(actionsPackageDef);
+    actionsProto = actionsDef.braiins?.bos?.v1;
+
+    if (!actionsProto || !actionsProto.ActionsService) {
+      console.error('Failed to load ActionsService from proto. Package structure:', JSON.stringify(Object.keys(actionsDef), null, 2));
+      return;
+    }
 
     console.log('Braiins OS gRPC proto files loaded successfully');
+    console.log('Available auth services:', Object.keys(authProto));
+    console.log('Available action services:', Object.keys(actionsProto));
   } catch (err) {
     console.error('Failed to load Braiins OS proto files:', err.message);
+    console.error(err.stack);
   }
 }
 
@@ -138,11 +155,17 @@ function getGrpcClient(ip, serviceName) {
   const address = `${ip}:50051`;
 
   if (serviceName === 'auth') {
+    if (!authProto || !authProto.AuthenticationService) {
+      throw new Error('gRPC AuthenticationService not loaded. Check proto files and server startup logs.');
+    }
     grpcClientCache[cacheKey] = new authProto.AuthenticationService(
       address,
       grpc.credentials.createInsecure()
     );
   } else if (serviceName === 'actions') {
+    if (!actionsProto || !actionsProto.ActionsService) {
+      throw new Error('gRPC ActionsService not loaded. Check proto files and server startup logs.');
+    }
     grpcClientCache[cacheKey] = new actionsProto.ActionsService(
       address,
       grpc.credentials.createInsecure()
