@@ -126,8 +126,13 @@ mining-dashboard-app/
 │                                # - WebSocket client
 │
 ├── package.json                 # NPM configuration
-│                                # - Dependencies: express, ws
+│                                # - Dependencies: express, ws, @grpc/grpc-js, @grpc/proto-loader
 │                                # - Scripts: start, dev
+│
+├── proto/                       # Braiins OS gRPC protocol buffers
+│   └── bos/v1/
+│       ├── authentication.proto # Login/auth service definitions
+│       └── actions.proto        # PauseMining/ResumeMining service definitions
 │
 ├── Dockerfile                   # Docker build configuration
 │                                # - Base: node:18-alpine
