@@ -92,7 +92,12 @@ let minerControlState = {};
 //     authToken: string,
 //     tokenExpiry: Date,
 //     controlAttempts: number,     // Consecutive failed sync attempts
-//     lastSyncError: string        // Last error when trying to sync state
+//     lastSyncError: string,       // Last error when trying to sync state
+//     // Efficiency tracking for projected SCOP when paused
+//     measuredEfficiency: number,  // Last measured J/TH when mining
+//     measuredPower: number,       // Last measured power in watts when mining
+//     measuredHashrate: number,    // Last measured hashrate in TH/s when mining
+//     lastEfficiencyUpdate: Date   // When efficiency was last measured
 //   }
 // }
 
@@ -340,36 +345,77 @@ async function getMiningStatus(ip) {
 }
 
 /**
- * Determine what state the miner should be in based on SCOP and temperature
- * @returns {{ intendedState: 'mining'|'paused', reason: string }}
+ * Calculate projected SCOP based on expected efficiency when miner would be running
+ * @param {number} powerWatts - Expected power consumption
+ * @param {number} hashrateTHs - Expected hashrate
+ * @param {number} electricityPrice - Current electricity price per kWh
+ * @param {number} btcPrice - Current BTC price
+ * @returns {number} Projected SCOP
  */
-function determineIntendedState(scop, boardTemp, threshold, minTemp) {
+function calculateProjectedSCOP(powerWatts, hashrateTHs, electricityPrice, btcPrice) {
+  if (!powerWatts || !hashrateTHs || !electricityPrice || !btcPrice) return null;
+
+  const networkHashrateEHs = networkStatsCache.hashrate || 700;
+  const blockReward = networkStatsCache.blockReward || 3.125;
+  const blocksPerDay = networkStatsCache.blocksPerDay || 144;
+
+  const hashrateEHs = hashrateTHs / 1000000;
+  const dailyBTCEstimate = (hashrateEHs / networkHashrateEHs) * blockReward * blocksPerDay;
+
+  const powerKW = powerWatts / 1000;
+  const dailyKWh = powerKW * 24;
+  const dailyElectricityCost = dailyKWh * electricityPrice;
+  const dailyEarnings = dailyBTCEstimate * btcPrice;
+
+  const effectiveMultiplier = dailyEarnings / dailyElectricityCost;
+  const effectiveSCOP = 1 / (1 - Math.min(effectiveMultiplier, 0.99));
+
+  return Math.min(effectiveSCOP, 10);
+}
+
+/**
+ * Determine what state the miner should be in based on SCOP and temperature
+ * @returns {{ intendedState: 'mining'|'paused', reason: string, scopUsed: number, scopType: string }}
+ */
+function determineIntendedState(scop, projectedSCOP, boardTemp, threshold, minTemp, isPaused) {
   // Priority 1: Temperature override - if board temp is below minimum, must mine for heat
   if (minTemp !== undefined && boardTemp !== undefined && boardTemp < minTemp) {
     return {
       intendedState: 'mining',
-      reason: `Board temp ${boardTemp.toFixed(1)}°C < min ${minTemp}°C (heating needed)`
+      reason: `Board temp ${boardTemp.toFixed(1)}°C < min ${minTemp}°C (heating needed)`,
+      scopUsed: isPaused ? projectedSCOP : scop,
+      scopType: isPaused ? 'projected' : 'measured'
     };
   }
 
   // Priority 2: SCOP-based decision
-  if (scop === undefined || scop === null) {
-    // If SCOP is unknown, maintain current state or default to mining
+  // When paused, use projected SCOP to decide if we should resume
+  // When mining, use actual SCOP to decide if we should pause
+  const scopToUse = isPaused ? projectedSCOP : scop;
+  const scopType = isPaused ? 'projected' : 'measured';
+
+  if (scopToUse === undefined || scopToUse === null) {
     return {
       intendedState: 'mining',
-      reason: 'SCOP unavailable, defaulting to mining'
+      reason: `${scopType} SCOP unavailable, defaulting to mining`,
+      scopUsed: null,
+      scopType
     };
   }
 
-  if (scop >= threshold) {
+  if (scopToUse >= threshold) {
     return {
       intendedState: 'mining',
-      reason: `SCOP ${scop.toFixed(2)} >= threshold ${threshold} (profitable)`
+      reason: `${scopType} SCOP ${scopToUse.toFixed(2)} >= threshold ${threshold} (profitable)`,
+      scopUsed: scopToUse,
+      scopType
     };
   } else {
     return {
       intendedState: 'paused',
-      reason: `SCOP ${scop.toFixed(2)} < threshold ${threshold} (unprofitable)`
+      reason: `${scopType} SCOP ${scopToUse.toFixed(2)} < threshold ${threshold} (unprofitable)`,
+      scopUsed: scopToUse,
+      scopType
     };
   }
 }
@@ -393,6 +439,8 @@ async function checkSCOPThresholds(minerIp, stats, minerConfig) {
   }
 
   const scop = stats.efficiency?.effectiveSCOP;
+  const currentPrice = stats.efficiency?.hourlyElectricityCost ?
+    (stats.efficiency.hourlyElectricityCost / (stats.efficiency.dailyKWh / 24)) : null;
 
   // Use board temperature (not chip temp) for room temp estimation
   const boardTemps = stats.boards
@@ -405,40 +453,92 @@ async function checkSCOPThresholds(minerIp, stats, minerConfig) {
   const threshold = minerConfig.autoControl.scopThreshold || 2.0;
   const minTemp = minerConfig.autoControl.minTemperature;
 
+  // Get efficiency override or use measured values
+  const efficiencyOverride = minerConfig.autoControl.efficiencyOverride; // { power: watts, hashrate: TH/s }
+
   const state = minerControlState[minerIp] || {};
 
   // Determine actual miner state from hashrate (more reliable than stored state)
   const hashrate = stats.hashrate || 0;
+  const power = stats.power || 0;
   const actuallyMining = hashrate > 0.1; // More than 0.1 TH/s means mining
   const isPaused = !actuallyMining;
 
+  // If miner is actively mining, update measured efficiency
+  if (actuallyMining && hashrate > 0 && power > 0) {
+    minerControlState[minerIp] = {
+      ...state,
+      measuredEfficiency: power / hashrate, // J/TH (watts per TH/s)
+      measuredPower: power,
+      measuredHashrate: hashrate,
+      lastEfficiencyUpdate: new Date()
+    };
+  }
+
   // Update actual state in our tracking
   minerControlState[minerIp] = {
-    ...state,
+    ...minerControlState[minerIp],
     isPaused,
     lastSCOPCheck: new Date()
   };
 
+  // Calculate projected SCOP for when miner would be running
+  // Priority: 1) Custom override, 2) Last measured values, 3) null
+  let projectedPower, projectedHashrate, projectedSource;
+
+  if (efficiencyOverride?.power && efficiencyOverride?.hashrate) {
+    projectedPower = efficiencyOverride.power;
+    projectedHashrate = efficiencyOverride.hashrate;
+    projectedSource = 'override';
+  } else if (minerControlState[minerIp]?.measuredPower && minerControlState[minerIp]?.measuredHashrate) {
+    projectedPower = minerControlState[minerIp].measuredPower;
+    projectedHashrate = minerControlState[minerIp].measuredHashrate;
+    projectedSource = 'measured';
+  } else {
+    projectedPower = null;
+    projectedHashrate = null;
+    projectedSource = 'none';
+  }
+
+  // Get current electricity price and BTC price for projection
+  const btcPrice = stats.efficiency?.currentBTCPrice || networkStatsCache.btcPrice;
+  const electricityPrice = currentPrice || 0.5; // fallback
+
+  const projectedSCOP = projectedPower && projectedHashrate ?
+    calculateProjectedSCOP(projectedPower, projectedHashrate, electricityPrice, btcPrice) : null;
+
+  // Store projected values for frontend display
+  minerControlState[minerIp].projectedSCOP = projectedSCOP;
+  minerControlState[minerIp].projectedSource = projectedSource;
+  minerControlState[minerIp].projectedPower = projectedPower;
+  minerControlState[minerIp].projectedHashrate = projectedHashrate;
+
   // Determine what state the miner SHOULD be in
-  const { intendedState, reason } = determineIntendedState(scop, boardTemp, threshold, minTemp);
+  const { intendedState, reason, scopUsed, scopType } = determineIntendedState(
+    scop, projectedSCOP, boardTemp, threshold, minTemp, isPaused
+  );
 
   // Always update the intended state and reason
   minerControlState[minerIp].intendedState = intendedState;
   minerControlState[minerIp].stateReason = reason;
+  minerControlState[minerIp].scopUsed = scopUsed;
+  minerControlState[minerIp].scopType = scopType;
 
   // Check if actual state matches intended state
   const actualState = isPaused ? 'paused' : 'mining';
   const stateMatches = actualState === intendedState;
 
-  console.log(`[SCOP Auto-Control] ${minerIp}: SCOP=${scop?.toFixed(2) || 'N/A'}, boardTemp=${boardTemp?.toFixed(1) || 'N/A'}°C, hashrate=${hashrate.toFixed(2)} TH/s`);
+  console.log(`[SCOP Auto-Control] ${minerIp}: measured SCOP=${scop?.toFixed(2) || 'N/A'}, projected SCOP=${projectedSCOP?.toFixed(2) || 'N/A'} (${projectedSource})`);
+  console.log(`  → boardTemp=${boardTemp?.toFixed(1) || 'N/A'}°C, hashrate=${hashrate.toFixed(2)} TH/s, power=${power}W`);
+  console.log(`  → Using ${scopType} SCOP: ${scopUsed?.toFixed(2) || 'N/A'}`);
   console.log(`  → Actual: ${actualState.toUpperCase()}, Intended: ${intendedState.toUpperCase()}, Match: ${stateMatches ? 'YES' : 'NO'}`);
   console.log(`  → Reason: ${reason}`);
 
   // If states don't match, take corrective action
   if (!stateMatches) {
     // Rate limit control actions to prevent rapid toggling (at least 30 seconds between actions)
-    const lastAction = state.lastControlAction;
-    const timeSinceLastAction = lastAction ? Date.now() - lastAction.getTime() : Infinity;
+    const lastAction = minerControlState[minerIp].lastControlAction;
+    const timeSinceLastAction = lastAction ? Date.now() - new Date(lastAction).getTime() : Infinity;
 
     if (timeSinceLastAction < 30000) {
       console.log(`  → Waiting for control cooldown (${Math.ceil((30000 - timeSinceLastAction) / 1000)}s remaining)`);
@@ -461,7 +561,7 @@ async function checkSCOPThresholds(minerIp, stats, minerConfig) {
       }
     } catch (err) {
       console.error(`  → ERROR: Failed to sync miner state: ${err.message}`);
-      minerControlState[minerIp].controlAttempts = (state.controlAttempts || 0) + 1;
+      minerControlState[minerIp].controlAttempts = (minerControlState[minerIp].controlAttempts || 0) + 1;
       minerControlState[minerIp].lastSyncError = err.message;
     }
   } else {
@@ -2944,7 +3044,7 @@ app.get('/api/miner/status', async (req, res) => {
 // Update auto-control settings for a miner
 app.post('/api/miner/auto-control', async (req, res) => {
   try {
-    const { ip, enabled, scopThreshold, minTemperature } = req.body;
+    const { ip, enabled, scopThreshold, minTemperature, efficiencyOverride } = req.body;
 
     if (!ip) {
       return res.status(400).json({ error: 'No miner IP provided' });
@@ -2961,7 +3061,10 @@ app.post('/api/miner/auto-control', async (req, res) => {
     miner.autoControl = {
       enabled: enabled !== undefined ? enabled : (miner.autoControl?.enabled || false),
       scopThreshold: scopThreshold !== undefined ? scopThreshold : (miner.autoControl?.scopThreshold || 2.0),
-      minTemperature: minTemperature !== undefined ? minTemperature : miner.autoControl?.minTemperature
+      minTemperature: minTemperature !== undefined ? minTemperature : miner.autoControl?.minTemperature,
+      // Efficiency override for projected SCOP calculation when paused
+      // { power: watts, hashrate: TH/s }
+      efficiencyOverride: efficiencyOverride !== undefined ? efficiencyOverride : miner.autoControl?.efficiencyOverride
     };
 
     await saveConfig(config);
@@ -3282,7 +3385,17 @@ async function pollMiners() {
               (controlState.isPaused ? 'paused' : 'mining') === controlState.intendedState,
             lastControlAction: controlState.lastControlAction || null,
             controlAttempts: controlState.controlAttempts || 0,
-            lastSyncError: controlState.lastSyncError || null
+            lastSyncError: controlState.lastSyncError || null,
+            // Efficiency tracking for projected SCOP
+            scopUsed: controlState.scopUsed || null,
+            scopType: controlState.scopType || null,
+            projectedSCOP: controlState.projectedSCOP || null,
+            projectedSource: controlState.projectedSource || null,
+            measuredPower: controlState.measuredPower || null,
+            measuredHashrate: controlState.measuredHashrate || null,
+            projectedPower: controlState.projectedPower || null,
+            projectedHashrate: controlState.projectedHashrate || null,
+            lastEfficiencyUpdate: controlState.lastEfficiencyUpdate || null
           }
         };
       } catch (err) {
@@ -3303,7 +3416,17 @@ async function pollMiners() {
               (controlState.isPaused ? 'paused' : 'mining') === controlState.intendedState,
             lastControlAction: controlState.lastControlAction || null,
             controlAttempts: controlState.controlAttempts || 0,
-            lastSyncError: controlState.lastSyncError || null
+            lastSyncError: controlState.lastSyncError || null,
+            // Efficiency tracking for projected SCOP
+            scopUsed: controlState.scopUsed || null,
+            scopType: controlState.scopType || null,
+            projectedSCOP: controlState.projectedSCOP || null,
+            projectedSource: controlState.projectedSource || null,
+            measuredPower: controlState.measuredPower || null,
+            measuredHashrate: controlState.measuredHashrate || null,
+            projectedPower: controlState.projectedPower || null,
+            projectedHashrate: controlState.projectedHashrate || null,
+            lastEfficiencyUpdate: controlState.lastEfficiencyUpdate || null
           }
         };
       }

@@ -1159,6 +1159,8 @@
             const [scopThreshold, setScopThreshold] = useState(miner.autoControl?.scopThreshold || 2.0);
             const [minTemperature, setMinTemperature] = useState(miner.autoControl?.minTemperature || '');
             const [autoEnabled, setAutoEnabled] = useState(miner.autoControl?.enabled || false);
+            const [overridePower, setOverridePower] = useState(miner.autoControl?.efficiencyOverride?.power || '');
+            const [overrideHashrate, setOverrideHashrate] = useState(miner.autoControl?.efficiencyOverride?.hashrate || '');
             const formatHashrate = (ths) => ths != null ? `${ths.toFixed(2)} TH/s` : 'N/A';
             const formatUptime = (seconds) => {
                 if (!seconds) return 'N/A';
@@ -1518,12 +1520,87 @@
                                     </div>
                                 </div>
 
+                                {/* Efficiency Override Section */}
+                                <div style={{
+                                    marginBottom: '0.75rem',
+                                    padding: '0.5rem',
+                                    backgroundColor: 'rgba(139, 92, 246, 0.1)',
+                                    borderRadius: '0.375rem',
+                                    border: '1px solid rgba(139, 92, 246, 0.3)'
+                                }}>
+                                    <div style={{ fontSize: '0.625rem', color: '#a78bfa', marginBottom: '0.5rem', fontWeight: '600' }}>
+                                        Expected Efficiency (for projected SCOP when paused)
+                                    </div>
+
+                                    {/* Show measured values if available */}
+                                    {miner.autoControlState?.measuredPower && (
+                                        <div style={{ fontSize: '0.625rem', color: '#9ca3af', marginBottom: '0.5rem' }}>
+                                            Last measured: {miner.autoControlState.measuredHashrate?.toFixed(1)} TH/s @ {miner.autoControlState.measuredPower}W
+                                            ({(miner.autoControlState.measuredPower / miner.autoControlState.measuredHashrate).toFixed(1)} J/TH)
+                                        </div>
+                                    )}
+
+                                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.5rem' }}>
+                                        <div>
+                                            <label style={{ display: 'block', color: '#9ca3af', marginBottom: '0.25rem', fontSize: '0.625rem' }}>
+                                                Power (W)
+                                            </label>
+                                            <input
+                                                type="number"
+                                                step="100"
+                                                min="0"
+                                                value={overridePower}
+                                                onChange={(e) => setOverridePower(e.target.value === '' ? '' : parseInt(e.target.value))}
+                                                placeholder={miner.autoControlState?.measuredPower || 'Auto'}
+                                                style={{
+                                                    width: '100%',
+                                                    padding: '0.375rem',
+                                                    borderRadius: '0.25rem',
+                                                    backgroundColor: 'rgba(0, 0, 0, 0.3)',
+                                                    border: '1px solid rgba(255, 255, 255, 0.2)',
+                                                    color: 'white',
+                                                    fontSize: '0.75rem'
+                                                }}
+                                            />
+                                        </div>
+                                        <div>
+                                            <label style={{ display: 'block', color: '#9ca3af', marginBottom: '0.25rem', fontSize: '0.625rem' }}>
+                                                Hashrate (TH/s)
+                                            </label>
+                                            <input
+                                                type="number"
+                                                step="1"
+                                                min="0"
+                                                value={overrideHashrate}
+                                                onChange={(e) => setOverrideHashrate(e.target.value === '' ? '' : parseFloat(e.target.value))}
+                                                placeholder={miner.autoControlState?.measuredHashrate?.toFixed(0) || 'Auto'}
+                                                style={{
+                                                    width: '100%',
+                                                    padding: '0.375rem',
+                                                    borderRadius: '0.25rem',
+                                                    backgroundColor: 'rgba(0, 0, 0, 0.3)',
+                                                    border: '1px solid rgba(255, 255, 255, 0.2)',
+                                                    color: 'white',
+                                                    fontSize: '0.75rem'
+                                                }}
+                                            />
+                                        </div>
+                                    </div>
+                                    <div style={{ color: '#6b7280', fontSize: '0.5rem', marginTop: '0.25rem' }}>
+                                        Leave blank to use last measured values. Override to set expected efficiency when starting up.
+                                    </div>
+                                </div>
+
                                 <button
                                     onClick={async () => {
+                                        const effOverride = (overridePower && overrideHashrate)
+                                            ? { power: overridePower, hashrate: overrideHashrate }
+                                            : null;
                                         await onUpdateAutoControl(miner.minerIp, {
                                             enabled: autoEnabled,
                                             scopThreshold: scopThreshold,
-                                            minTemperature: minTemperature === '' ? undefined : minTemperature
+                                            minTemperature: minTemperature === '' ? undefined : minTemperature,
+                                            efficiencyOverride: effOverride
                                         });
                                     }}
                                     style={{
@@ -1585,6 +1662,44 @@
                                                 </div>
                                             </div>
                                         </div>
+
+                                        {/* SCOP Display - show both measured and projected */}
+                                        <div style={{
+                                            marginTop: '0.5rem',
+                                            padding: '0.375rem',
+                                            backgroundColor: 'rgba(0, 0, 0, 0.2)',
+                                            borderRadius: '0.25rem',
+                                            display: 'grid',
+                                            gridTemplateColumns: '1fr 1fr',
+                                            gap: '0.5rem'
+                                        }}>
+                                            <div>
+                                                <div style={{ fontSize: '0.5rem', color: '#9ca3af' }}>Measured SCOP</div>
+                                                <div style={{ fontSize: '0.75rem', fontWeight: '600', color: '#d1d5db' }}>
+                                                    {miner.efficiency?.effectiveSCOP?.toFixed(2) || 'N/A'}
+                                                </div>
+                                            </div>
+                                            <div>
+                                                <div style={{ fontSize: '0.5rem', color: '#a78bfa' }}>
+                                                    Projected SCOP
+                                                    {miner.autoControlState.projectedSource === 'override' && ' (override)'}
+                                                    {miner.autoControlState.projectedSource === 'measured' && ' (from last run)'}
+                                                </div>
+                                                <div style={{ fontSize: '0.75rem', fontWeight: '600', color: '#a78bfa' }}>
+                                                    {miner.autoControlState.projectedSCOP?.toFixed(2) || 'N/A'}
+                                                </div>
+                                            </div>
+                                        </div>
+
+                                        {/* Show which SCOP is being used for decision */}
+                                        <div style={{
+                                            marginTop: '0.375rem',
+                                            fontSize: '0.5rem',
+                                            color: '#6b7280'
+                                        }}>
+                                            Decision based on: {miner.autoControlState.scopType || 'N/A'} SCOP = {miner.autoControlState.scopUsed?.toFixed(2) || 'N/A'}
+                                        </div>
+
                                         {miner.autoControlState.stateReason && (
                                             <div style={{
                                                 marginTop: '0.5rem',
