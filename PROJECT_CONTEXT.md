@@ -84,6 +84,8 @@ A comprehensive web-based dashboard for monitoring and controlling Bitcoin Antmi
 | Node.js | 18+ | Runtime environment |
 | Express.js | 4.18.2 | HTTP server framework |
 | ws | 8.14.2 | WebSocket server for real-time updates |
+| @grpc/grpc-js | 1.9.0 | gRPC client for Braiins OS control API |
+| @grpc/proto-loader | 0.7.0 | Protocol buffer loader for gRPC |
 | net (built-in) | - | TCP connections to CGMiner API |
 | https/http (built-in) | - | External API requests |
 | fs (built-in) | - | JSON file storage |
