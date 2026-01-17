@@ -80,7 +80,21 @@ let alertHistory = [];
 let lastAlertTimes = {}; // Track when each alert type last fired for cooldown
 
 // Miner control state tracking
-let minerControlState = {}; // { ip: { isPaused: bool, authToken: string, tokenExpiry: Date, lastSCOPCheck: Date } }
+// Enhanced state tracking for active SCOP auto-control
+let minerControlState = {};
+// Structure: {
+//   ip: {
+//     isPaused: bool,              // Current actual state (from miner)
+//     intendedState: 'mining'|'paused'|null,  // What auto-control wants
+//     stateReason: string,         // Why auto-control set this state
+//     lastControlAction: Date,     // When we last issued a control command
+//     lastSCOPCheck: Date,         // When we last evaluated SCOP
+//     authToken: string,
+//     tokenExpiry: Date,
+//     controlAttempts: number,     // Consecutive failed sync attempts
+//     lastSyncError: string        // Last error when trying to sync state
+//   }
+// }
 
 // ============================================================================
 // Braiins OS gRPC API Functions (for miner pause/resume control)
@@ -326,16 +340,61 @@ async function getMiningStatus(ip) {
 }
 
 /**
- * Check SCOP thresholds and auto-control miners
+ * Determine what state the miner should be in based on SCOP and temperature
+ * @returns {{ intendedState: 'mining'|'paused', reason: string }}
+ */
+function determineIntendedState(scop, boardTemp, threshold, minTemp) {
+  // Priority 1: Temperature override - if board temp is below minimum, must mine for heat
+  if (minTemp !== undefined && boardTemp !== undefined && boardTemp < minTemp) {
+    return {
+      intendedState: 'mining',
+      reason: `Board temp ${boardTemp.toFixed(1)}°C < min ${minTemp}°C (heating needed)`
+    };
+  }
+
+  // Priority 2: SCOP-based decision
+  if (scop === undefined || scop === null) {
+    // If SCOP is unknown, maintain current state or default to mining
+    return {
+      intendedState: 'mining',
+      reason: 'SCOP unavailable, defaulting to mining'
+    };
+  }
+
+  if (scop >= threshold) {
+    return {
+      intendedState: 'mining',
+      reason: `SCOP ${scop.toFixed(2)} >= threshold ${threshold} (profitable)`
+    };
+  } else {
+    return {
+      intendedState: 'paused',
+      reason: `SCOP ${scop.toFixed(2)} < threshold ${threshold} (unprofitable)`
+    };
+  }
+}
+
+/**
+ * Check SCOP thresholds and actively control miners
+ * This function ensures the miner is in the correct state when auto-control is enabled
  * Called periodically during miner polling
  */
 async function checkSCOPThresholds(minerIp, stats, minerConfig) {
-  if (!minerConfig.autoControl?.enabled) return;
+  if (!minerConfig.autoControl?.enabled) {
+    // Clear intended state if auto-control is disabled
+    if (minerControlState[minerIp]?.intendedState) {
+      minerControlState[minerIp] = {
+        ...minerControlState[minerIp],
+        intendedState: null,
+        stateReason: null
+      };
+    }
+    return;
+  }
 
   const scop = stats.efficiency?.effectiveSCOP;
 
   // Use board temperature (not chip temp) for room temp estimation
-  // Get average of available board temps, or fall back to chip temp
   const boardTemps = stats.boards
     ?.map(b => b.temp)
     .filter(t => t !== null && t !== undefined && t > 0) || [];
@@ -347,44 +406,68 @@ async function checkSCOPThresholds(minerIp, stats, minerConfig) {
   const minTemp = minerConfig.autoControl.minTemperature;
 
   const state = minerControlState[minerIp] || {};
-  const isPaused = state.isPaused;
 
-  // Don't check more than once per minute
-  if (state.lastSCOPCheck && Date.now() - state.lastSCOPCheck.getTime() < 60000) {
-    return;
-  }
+  // Determine actual miner state from hashrate (more reliable than stored state)
+  const hashrate = stats.hashrate || 0;
+  const actuallyMining = hashrate > 0.1; // More than 0.1 TH/s means mining
+  const isPaused = !actuallyMining;
 
-  minerControlState[minerIp] = { ...state, lastSCOPCheck: new Date() };
+  // Update actual state in our tracking
+  minerControlState[minerIp] = {
+    ...state,
+    isPaused,
+    lastSCOPCheck: new Date()
+  };
 
-  console.log(`SCOP check for ${minerIp}: SCOP=${scop?.toFixed(2)}, threshold=${threshold}, boardTemp=${boardTemp?.toFixed(1)}°C, minTemp=${minTemp}°C, isPaused=${isPaused}`);
+  // Determine what state the miner SHOULD be in
+  const { intendedState, reason } = determineIntendedState(scop, boardTemp, threshold, minTemp);
 
-  // Logic for auto-control:
-  // 1. If SCOP < threshold AND (no minTemp OR boardTemp > minTemp) → pause
-  // 2. If SCOP >= threshold OR boardTemp < minTemp → resume
+  // Always update the intended state and reason
+  minerControlState[minerIp].intendedState = intendedState;
+  minerControlState[minerIp].stateReason = reason;
 
-  try {
-    if (!isPaused && scop !== undefined && scop < threshold) {
-      // Check if we need to keep mining for minimum temperature
-      if (minTemp !== undefined && boardTemp !== undefined && boardTemp < minTemp) {
-        console.log(`SCOP below threshold but boardTemp ${boardTemp.toFixed(1)}°C < minTemp ${minTemp}°C, keeping miner ON`);
-        return;
-      }
+  // Check if actual state matches intended state
+  const actualState = isPaused ? 'paused' : 'mining';
+  const stateMatches = actualState === intendedState;
 
-      console.log(`SCOP ${scop.toFixed(2)} below threshold ${threshold}, pausing miner ${minerIp}`);
-      await pauseMining(minerIp, minerConfig);
-    } else if (isPaused) {
-      // Resume if SCOP is good OR if board temperature is below minimum
-      const shouldResumeForSCOP = scop !== undefined && scop >= threshold;
-      const shouldResumeForTemp = minTemp !== undefined && boardTemp !== undefined && boardTemp < minTemp;
+  console.log(`[SCOP Auto-Control] ${minerIp}: SCOP=${scop?.toFixed(2) || 'N/A'}, boardTemp=${boardTemp?.toFixed(1) || 'N/A'}°C, hashrate=${hashrate.toFixed(2)} TH/s`);
+  console.log(`  → Actual: ${actualState.toUpperCase()}, Intended: ${intendedState.toUpperCase()}, Match: ${stateMatches ? 'YES' : 'NO'}`);
+  console.log(`  → Reason: ${reason}`);
 
-      if (shouldResumeForSCOP || shouldResumeForTemp) {
-        const reason = shouldResumeForTemp ? `boardTemp ${boardTemp.toFixed(1)}°C < minTemp ${minTemp}°C` : `SCOP ${scop?.toFixed(2)} >= threshold ${threshold}`;
-        console.log(`Resuming miner ${minerIp}: ${reason}`);
-        await resumeMining(minerIp, minerConfig);
-      }
+  // If states don't match, take corrective action
+  if (!stateMatches) {
+    // Rate limit control actions to prevent rapid toggling (at least 30 seconds between actions)
+    const lastAction = state.lastControlAction;
+    const timeSinceLastAction = lastAction ? Date.now() - lastAction.getTime() : Infinity;
+
+    if (timeSinceLastAction < 30000) {
+      console.log(`  → Waiting for control cooldown (${Math.ceil((30000 - timeSinceLastAction) / 1000)}s remaining)`);
+      return;
     }
-  } catch (err) {
-    console.error(`Auto-control error for ${minerIp}:`, err.message);
+
+    try {
+      if (intendedState === 'paused') {
+        console.log(`  → ACTION: Pausing miner to match intended state`);
+        await pauseMining(minerIp, minerConfig);
+        minerControlState[minerIp].lastControlAction = new Date();
+        minerControlState[minerIp].controlAttempts = 0;
+        minerControlState[minerIp].lastSyncError = null;
+      } else if (intendedState === 'mining') {
+        console.log(`  → ACTION: Resuming miner to match intended state`);
+        await resumeMining(minerIp, minerConfig);
+        minerControlState[minerIp].lastControlAction = new Date();
+        minerControlState[minerIp].controlAttempts = 0;
+        minerControlState[minerIp].lastSyncError = null;
+      }
+    } catch (err) {
+      console.error(`  → ERROR: Failed to sync miner state: ${err.message}`);
+      minerControlState[minerIp].controlAttempts = (state.controlAttempts || 0) + 1;
+      minerControlState[minerIp].lastSyncError = err.message;
+    }
+  } else {
+    // States match, clear any error state
+    minerControlState[minerIp].controlAttempts = 0;
+    minerControlState[minerIp].lastSyncError = null;
   }
 }
 
@@ -3181,7 +3264,7 @@ async function pollMiners() {
           await checkSCOPThresholds(miner.ip, stats, miner);
         }
 
-        // Get current control state
+        // Get current control state with enhanced details
         const controlState = minerControlState[miner.ip] || {};
 
         return {
@@ -3190,7 +3273,17 @@ async function pollMiners() {
           minerName: miner.name,
           powerProfile: miner.powerProfile,
           autoControl: miner.autoControl || { enabled: false },
-          isPaused: controlState.isPaused || false
+          isPaused: controlState.isPaused || false,
+          // Enhanced auto-control state
+          autoControlState: {
+            intendedState: controlState.intendedState || null,
+            stateReason: controlState.stateReason || null,
+            stateMatches: controlState.intendedState === null ? null :
+              (controlState.isPaused ? 'paused' : 'mining') === controlState.intendedState,
+            lastControlAction: controlState.lastControlAction || null,
+            controlAttempts: controlState.controlAttempts || 0,
+            lastSyncError: controlState.lastSyncError || null
+          }
         };
       } catch (err) {
         console.error(`Error fetching stats for ${miner.name} (${miner.ip}):`, err.message);
@@ -3201,7 +3294,17 @@ async function pollMiners() {
           error: err.message,
           powerProfile: miner.powerProfile,
           autoControl: miner.autoControl || { enabled: false },
-          isPaused: controlState.isPaused || false
+          isPaused: controlState.isPaused || false,
+          // Enhanced auto-control state
+          autoControlState: {
+            intendedState: controlState.intendedState || null,
+            stateReason: controlState.stateReason || null,
+            stateMatches: controlState.intendedState === null ? null :
+              (controlState.isPaused ? 'paused' : 'mining') === controlState.intendedState,
+            lastControlAction: controlState.lastControlAction || null,
+            controlAttempts: controlState.controlAttempts || 0,
+            lastSyncError: controlState.lastSyncError || null
+          }
         };
       }
     });
