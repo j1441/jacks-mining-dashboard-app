@@ -5,6 +5,8 @@ const path = require('path');
 const fs = require('fs').promises;
 const https = require('https');
 const http = require('http');
+const grpc = require('@grpc/grpc-js');
+const protoLoader = require('@grpc/proto-loader');
 
 const app = express();
 const PORT = process.env.PORT || 3456;
@@ -81,11 +83,77 @@ let lastAlertTimes = {}; // Track when each alert type last fired for cooldown
 let minerControlState = {}; // { ip: { isPaused: bool, authToken: string, tokenExpiry: Date, lastSCOPCheck: Date } }
 
 // ============================================================================
-// Braiins OS REST API Functions (for miner pause/resume control)
+// Braiins OS gRPC API Functions (for miner pause/resume control)
 // ============================================================================
 
+// Load proto files for Braiins OS gRPC API
+const PROTO_PATH_AUTH = path.join(__dirname, 'proto', 'bos', 'v1', 'authentication.proto');
+const PROTO_PATH_ACTIONS = path.join(__dirname, 'proto', 'bos', 'v1', 'actions.proto');
+
+const protoOptions = {
+  keepCase: true,
+  longs: String,
+  enums: String,
+  defaults: true,
+  oneofs: true
+};
+
+// Load proto definitions
+let authProto = null;
+let actionsProto = null;
+
+function loadProtos() {
+  try {
+    const authPackageDef = protoLoader.loadSync(PROTO_PATH_AUTH, protoOptions);
+    authProto = grpc.loadPackageDefinition(authPackageDef).braiins.bos.v1;
+
+    const actionsPackageDef = protoLoader.loadSync(PROTO_PATH_ACTIONS, protoOptions);
+    actionsProto = grpc.loadPackageDefinition(actionsPackageDef).braiins.bos.v1;
+
+    console.log('Braiins OS gRPC proto files loaded successfully');
+  } catch (err) {
+    console.error('Failed to load Braiins OS proto files:', err.message);
+  }
+}
+
+// Initialize protos on startup
+loadProtos();
+
+// Cache for gRPC clients to reuse connections
+const grpcClientCache = {};
+
 /**
- * Login to Braiins OS REST API and get auth token
+ * Get or create a gRPC client for a miner
+ * @param {string} ip - Miner IP address
+ * @param {string} serviceName - 'auth' or 'actions'
+ * @returns {object} gRPC client
+ */
+function getGrpcClient(ip, serviceName) {
+  const cacheKey = `${ip}:${serviceName}`;
+
+  if (grpcClientCache[cacheKey]) {
+    return grpcClientCache[cacheKey];
+  }
+
+  const address = `${ip}:50051`;
+
+  if (serviceName === 'auth') {
+    grpcClientCache[cacheKey] = new authProto.AuthenticationService(
+      address,
+      grpc.credentials.createInsecure()
+    );
+  } else if (serviceName === 'actions') {
+    grpcClientCache[cacheKey] = new actionsProto.ActionsService(
+      address,
+      grpc.credentials.createInsecure()
+    );
+  }
+
+  return grpcClientCache[cacheKey];
+}
+
+/**
+ * Login to Braiins OS gRPC API and get auth token
  * @param {string} ip - Miner IP address
  * @param {string} username - Braiins OS username (default: 'root')
  * @param {string} password - Braiins OS password (default: 'root')
@@ -93,45 +161,21 @@ let minerControlState = {}; // { ip: { isPaused: bool, authToken: string, tokenE
  */
 async function braiinsLogin(ip, username = 'root', password = 'root') {
   return new Promise((resolve, reject) => {
-    const postData = JSON.stringify({ username, password });
+    const client = getGrpcClient(ip, 'auth');
 
-    const options = {
-      hostname: ip,
-      port: 80,
-      path: '/api/v1/auth/login',
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Content-Length': Buffer.byteLength(postData)
-      },
-      timeout: 10000
-    };
+    const deadline = new Date();
+    deadline.setSeconds(deadline.getSeconds() + 10);
 
-    const req = http.request(options, (res) => {
-      let data = '';
-      res.on('data', chunk => data += chunk);
-      res.on('end', () => {
-        try {
-          if (res.statusCode === 200) {
-            const result = JSON.parse(data);
-            resolve(result);
-          } else {
-            reject(new Error(`Login failed: HTTP ${res.statusCode} - ${data}`));
-          }
-        } catch (err) {
-          reject(new Error(`Login parse error: ${err.message}`));
-        }
-      });
+    client.Login({ username, password }, { deadline }, (err, response) => {
+      if (err) {
+        reject(new Error(`gRPC Login failed: ${err.message}`));
+      } else {
+        resolve({
+          token: response.token,
+          timeout_s: parseInt(response.timeout_s) || 3600
+        });
+      }
     });
-
-    req.on('error', reject);
-    req.on('timeout', () => {
-      req.destroy();
-      reject(new Error('Login request timeout'));
-    });
-
-    req.write(postData);
-    req.end();
   });
 }
 
@@ -153,7 +197,7 @@ async function getMinerAuthToken(ip, minerConfig = {}) {
   const username = minerConfig.username || 'root';
   const password = minerConfig.password || 'root';
 
-  console.log(`Logging into Braiins OS at ${ip}...`);
+  console.log(`Logging into Braiins OS gRPC at ${ip}:50051...`);
   const loginResult = await braiinsLogin(ip, username, password);
 
   minerControlState[ip] = {
@@ -162,109 +206,76 @@ async function getMinerAuthToken(ip, minerConfig = {}) {
     tokenExpiry: new Date(Date.now() + (loginResult.timeout_s || 3600) * 1000)
   };
 
-  console.log(`Braiins OS login successful for ${ip}, token expires in ${loginResult.timeout_s}s`);
+  console.log(`Braiins OS gRPC login successful for ${ip}, token expires in ${loginResult.timeout_s}s`);
   return loginResult.token;
 }
 
 /**
- * Pause mining on a Braiins OS miner
+ * Create gRPC metadata with auth token
+ * @param {string} token - Auth token
+ * @returns {grpc.Metadata}
+ */
+function createAuthMetadata(token) {
+  const metadata = new grpc.Metadata();
+  metadata.add('authorization', token);
+  return metadata;
+}
+
+/**
+ * Pause mining on a Braiins OS miner via gRPC
  * @param {string} ip - Miner IP address
  * @param {object} minerConfig - Optional miner config
  * @returns {Promise<{success: boolean, wasAlreadyPaused: boolean}>}
  */
 async function pauseMining(ip, minerConfig = {}) {
   const token = await getMinerAuthToken(ip, minerConfig);
+  const metadata = createAuthMetadata(token);
 
   return new Promise((resolve, reject) => {
-    const options = {
-      hostname: ip,
-      port: 80,
-      path: '/api/v1/actions/pause',
-      method: 'PUT',
-      headers: {
-        'Authorization': `Bearer ${token}`,
-        'Content-Type': 'application/json'
-      },
-      timeout: 10000
-    };
+    const client = getGrpcClient(ip, 'actions');
 
-    const req = http.request(options, (res) => {
-      let data = '';
-      res.on('data', chunk => data += chunk);
-      res.on('end', () => {
-        try {
-          if (res.statusCode === 200) {
-            const wasAlreadyPaused = JSON.parse(data);
-            minerControlState[ip] = { ...minerControlState[ip], isPaused: true };
-            console.log(`Mining paused on ${ip} (was already paused: ${wasAlreadyPaused})`);
-            resolve({ success: true, wasAlreadyPaused });
-          } else {
-            reject(new Error(`Pause failed: HTTP ${res.statusCode} - ${data}`));
-          }
-        } catch (err) {
-          reject(new Error(`Pause parse error: ${err.message}`));
-        }
-      });
+    const deadline = new Date();
+    deadline.setSeconds(deadline.getSeconds() + 10);
+
+    client.PauseMining({}, { deadline, metadata }, (err, response) => {
+      if (err) {
+        reject(new Error(`gRPC PauseMining failed: ${err.message}`));
+      } else {
+        const wasAlreadyPaused = response.already_paused || false;
+        minerControlState[ip] = { ...minerControlState[ip], isPaused: true };
+        console.log(`Mining paused on ${ip} via gRPC (was already paused: ${wasAlreadyPaused})`);
+        resolve({ success: true, wasAlreadyPaused });
+      }
     });
-
-    req.on('error', reject);
-    req.on('timeout', () => {
-      req.destroy();
-      reject(new Error('Pause request timeout'));
-    });
-
-    req.end();
   });
 }
 
 /**
- * Resume mining on a Braiins OS miner
+ * Resume mining on a Braiins OS miner via gRPC
  * @param {string} ip - Miner IP address
  * @param {object} minerConfig - Optional miner config
  * @returns {Promise<{success: boolean, wasAlreadyMining: boolean}>}
  */
 async function resumeMining(ip, minerConfig = {}) {
   const token = await getMinerAuthToken(ip, minerConfig);
+  const metadata = createAuthMetadata(token);
 
   return new Promise((resolve, reject) => {
-    const options = {
-      hostname: ip,
-      port: 80,
-      path: '/api/v1/actions/resume',
-      method: 'PUT',
-      headers: {
-        'Authorization': `Bearer ${token}`,
-        'Content-Type': 'application/json'
-      },
-      timeout: 10000
-    };
+    const client = getGrpcClient(ip, 'actions');
 
-    const req = http.request(options, (res) => {
-      let data = '';
-      res.on('data', chunk => data += chunk);
-      res.on('end', () => {
-        try {
-          if (res.statusCode === 200) {
-            const wasAlreadyMining = JSON.parse(data);
-            minerControlState[ip] = { ...minerControlState[ip], isPaused: false };
-            console.log(`Mining resumed on ${ip} (was already mining: ${wasAlreadyMining})`);
-            resolve({ success: true, wasAlreadyMining });
-          } else {
-            reject(new Error(`Resume failed: HTTP ${res.statusCode} - ${data}`));
-          }
-        } catch (err) {
-          reject(new Error(`Resume parse error: ${err.message}`));
-        }
-      });
+    const deadline = new Date();
+    deadline.setSeconds(deadline.getSeconds() + 10);
+
+    client.ResumeMining({}, { deadline, metadata }, (err, response) => {
+      if (err) {
+        reject(new Error(`gRPC ResumeMining failed: ${err.message}`));
+      } else {
+        const wasAlreadyMining = response.already_mining || false;
+        minerControlState[ip] = { ...minerControlState[ip], isPaused: false };
+        console.log(`Mining resumed on ${ip} via gRPC (was already mining: ${wasAlreadyMining})`);
+        resolve({ success: true, wasAlreadyMining });
+      }
     });
-
-    req.on('error', reject);
-    req.on('timeout', () => {
-      req.destroy();
-      reject(new Error('Resume request timeout'));
-    });
-
-    req.end();
   });
 }
 
