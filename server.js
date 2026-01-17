@@ -77,6 +77,274 @@ let minerStatsCache = {
 let alertHistory = [];
 let lastAlertTimes = {}; // Track when each alert type last fired for cooldown
 
+// Miner control state tracking
+let minerControlState = {}; // { ip: { isPaused: bool, authToken: string, tokenExpiry: Date, lastSCOPCheck: Date } }
+
+// ============================================================================
+// Braiins OS REST API Functions (for miner pause/resume control)
+// ============================================================================
+
+/**
+ * Login to Braiins OS REST API and get auth token
+ * @param {string} ip - Miner IP address
+ * @param {string} username - Braiins OS username (default: 'root')
+ * @param {string} password - Braiins OS password (default: 'root')
+ * @returns {Promise<{token: string, timeout_s: number}>}
+ */
+async function braiinsLogin(ip, username = 'root', password = 'root') {
+  return new Promise((resolve, reject) => {
+    const postData = JSON.stringify({ username, password });
+
+    const options = {
+      hostname: ip,
+      port: 80,
+      path: '/api/v1/auth/login',
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Content-Length': Buffer.byteLength(postData)
+      },
+      timeout: 10000
+    };
+
+    const req = http.request(options, (res) => {
+      let data = '';
+      res.on('data', chunk => data += chunk);
+      res.on('end', () => {
+        try {
+          if (res.statusCode === 200) {
+            const result = JSON.parse(data);
+            resolve(result);
+          } else {
+            reject(new Error(`Login failed: HTTP ${res.statusCode} - ${data}`));
+          }
+        } catch (err) {
+          reject(new Error(`Login parse error: ${err.message}`));
+        }
+      });
+    });
+
+    req.on('error', reject);
+    req.on('timeout', () => {
+      req.destroy();
+      reject(new Error('Login request timeout'));
+    });
+
+    req.write(postData);
+    req.end();
+  });
+}
+
+/**
+ * Get or refresh auth token for a miner
+ * @param {string} ip - Miner IP address
+ * @param {object} minerConfig - Miner config with optional username/password
+ * @returns {Promise<string>} Auth token
+ */
+async function getMinerAuthToken(ip, minerConfig = {}) {
+  const state = minerControlState[ip] || {};
+
+  // Check if we have a valid cached token (with 60s buffer before expiry)
+  if (state.authToken && state.tokenExpiry && new Date() < new Date(state.tokenExpiry.getTime() - 60000)) {
+    return state.authToken;
+  }
+
+  // Login and cache token
+  const username = minerConfig.username || 'root';
+  const password = minerConfig.password || 'root';
+
+  console.log(`Logging into Braiins OS at ${ip}...`);
+  const loginResult = await braiinsLogin(ip, username, password);
+
+  minerControlState[ip] = {
+    ...state,
+    authToken: loginResult.token,
+    tokenExpiry: new Date(Date.now() + (loginResult.timeout_s || 3600) * 1000)
+  };
+
+  console.log(`Braiins OS login successful for ${ip}, token expires in ${loginResult.timeout_s}s`);
+  return loginResult.token;
+}
+
+/**
+ * Pause mining on a Braiins OS miner
+ * @param {string} ip - Miner IP address
+ * @param {object} minerConfig - Optional miner config
+ * @returns {Promise<{success: boolean, wasAlreadyPaused: boolean}>}
+ */
+async function pauseMining(ip, minerConfig = {}) {
+  const token = await getMinerAuthToken(ip, minerConfig);
+
+  return new Promise((resolve, reject) => {
+    const options = {
+      hostname: ip,
+      port: 80,
+      path: '/api/v1/actions/pause',
+      method: 'PUT',
+      headers: {
+        'Authorization': `Bearer ${token}`,
+        'Content-Type': 'application/json'
+      },
+      timeout: 10000
+    };
+
+    const req = http.request(options, (res) => {
+      let data = '';
+      res.on('data', chunk => data += chunk);
+      res.on('end', () => {
+        try {
+          if (res.statusCode === 200) {
+            const wasAlreadyPaused = JSON.parse(data);
+            minerControlState[ip] = { ...minerControlState[ip], isPaused: true };
+            console.log(`Mining paused on ${ip} (was already paused: ${wasAlreadyPaused})`);
+            resolve({ success: true, wasAlreadyPaused });
+          } else {
+            reject(new Error(`Pause failed: HTTP ${res.statusCode} - ${data}`));
+          }
+        } catch (err) {
+          reject(new Error(`Pause parse error: ${err.message}`));
+        }
+      });
+    });
+
+    req.on('error', reject);
+    req.on('timeout', () => {
+      req.destroy();
+      reject(new Error('Pause request timeout'));
+    });
+
+    req.end();
+  });
+}
+
+/**
+ * Resume mining on a Braiins OS miner
+ * @param {string} ip - Miner IP address
+ * @param {object} minerConfig - Optional miner config
+ * @returns {Promise<{success: boolean, wasAlreadyMining: boolean}>}
+ */
+async function resumeMining(ip, minerConfig = {}) {
+  const token = await getMinerAuthToken(ip, minerConfig);
+
+  return new Promise((resolve, reject) => {
+    const options = {
+      hostname: ip,
+      port: 80,
+      path: '/api/v1/actions/resume',
+      method: 'PUT',
+      headers: {
+        'Authorization': `Bearer ${token}`,
+        'Content-Type': 'application/json'
+      },
+      timeout: 10000
+    };
+
+    const req = http.request(options, (res) => {
+      let data = '';
+      res.on('data', chunk => data += chunk);
+      res.on('end', () => {
+        try {
+          if (res.statusCode === 200) {
+            const wasAlreadyMining = JSON.parse(data);
+            minerControlState[ip] = { ...minerControlState[ip], isPaused: false };
+            console.log(`Mining resumed on ${ip} (was already mining: ${wasAlreadyMining})`);
+            resolve({ success: true, wasAlreadyMining });
+          } else {
+            reject(new Error(`Resume failed: HTTP ${res.statusCode} - ${data}`));
+          }
+        } catch (err) {
+          reject(new Error(`Resume parse error: ${err.message}`));
+        }
+      });
+    });
+
+    req.on('error', reject);
+    req.on('timeout', () => {
+      req.destroy();
+      reject(new Error('Resume request timeout'));
+    });
+
+    req.end();
+  });
+}
+
+/**
+ * Get current mining status from Braiins OS
+ * @param {string} ip - Miner IP address
+ * @returns {Promise<{isPaused: boolean, status: string}>}
+ */
+async function getMiningStatus(ip) {
+  try {
+    // Use the summary endpoint to check if miner is actively mining
+    const summary = await sendCGMinerCommand(ip, { command: 'summary' });
+    const hashrate = summary.SUMMARY?.[0]?.['MHS 5s'] || 0;
+
+    // If hashrate is essentially zero, consider it paused
+    const isPaused = hashrate < 1; // Less than 1 MH/s means paused
+
+    minerControlState[ip] = { ...minerControlState[ip], isPaused };
+
+    return { isPaused, status: isPaused ? 'paused' : 'mining', hashrate };
+  } catch (err) {
+    console.error(`Failed to get mining status for ${ip}:`, err.message);
+    return { isPaused: null, status: 'unknown', error: err.message };
+  }
+}
+
+/**
+ * Check SCOP thresholds and auto-control miners
+ * Called periodically during miner polling
+ */
+async function checkSCOPThresholds(minerIp, stats, minerConfig) {
+  if (!minerConfig.autoControl?.enabled) return;
+
+  const scop = stats.efficiency?.effectiveSCOP;
+  const temp = stats.temperature;
+  const threshold = minerConfig.autoControl.scopThreshold || 2.0;
+  const minTemp = minerConfig.autoControl.minTemperature;
+
+  const state = minerControlState[minerIp] || {};
+  const isPaused = state.isPaused;
+
+  // Don't check more than once per minute
+  if (state.lastSCOPCheck && Date.now() - state.lastSCOPCheck.getTime() < 60000) {
+    return;
+  }
+
+  minerControlState[minerIp] = { ...state, lastSCOPCheck: new Date() };
+
+  console.log(`SCOP check for ${minerIp}: SCOP=${scop?.toFixed(2)}, threshold=${threshold}, temp=${temp}°C, minTemp=${minTemp}°C, isPaused=${isPaused}`);
+
+  // Logic for auto-control:
+  // 1. If SCOP < threshold AND (no minTemp OR temp > minTemp) → pause
+  // 2. If SCOP >= threshold OR temp < minTemp → resume
+
+  try {
+    if (!isPaused && scop !== undefined && scop < threshold) {
+      // Check if we need to keep mining for minimum temperature
+      if (minTemp !== undefined && temp !== undefined && temp < minTemp) {
+        console.log(`SCOP below threshold but temp ${temp}°C < minTemp ${minTemp}°C, keeping miner ON`);
+        return;
+      }
+
+      console.log(`SCOP ${scop.toFixed(2)} below threshold ${threshold}, pausing miner ${minerIp}`);
+      await pauseMining(minerIp, minerConfig);
+    } else if (isPaused) {
+      // Resume if SCOP is good OR if temperature is below minimum
+      const shouldResumeForSCOP = scop !== undefined && scop >= threshold;
+      const shouldResumeForTemp = minTemp !== undefined && temp !== undefined && temp < minTemp;
+
+      if (shouldResumeForSCOP || shouldResumeForTemp) {
+        const reason = shouldResumeForTemp ? `temp ${temp}°C < minTemp ${minTemp}°C` : `SCOP ${scop?.toFixed(2)} >= threshold ${threshold}`;
+        console.log(`Resuming miner ${minerIp}: ${reason}`);
+        await resumeMining(minerIp, minerConfig);
+      }
+    }
+  } catch (err) {
+    console.error(`Auto-control error for ${minerIp}:`, err.message);
+  }
+}
+
 // ============================================================================
 // Utility Functions
 // ============================================================================
@@ -2481,6 +2749,96 @@ app.post('/api/miner/power', async (req, res) => {
   }
 });
 
+// Pause mining on a miner
+app.post('/api/miner/pause', async (req, res) => {
+  try {
+    const config = await loadConfig();
+    const ip = req.body.ip;
+
+    if (!ip) {
+      return res.status(400).json({ error: 'No miner IP provided' });
+    }
+
+    const minerConfig = config.miners.find(m => m.ip === ip) || {};
+    const result = await pauseMining(ip, minerConfig);
+
+    res.json(result);
+  } catch (err) {
+    console.error('API pause error:', err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Resume mining on a miner
+app.post('/api/miner/resume', async (req, res) => {
+  try {
+    const config = await loadConfig();
+    const ip = req.body.ip;
+
+    if (!ip) {
+      return res.status(400).json({ error: 'No miner IP provided' });
+    }
+
+    const minerConfig = config.miners.find(m => m.ip === ip) || {};
+    const result = await resumeMining(ip, minerConfig);
+
+    res.json(result);
+  } catch (err) {
+    console.error('API resume error:', err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Get mining status for a miner
+app.get('/api/miner/status', async (req, res) => {
+  try {
+    const ip = req.query.ip;
+
+    if (!ip) {
+      return res.status(400).json({ error: 'No miner IP provided' });
+    }
+
+    const status = await getMiningStatus(ip);
+    res.json(status);
+  } catch (err) {
+    console.error('API status error:', err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Update auto-control settings for a miner
+app.post('/api/miner/auto-control', async (req, res) => {
+  try {
+    const { ip, enabled, scopThreshold, minTemperature } = req.body;
+
+    if (!ip) {
+      return res.status(400).json({ error: 'No miner IP provided' });
+    }
+
+    const config = await loadConfig();
+    const miner = config.miners.find(m => m.ip === ip);
+
+    if (!miner) {
+      return res.status(404).json({ error: 'Miner not found' });
+    }
+
+    // Initialize or update autoControl settings
+    miner.autoControl = {
+      enabled: enabled !== undefined ? enabled : (miner.autoControl?.enabled || false),
+      scopThreshold: scopThreshold !== undefined ? scopThreshold : (miner.autoControl?.scopThreshold || 2.0),
+      minTemperature: minTemperature !== undefined ? minTemperature : miner.autoControl?.minTemperature
+    };
+
+    await saveConfig(config);
+
+    console.log(`Auto-control settings updated for ${ip}:`, miner.autoControl);
+    res.json({ success: true, autoControl: miner.autoControl });
+  } catch (err) {
+    console.error('API auto-control error:', err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
 app.post('/api/config', async (req, res) => {
   try {
     console.log('Received config POST:', req.body);
@@ -2765,19 +3123,33 @@ async function pollMiners() {
     const minerStatsPromises = config.miners.map(async (miner) => {
       try {
         const stats = await getMinerStats(miner.ip, config);
+
+        // Check SCOP thresholds and auto-control if enabled
+        if (miner.autoControl?.enabled && stats.efficiency) {
+          await checkSCOPThresholds(miner.ip, stats, miner);
+        }
+
+        // Get current control state
+        const controlState = minerControlState[miner.ip] || {};
+
         return {
           ...stats,
           minerIp: miner.ip,
           minerName: miner.name,
-          powerProfile: miner.powerProfile
+          powerProfile: miner.powerProfile,
+          autoControl: miner.autoControl || { enabled: false },
+          isPaused: controlState.isPaused || false
         };
       } catch (err) {
         console.error(`Error fetching stats for ${miner.name} (${miner.ip}):`, err.message);
+        const controlState = minerControlState[miner.ip] || {};
         return {
           minerIp: miner.ip,
           minerName: miner.name,
           error: err.message,
-          powerProfile: miner.powerProfile
+          powerProfile: miner.powerProfile,
+          autoControl: miner.autoControl || { enabled: false },
+          isPaused: controlState.isPaused || false
         };
       }
     });
