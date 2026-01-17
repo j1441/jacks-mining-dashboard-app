@@ -260,7 +260,7 @@ async function pauseMining(ip, minerConfig = {}) {
     const deadline = new Date();
     deadline.setSeconds(deadline.getSeconds() + 10);
 
-    client.PauseMining({}, { deadline, metadata }, (err, response) => {
+    client.PauseMining({}, metadata, { deadline }, (err, response) => {
       if (err) {
         reject(new Error(`gRPC PauseMining failed: ${err.message}`));
       } else {
@@ -289,7 +289,7 @@ async function resumeMining(ip, minerConfig = {}) {
     const deadline = new Date();
     deadline.setSeconds(deadline.getSeconds() + 10);
 
-    client.ResumeMining({}, { deadline, metadata }, (err, response) => {
+    client.ResumeMining({}, metadata, { deadline }, (err, response) => {
       if (err) {
         reject(new Error(`gRPC ResumeMining failed: ${err.message}`));
       } else {
