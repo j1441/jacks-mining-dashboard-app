@@ -364,19 +364,56 @@ async function fetchBraiinsGraphQL(ip) {
       }
     }
   }`;
-  
+
   const workSolverSchema = await graphqlRequest(ip, workSolverIntrospection, sessionToken);
   if (workSolverSchema?.data?.__type?.fields) {
     console.log('WorkSolverInfo type fields:', workSolverSchema.data.__type.fields.map(f => f.name));
   }
-  
+
+  // Introspect TunerInfo type for power consumption data
+  const tunerIntrospection = `{
+    __type(name: "TunerInfo") {
+      fields {
+        name
+        type {
+          name
+          kind
+        }
+      }
+    }
+  }`;
+
+  const tunerSchema = await graphqlRequest(ip, tunerIntrospection, sessionToken);
+  if (tunerSchema?.data?.__type?.fields) {
+    console.log('TunerInfo type fields:', tunerSchema.data.__type.fields.map(f => f.name));
+  }
+
+  // Introspect MinerStats or similar for power data
+  const minerStatsIntrospection = `{
+    __type(name: "MinerStats") {
+      fields {
+        name
+        type {
+          name
+          kind
+        }
+      }
+    }
+  }`;
+
+  const minerStatsSchema = await graphqlRequest(ip, minerStatsIntrospection, sessionToken);
+  if (minerStatsSchema?.data?.__type?.fields) {
+    console.log('MinerStats type fields:', minerStatsSchema.data.__type.fields.map(f => f.name));
+  }
+
   // Build queries with CORRECT field names based on schema discovery
   // FanInfo has: name, speed, rpm
   // TempCtrlInfo has: targetC, hotC, dangerousC
   // WorkSolverInfo.temperatures is array of Temperature with: name, degreesC
+  // TunerInfo has: powerLimitW, powerReal (actual power consumption)
   const queries = [];
-  
-  // Query 1: Full temperature and fan data with correct field names
+
+  // Query 1: Full data with power consumption from tuner
   queries.push(`{
     bosminer {
       info {
@@ -395,12 +432,16 @@ async function fetchBraiinsGraphQL(ip) {
             name
             degreesC
           }
+          tuner {
+            powerLimitW
+            approximatePowerConsumptionW
+          }
         }
       }
     }
   }`);
-  
-  // Query 2: Just tempCtrl and fans (simpler)
+
+  // Query 2: Temps, fans, and power with alternative tuner fields
   queries.push(`{
     bosminer {
       info {
@@ -411,11 +452,17 @@ async function fetchBraiinsGraphQL(ip) {
         fans {
           rpm
         }
+        workSolver {
+          tuner {
+            powerLimitW
+            approximatePowerConsumptionW
+          }
+        }
       }
     }
   }`);
-  
-  // Query 3: Just workSolver temperatures
+
+  // Query 3: Just workSolver with temperatures and tuner
   queries.push(`{
     bosminer {
       info {
@@ -423,6 +470,10 @@ async function fetchBraiinsGraphQL(ip) {
           temperatures {
             name
             degreesC
+          }
+          tuner {
+            powerLimitW
+            approximatePowerConsumptionW
           }
         }
       }
@@ -1486,11 +1537,13 @@ function checkAlerts(stats, alertConfig, minerName) {
     // Check low hashrate
     if (alertConfig.lowHashrate?.enabled && stats.hashrate) {
       const thresholdPercent = alertConfig.lowHashrate.threshold || 80;
-      // Estimate expected hashrate based on power profile
+      // Estimate expected hashrate based on power draw (if available)
       let expectedHashrate = 100; // Default TH/s
-      if (stats.powerDraw < 2500) expectedHashrate = 80;
-      else if (stats.powerDraw < 3000) expectedHashrate = 95;
-      else expectedHashrate = 110;
+      if (stats.powerDraw !== null && stats.powerDraw > 0) {
+        if (stats.powerDraw < 2500) expectedHashrate = 80;
+        else if (stats.powerDraw < 3000) expectedHashrate = 95;
+        else expectedHashrate = 110;
+      }
 
       const minHashrate = expectedHashrate * (thresholdPercent / 100);
       if (stats.hashrate < minHashrate) {
@@ -1703,7 +1756,8 @@ async function getMinerStats(ip, config = {}) {
     // Extract temperatures - prefer GraphQL data, fall back to CGMiner
     let temps = { board1: null, board2: null, board3: null, chip: null };
     let fans = { speed1: null, speed2: null, speed3: null, speed4: null };
-    
+    let graphqlPower = null; // Power from GraphQL API (most accurate)
+
     // Try GraphQL data first (most reliable for Braiins OS)
     if (graphqlData?.data) {
       console.log('=== PROCESSING GRAPHQL DATA ===');
@@ -1774,8 +1828,22 @@ async function getMinerStats(ip, config = {}) {
             }
           }
         }
+
+        // Extract power consumption from tuner data
+        if (info.workSolver?.tuner) {
+          const tuner = info.workSolver.tuner;
+          console.log('Found tuner data:', JSON.stringify(tuner));
+          // Prefer actual power consumption, fall back to power limit
+          if (tuner.approximatePowerConsumptionW !== undefined && tuner.approximatePowerConsumptionW !== null) {
+            graphqlPower = tuner.approximatePowerConsumptionW;
+            console.log('Got power from approximatePowerConsumptionW:', graphqlPower);
+          } else if (tuner.powerLimitW !== undefined && tuner.powerLimitW !== null) {
+            graphqlPower = tuner.powerLimitW;
+            console.log('Got power from powerLimitW:', graphqlPower);
+          }
+        }
       }
-      
+
       // Handle multiple possible GraphQL response formats
       
       // Format 1: bosminer.hashChains with temperature objects
@@ -1959,9 +2027,38 @@ async function getMinerStats(ip, config = {}) {
     console.log('Final temperatures:', temps);
     console.log('Final fans:', fans);
 
-    // Get power from stats or estimate
-    const power = statsData.Power || statsData.power || statsData.power_limit || 
-                  summaryData.Power || Math.round(hashrate * 34) || 3250;
+    // Get power from various sources - prioritize GraphQL (most accurate), then CGMiner API
+    // DO NOT use fake estimates based on assumed W/TH - only show real data
+    let power = null;
+    let powerSource = 'unavailable';
+
+    // Priority 1: GraphQL tuner data (most accurate - actual measured power)
+    if (graphqlPower !== null && graphqlPower > 0) {
+      power = graphqlPower;
+      powerSource = 'graphql';
+      console.log('Using power from GraphQL:', power);
+    }
+    // Priority 2: CGMiner stats API
+    else if (statsData.Power && statsData.Power > 0) {
+      power = statsData.Power;
+      powerSource = 'cgminer-stats';
+      console.log('Using power from CGMiner stats:', power);
+    }
+    else if (statsData.power && statsData.power > 0) {
+      power = statsData.power;
+      powerSource = 'cgminer-stats';
+      console.log('Using power from CGMiner stats (lowercase):', power);
+    }
+    // Priority 3: CGMiner summary API
+    else if (summaryData.Power && summaryData.Power > 0) {
+      power = summaryData.Power;
+      powerSource = 'cgminer-summary';
+      console.log('Using power from CGMiner summary:', power);
+    }
+    // No fake fallbacks - if we can't get real power, leave it null
+    else {
+      console.log('WARNING: No real power data available from miner API');
+    }
 
     const powerProfile = config.currentProfile || 'medium';
 
@@ -2009,8 +2106,11 @@ async function getMinerStats(ip, config = {}) {
     // Total effective price = base price + grid fees
     const effectivePrice = basePrice + gridFee;
 
-    // Calculate efficiency metrics with effective price
-    const efficiency = calculateEfficiency(hashrate, power, effectivePrice, btcPrice, currency);
+    // Calculate efficiency metrics with effective price (only if power is available)
+    const efficiency = power !== null ? calculateEfficiency(hashrate, power, effectivePrice, btcPrice, currency) : null;
+
+    // Calculate W/TH only if we have real power data
+    const efficiencyWPerTH = (power !== null && hashrate > 0) ? power / hashrate : null;
 
     return {
       // Basic stats
@@ -2019,9 +2119,10 @@ async function getMinerStats(ip, config = {}) {
       hashrate15m,
       hashrate24h,
       hashrateAv,
-      efficiencyWPerTH: power / hashrate, // W/TH efficiency
+      efficiencyWPerTH, // W/TH efficiency (null if power unavailable)
       temperature: temps.chip,
-      powerDraw: power,
+      powerDraw: power, // null if unavailable
+      powerSource, // indicates where power data came from
       uptime: summaryData.Elapsed || 0,
       boards: [
         { temp: temps.board1, chipTemp: tempsCmd?.TEMPS?.[0]?.Chip || null },
@@ -2087,6 +2188,10 @@ async function getMinerStats(ip, config = {}) {
       
       // Debug info - all available API data
       _debug: {
+        // Power source tracking
+        powerSource,
+        graphqlPower,
+
         // GraphQL API
         graphqlAvailable: graphqlData?.data ? true : false,
         graphqlRootFields: graphqlData?._availableFields || [],
@@ -2094,6 +2199,7 @@ async function getMinerStats(ip, config = {}) {
         graphqlBosFields: graphqlData?._bosFields || [],
         graphqlTemps: graphqlData?.data?.temperatures || graphqlData?.data?.bosminer?.hashChains || [],
         graphqlFans: graphqlData?.data?.fans || graphqlData?.data?.bosminer?.fans || [],
+        graphqlTuner: graphqlData?.data?.bosminer?.info?.workSolver?.tuner || null,
         graphqlRawData: graphqlData?.data ? JSON.stringify(graphqlData.data).substring(0, 500) : null,
 
         // HTTP API
