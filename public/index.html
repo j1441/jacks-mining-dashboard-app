@@ -1421,13 +1421,13 @@
 
                                 <div style={{ marginBottom: '0.75rem' }}>
                                     <label style={{ display: 'block', color: '#9ca3af', marginBottom: '0.25rem' }}>
-                                        Min Room Temp °C (override SCOP)
+                                        Min Board Temp °C (override SCOP)
                                     </label>
                                     <input
                                         type="number"
                                         step="1"
                                         min="0"
-                                        max="30"
+                                        max="50"
                                         value={minTemperature}
                                         onChange={(e) => setMinTemperature(e.target.value === '' ? '' : parseInt(e.target.value))}
                                         placeholder="Not set"
@@ -1442,7 +1442,7 @@
                                         }}
                                     />
                                     <div style={{ color: '#6b7280', fontSize: '0.625rem', marginTop: '0.25rem' }}>
-                                        Keep miner ON if chip temp drops below this value
+                                        Keep miner ON if board temp drops below this (better room temp estimate)
                                     </div>
                                 </div>
 

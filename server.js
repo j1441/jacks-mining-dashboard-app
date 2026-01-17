@@ -299,7 +299,16 @@ async function checkSCOPThresholds(minerIp, stats, minerConfig) {
   if (!minerConfig.autoControl?.enabled) return;
 
   const scop = stats.efficiency?.effectiveSCOP;
-  const temp = stats.temperature;
+
+  // Use board temperature (not chip temp) for room temp estimation
+  // Get average of available board temps, or fall back to chip temp
+  const boardTemps = stats.boards
+    ?.map(b => b.temp)
+    .filter(t => t !== null && t !== undefined && t > 0) || [];
+  const boardTemp = boardTemps.length > 0
+    ? boardTemps.reduce((a, b) => a + b, 0) / boardTemps.length
+    : stats.temperature;
+
   const threshold = minerConfig.autoControl.scopThreshold || 2.0;
   const minTemp = minerConfig.autoControl.minTemperature;
 
@@ -313,29 +322,29 @@ async function checkSCOPThresholds(minerIp, stats, minerConfig) {
 
   minerControlState[minerIp] = { ...state, lastSCOPCheck: new Date() };
 
-  console.log(`SCOP check for ${minerIp}: SCOP=${scop?.toFixed(2)}, threshold=${threshold}, temp=${temp}°C, minTemp=${minTemp}°C, isPaused=${isPaused}`);
+  console.log(`SCOP check for ${minerIp}: SCOP=${scop?.toFixed(2)}, threshold=${threshold}, boardTemp=${boardTemp?.toFixed(1)}°C, minTemp=${minTemp}°C, isPaused=${isPaused}`);
 
   // Logic for auto-control:
-  // 1. If SCOP < threshold AND (no minTemp OR temp > minTemp) → pause
-  // 2. If SCOP >= threshold OR temp < minTemp → resume
+  // 1. If SCOP < threshold AND (no minTemp OR boardTemp > minTemp) → pause
+  // 2. If SCOP >= threshold OR boardTemp < minTemp → resume
 
   try {
     if (!isPaused && scop !== undefined && scop < threshold) {
       // Check if we need to keep mining for minimum temperature
-      if (minTemp !== undefined && temp !== undefined && temp < minTemp) {
-        console.log(`SCOP below threshold but temp ${temp}°C < minTemp ${minTemp}°C, keeping miner ON`);
+      if (minTemp !== undefined && boardTemp !== undefined && boardTemp < minTemp) {
+        console.log(`SCOP below threshold but boardTemp ${boardTemp.toFixed(1)}°C < minTemp ${minTemp}°C, keeping miner ON`);
         return;
       }
 
       console.log(`SCOP ${scop.toFixed(2)} below threshold ${threshold}, pausing miner ${minerIp}`);
       await pauseMining(minerIp, minerConfig);
     } else if (isPaused) {
-      // Resume if SCOP is good OR if temperature is below minimum
+      // Resume if SCOP is good OR if board temperature is below minimum
       const shouldResumeForSCOP = scop !== undefined && scop >= threshold;
-      const shouldResumeForTemp = minTemp !== undefined && temp !== undefined && temp < minTemp;
+      const shouldResumeForTemp = minTemp !== undefined && boardTemp !== undefined && boardTemp < minTemp;
 
       if (shouldResumeForSCOP || shouldResumeForTemp) {
-        const reason = shouldResumeForTemp ? `temp ${temp}°C < minTemp ${minTemp}°C` : `SCOP ${scop?.toFixed(2)} >= threshold ${threshold}`;
+        const reason = shouldResumeForTemp ? `boardTemp ${boardTemp.toFixed(1)}°C < minTemp ${minTemp}°C` : `SCOP ${scop?.toFixed(2)} >= threshold ${threshold}`;
         console.log(`Resuming miner ${minerIp}: ${reason}`);
         await resumeMining(minerIp, minerConfig);
       }
