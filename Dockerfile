@@ -16,6 +16,7 @@ RUN npm ci --only=production
 
 COPY server.js .
 COPY public ./public
+COPY proto ./proto
 
 # Create data directory with proper permissions
 # COPY entrypoint.sh /entrypoint.sh
