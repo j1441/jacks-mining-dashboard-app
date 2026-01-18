@@ -1133,9 +1133,25 @@ async function getMinerStatsOptimized(ip, minerConfig) {
   }
   const effectivePrice = basePrice + gridFee;
 
-  // Calculate efficiency
+  // Calculate efficiency for all hashrate periods
+  const hashrate1mValue = (summaryData['MHS 1m'] || 0) / 1000000;
+  const hashrate15mValue = hashrate15m;
+  const hashrate1hValue = (summaryData['MHS 1h'] || 0) / 1000000;
+  const hashrate24hValue = (summaryData['MHS 24h'] || 0) / 1000000;
+
+  // Calculate efficiency and effective SCOP for each time period
   const efficiency = power !== null ? calculateEfficiency(hashrate, power, effectivePrice, btcPrice, currency) : null;
+  const efficiency1m = power !== null && hashrate1mValue > 0 ? calculateEfficiency(hashrate1mValue, power, effectivePrice, btcPrice, currency) : null;
+  const efficiency15m = power !== null && hashrate15mValue > 0 ? calculateEfficiency(hashrate15mValue, power, effectivePrice, btcPrice, currency) : null;
+  const efficiency1h = power !== null && hashrate1hValue > 0 ? calculateEfficiency(hashrate1hValue, power, effectivePrice, btcPrice, currency) : null;
+  const efficiency24h = power !== null && hashrate24hValue > 0 ? calculateEfficiency(hashrate24hValue, power, effectivePrice, btcPrice, currency) : null;
+
+  // Calculate W/TH for each time period
   const efficiencyWPerTH = (power !== null && hashrate > 0) ? power / hashrate : null;
+  const efficiencyWPerTH1m = (power !== null && hashrate1mValue > 0) ? power / hashrate1mValue : null;
+  const efficiencyWPerTH15m = (power !== null && hashrate15mValue > 0) ? power / hashrate15mValue : null;
+  const efficiencyWPerTH1h = (power !== null && hashrate1hValue > 0) ? power / hashrate1hValue : null;
+  const efficiencyWPerTH24h = (power !== null && hashrate24hValue > 0) ? power / hashrate24hValue : null;
 
   // Concise log output
   const workingApis = commandList.filter(cmd => !cgminerResults[cmd]?.error).join(',');
@@ -1145,9 +1161,14 @@ async function getMinerStatsOptimized(ip, minerConfig) {
     hashrate,
     hashrate15m,
     hashrate1m: (summaryData['MHS 1m'] || 0) / 1000000,
+    hashrate1h: (summaryData['MHS 1h'] || 0) / 1000000,
     hashrate24h: (summaryData['MHS 24h'] || 0) / 1000000,
     hashrateAv: (summaryData['MHS av'] || 0) / 1000000,
     efficiencyWPerTH,
+    efficiencyWPerTH1m,
+    efficiencyWPerTH15m,
+    efficiencyWPerTH1h,
+    efficiencyWPerTH24h,
     temperature: temps.chip,
     powerDraw: power,
     powerLimit,
@@ -1205,6 +1226,10 @@ async function getMinerStatsOptimized(ip, minerConfig) {
     },
 
     efficiency,
+    efficiency1m,
+    efficiency15m,
+    efficiency1h,
+    efficiency24h,
 
     // Minimal debug info
     _debug: {
@@ -3181,20 +3206,35 @@ async function getMinerStats(ip, config = {}) {
     // Total effective price = base price + grid fees
     const effectivePrice = basePrice + gridFee;
 
-    // Calculate efficiency metrics with effective price (only if power is available)
-    const efficiency = power !== null ? calculateEfficiency(hashrate, power, effectivePrice, btcPrice, currency) : null;
+    // Calculate efficiency and effective SCOP for each time period
+    const hashrate1hValue = (summaryData['MHS 1h'] || 0) / 1000000;
 
-    // Calculate W/TH only if we have real power data
+    const efficiency = power !== null ? calculateEfficiency(hashrate, power, effectivePrice, btcPrice, currency) : null;
+    const efficiency1m = power !== null && hashrate1m > 0 ? calculateEfficiency(hashrate1m, power, effectivePrice, btcPrice, currency) : null;
+    const efficiency15m = power !== null && hashrate15m > 0 ? calculateEfficiency(hashrate15m, power, effectivePrice, btcPrice, currency) : null;
+    const efficiency1h = power !== null && hashrate1hValue > 0 ? calculateEfficiency(hashrate1hValue, power, effectivePrice, btcPrice, currency) : null;
+    const efficiency24h = power !== null && hashrate24h > 0 ? calculateEfficiency(hashrate24h, power, effectivePrice, btcPrice, currency) : null;
+
+    // Calculate W/TH for each time period
     const efficiencyWPerTH = (power !== null && hashrate > 0) ? power / hashrate : null;
+    const efficiencyWPerTH1m = (power !== null && hashrate1m > 0) ? power / hashrate1m : null;
+    const efficiencyWPerTH15m = (power !== null && hashrate15m > 0) ? power / hashrate15m : null;
+    const efficiencyWPerTH1h = (power !== null && hashrate1hValue > 0) ? power / hashrate1hValue : null;
+    const efficiencyWPerTH24h = (power !== null && hashrate24h > 0) ? power / hashrate24h : null;
 
     return {
       // Basic stats
       hashrate,
       hashrate1m,
       hashrate15m,
+      hashrate1h: hashrate1hValue,
       hashrate24h,
       hashrateAv,
       efficiencyWPerTH, // W/TH efficiency (null if power unavailable)
+      efficiencyWPerTH1m,
+      efficiencyWPerTH15m,
+      efficiencyWPerTH1h,
+      efficiencyWPerTH24h,
       temperature: temps.chip,
       powerDraw: power, // Actual power consumption in watts (null if unavailable)
       powerLimit, // Configured power target in watts (null if unavailable)
@@ -3261,6 +3301,10 @@ async function getMinerStats(ip, config = {}) {
       
       // Efficiency metrics
       efficiency,
+      efficiency1m,
+      efficiency15m,
+      efficiency1h,
+      efficiency24h,
       
       // Debug info - all available API data
       _debug: {

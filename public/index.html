@@ -1603,10 +1603,25 @@
                                     {miner.efficiency.dailyKWh.toFixed(1)} kWh/day
                                 </div>
                             )}
-                            {/* W/TH Efficiency */}
+                            {/* W/TH Efficiency - All Time Periods */}
                             {miner.efficiencyWPerTH != null && (
-                                <div style={{ fontSize: '0.625rem', color: '#a78bfa', fontWeight: '600' }}>
-                                    {miner.efficiencyWPerTH.toFixed(1)} W/TH
+                                <div style={{ fontSize: '0.625rem', color: '#a78bfa', fontWeight: '600', marginTop: '0.25rem' }}>
+                                    <div style={{ marginBottom: '0.1rem' }}>W/TH:</div>
+                                    {miner.efficiencyWPerTH != null && (
+                                        <div>5s: {miner.efficiencyWPerTH.toFixed(1)}</div>
+                                    )}
+                                    {miner.efficiencyWPerTH1m != null && (
+                                        <div>1m: {miner.efficiencyWPerTH1m.toFixed(1)}</div>
+                                    )}
+                                    {miner.efficiencyWPerTH15m != null && (
+                                        <div>15m: {miner.efficiencyWPerTH15m.toFixed(1)}</div>
+                                    )}
+                                    {miner.efficiencyWPerTH1h != null && (
+                                        <div>1h: {miner.efficiencyWPerTH1h.toFixed(1)}</div>
+                                    )}
+                                    {miner.efficiencyWPerTH24h != null && (
+                                        <div>24h: {miner.efficiencyWPerTH24h.toFixed(1)}</div>
+                                    )}
                                 </div>
                             )}
                         </div>
@@ -1618,21 +1633,60 @@
                         </div>
                     </div>
 
-                    {/* Efficiency Info */}
+                    {/* Efficiency Info - Multi Time Period */}
                     {miner.efficiency && (
                         <div style={{ marginBottom: '1rem', padding: '0.75rem', background: 'rgba(255,255,255,0.05)', borderRadius: '0.5rem' }}>
-                            <div className="grid grid-cols-2" style={{ gap: '0.5rem', fontSize: '0.75rem' }}>
-                                <div>
-                                    <div style={{ color: '#9ca3af' }}>Daily Profit</div>
-                                    <div style={{ fontWeight: '600', color: miner.efficiency.isProfitable ? '#4ade80' : '#f87171' }}>
-                                        {miner.efficiency.isProfitable ? '+' : ''}{miner.efficiency.dailyProfit?.toFixed(0)} {currency}
-                                    </div>
+                            <div style={{ marginBottom: '0.5rem' }}>
+                                <div style={{ color: '#9ca3af', fontSize: '0.75rem' }}>Daily Profit (5s)</div>
+                                <div style={{ fontWeight: '600', color: miner.efficiency.isProfitable ? '#4ade80' : '#f87171', fontSize: '0.875rem' }}>
+                                    {miner.efficiency.isProfitable ? '+' : ''}{miner.efficiency.dailyProfit?.toFixed(0)} {currency}
                                 </div>
-                                <div>
-                                    <div style={{ color: '#9ca3af' }}>Effective SCOP</div>
-                                    <div style={{ fontWeight: '600', color: '#22d3ee' }}>
-                                        {miner.efficiency.effectiveSCOP?.toFixed(1)}
-                                    </div>
+                            </div>
+
+                            {/* Effective SCOP for all time periods */}
+                            <div style={{ fontSize: '0.75rem' }}>
+                                <div style={{ color: '#9ca3af', marginBottom: '0.25rem' }}>Effective SCOP:</div>
+                                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(5, 1fr)', gap: '0.5rem' }}>
+                                    {miner.efficiency?.effectiveSCOP != null && (
+                                        <div>
+                                            <div style={{ color: '#6b7280', fontSize: '0.625rem' }}>5s</div>
+                                            <div style={{ fontWeight: '600', color: '#22d3ee' }}>
+                                                {miner.efficiency.effectiveSCOP.toFixed(1)}
+                                            </div>
+                                        </div>
+                                    )}
+                                    {miner.efficiency1m?.effectiveSCOP != null && (
+                                        <div>
+                                            <div style={{ color: '#6b7280', fontSize: '0.625rem' }}>1m</div>
+                                            <div style={{ fontWeight: '600', color: '#22d3ee' }}>
+                                                {miner.efficiency1m.effectiveSCOP.toFixed(1)}
+                                            </div>
+                                        </div>
+                                    )}
+                                    {miner.efficiency15m?.effectiveSCOP != null && (
+                                        <div>
+                                            <div style={{ color: '#6b7280', fontSize: '0.625rem' }}>15m</div>
+                                            <div style={{ fontWeight: '600', color: '#22d3ee' }}>
+                                                {miner.efficiency15m.effectiveSCOP.toFixed(1)}
+                                            </div>
+                                        </div>
+                                    )}
+                                    {miner.efficiency1h?.effectiveSCOP != null && (
+                                        <div>
+                                            <div style={{ color: '#6b7280', fontSize: '0.625rem' }}>1h</div>
+                                            <div style={{ fontWeight: '600', color: '#22d3ee' }}>
+                                                {miner.efficiency1h.effectiveSCOP.toFixed(1)}
+                                            </div>
+                                        </div>
+                                    )}
+                                    {miner.efficiency24h?.effectiveSCOP != null && (
+                                        <div>
+                                            <div style={{ color: '#6b7280', fontSize: '0.625rem' }}>24h</div>
+                                            <div style={{ fontWeight: '600', color: '#22d3ee' }}>
+                                                {miner.efficiency24h.effectiveSCOP.toFixed(1)}
+                                            </div>
+                                        </div>
+                                    )}
                                 </div>
                             </div>
                         </div>
