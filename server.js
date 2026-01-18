@@ -2349,12 +2349,15 @@ async function sendCGMinerCommand(ip, command) {
   return new Promise((resolve, reject) => {
     const client = net.connect(4028, ip, () => {
       const request = JSON.stringify(command);
-      console.log(`Sending to ${ip}:4028:`, request);
+      // Only log during discovery, not during regular polling
+      if (process.env.DEBUG_CGMINER) {
+        console.log(`[CGMiner] ${ip}: ${command.command}`);
+      }
       client.write(request);
     });
 
     let data = '';
-    
+
     client.on('data', (chunk) => {
       data += chunk.toString();
     });
@@ -2362,7 +2365,6 @@ async function sendCGMinerCommand(ip, command) {
     client.on('end', () => {
       try {
         const cleaned = data.replace(/\0/g, '');
-        console.log(`Response from ${ip}:`, cleaned.substring(0, 500) + '...');
         const parsed = JSON.parse(cleaned);
         resolve(parsed);
       } catch (err) {
@@ -2371,7 +2373,7 @@ async function sendCGMinerCommand(ip, command) {
     });
 
     client.on('error', (err) => {
-      console.error(`Connection error to ${ip}:4028:`, err.message);
+      // Only log errors, not every connection
       reject(new Error('Connection error: ' + err.message));
     });
 
@@ -2390,25 +2392,13 @@ function extractTemperatures(statsData, devsData = {}, allStatsData = {}) {
   // Merge all data sources for searching
   const combinedData = { ...allStatsData, ...statsData, ...devsData };
   
-  // Debug: Log all keys to help identify the correct field names
-  console.log('Combined data keys for temp search:', Object.keys(combinedData).join(', '));
-  
   const temps = {
     board1: null,
     board2: null,
     board3: null,
     chip: null
   };
-  
-  // List all numeric fields for debugging
-  const numericFields = {};
-  for (const [key, value] of Object.entries(combinedData)) {
-    if (typeof value === 'number') {
-      numericFields[key] = value;
-    }
-  }
-  console.log('All numeric fields:', JSON.stringify(numericFields, null, 2));
-  
+
   // Common Braiins OS field patterns for S19 series
   // Pattern 1: temp_chip_X, temp_pcb_X
   if (combinedData.temp_chip_1 !== undefined) {
@@ -2420,7 +2410,6 @@ function extractTemperatures(statsData, devsData = {}, allStatsData = {}) {
       combinedData.temp_chip_2 || 0,
       combinedData.temp_chip_3 || 0
     );
-    console.log('Found temps using pattern: temp_chip_X');
   }
   // Pattern 2: temp1, temp2, temp3 (older format)
   else if (combinedData.temp1 !== undefined) {
@@ -2428,7 +2417,6 @@ function extractTemperatures(statsData, devsData = {}, allStatsData = {}) {
     temps.board2 = combinedData.temp2;
     temps.board3 = combinedData.temp3;
     temps.chip = combinedData.temp || Math.max(temps.board1 || 0, temps.board2 || 0, temps.board3 || 0);
-    console.log('Found temps using pattern: temp1/temp2/temp3');
   }
   // Pattern 3: temp2_1, temp2_2, temp2_3 (some Antminer models)
   else if (combinedData.temp2_1 !== undefined) {
@@ -2436,12 +2424,10 @@ function extractTemperatures(statsData, devsData = {}, allStatsData = {}) {
     temps.board2 = combinedData.temp2_2;
     temps.board3 = combinedData.temp2_3;
     temps.chip = Math.max(temps.board1 || 0, temps.board2 || 0, temps.board3 || 0);
-    console.log('Found temps using pattern: temp2_X');
   }
   // Pattern 4: Temperature field from devs
   else if (combinedData.Temperature !== undefined) {
     temps.chip = combinedData.Temperature;
-    console.log('Found temps using pattern: Temperature (devs)');
   }
   // Pattern 5: Check for chain_ prefixed fields
   else if (Object.keys(combinedData).some(k => k.startsWith('chain_'))) {
@@ -2451,17 +2437,12 @@ function extractTemperatures(statsData, devsData = {}, allStatsData = {}) {
         temps[`board${i}`] = combinedData[tempKey];
       }
     }
-    console.log('Found temps using pattern: chain_tempX');
   }
-  
+
   // Pattern 6: Search for any field containing 'temp' (fallback)
   if (temps.chip === null) {
-    const tempFields = [];
     for (const [key, value] of Object.entries(combinedData)) {
       if (typeof value === 'number' && key.toLowerCase().includes('temp') && value > 0 && value < 150) {
-        tempFields.push({ key, value });
-        console.log(`Found potential temperature field: ${key} = ${value}`);
-        
         if (key.toLowerCase().includes('chip')) {
           temps.chip = value;
         } else if (key.includes('1') && temps.board1 === null) {
@@ -2472,9 +2453,6 @@ function extractTemperatures(statsData, devsData = {}, allStatsData = {}) {
           temps.board3 = value;
         }
       }
-    }
-    if (tempFields.length > 0) {
-      console.log('Found temps using pattern: search for *temp*');
     }
   }
   
@@ -2490,9 +2468,6 @@ function extractTemperatures(statsData, devsData = {}, allStatsData = {}) {
         potentialTemps.push({ key, value });
       }
     }
-    if (potentialTemps.length > 0) {
-      console.log('Potential temperature fields by value range:', potentialTemps);
-    }
   }
   
   // If we still have no chip temp, use the max of board temps
@@ -2500,7 +2475,6 @@ function extractTemperatures(statsData, devsData = {}, allStatsData = {}) {
     temps.chip = Math.max(temps.board1 || 0, temps.board2 || 0, temps.board3 || 0);
   }
   
-  console.log('Final extracted temperatures:', temps);
   return temps;
 }
 
@@ -2523,28 +2497,23 @@ function extractFanSpeeds(statsData, devsData = {}, allStatsData = {}) {
     fans.speed2 = combinedData.fan2;
     fans.speed3 = combinedData.fan3;
     fans.speed4 = combinedData.fan4;
-    console.log('Found fans using pattern: fan1/fan2/fan3/fan4');
   } else if (combinedData.fan_speed_in !== undefined) {
     fans.speed1 = combinedData.fan_speed_in;
     fans.speed2 = combinedData.fan_speed_out;
-    console.log('Found fans using pattern: fan_speed_in/out');
   } else if (combinedData.Fan1 !== undefined) {
     fans.speed1 = combinedData.Fan1;
     fans.speed2 = combinedData.Fan2;
     fans.speed3 = combinedData.Fan3;
     fans.speed4 = combinedData.Fan4;
-    console.log('Found fans using pattern: Fan1/Fan2/Fan3/Fan4');
   } else if (combinedData['Fan Speed In'] !== undefined) {
     fans.speed1 = combinedData['Fan Speed In'];
     fans.speed2 = combinedData['Fan Speed Out'];
-    console.log('Found fans using pattern: Fan Speed In/Out');
   }
   
   // Search for fan fields if not found
   if (fans.speed1 === null) {
     for (const [key, value] of Object.entries(combinedData)) {
       if (typeof value === 'number' && key.toLowerCase().includes('fan') && value > 0) {
-        console.log(`Found potential fan field: ${key} = ${value}`);
         if (fans.speed1 === null && (key.includes('1') || key.toLowerCase().includes('in'))) {
           fans.speed1 = value;
         } else if (fans.speed2 === null && (key.includes('2') || key.toLowerCase().includes('out'))) {
@@ -2567,12 +2536,8 @@ function extractFanSpeeds(statsData, devsData = {}, allStatsData = {}) {
         potentialFans.push({ key, value });
       }
     }
-    if (potentialFans.length > 0) {
-      console.log('Potential fan fields by value range:', potentialFans);
-    }
   }
   
-  console.log('Final extracted fan speeds:', fans);
   return fans;
 }
 
@@ -2718,8 +2683,6 @@ function checkAlerts(stats, alertConfig, minerName) {
 
 async function getMinerStats(ip, config = {}) {
   try {
-    console.log(`Getting stats from miner at ${ip}`);
-    
     // Try to get data from Braiins OS GraphQL API (has temperature/fan data)
     let graphqlData = null;
     let httpApiData = null;
@@ -2727,7 +2690,7 @@ async function getMinerStats(ip, config = {}) {
     try {
       graphqlData = await fetchBraiinsGraphQL(ip, config);
     } catch (e) {
-      console.log('GraphQL not available:', e.message);
+      // GraphQL not available - will try other APIs
     }
 
     // Try HTTP API as fallback
@@ -2735,10 +2698,10 @@ async function getMinerStats(ip, config = {}) {
       try {
         httpApiData = await fetchBraiinsHTTPApi(ip, config);
       } catch (e) {
-        console.log('HTTP API not available:', e.message);
+        // HTTP API not available - will use CGMiner
       }
     }
-    
+
     // Try to get all BOSminer data for debug stats
     let devs = null;
     let tempsCmd = null;
@@ -2750,21 +2713,21 @@ async function getMinerStats(ip, config = {}) {
     try {
       // Fetch all BOSminer commands in parallel
       [devs, tempsCmd, fansCmd, devdetailsCmd, tunerstatusCmd] = await Promise.all([
-        sendCGMinerCommand(ip, { command: 'devs' }).catch(e => { console.log('devs error:', e.message); return null; }),
-        sendCGMinerCommand(ip, { command: 'temps' }).catch(e => { console.log('temps error:', e.message); return null; }),
-        sendCGMinerCommand(ip, { command: 'fans' }).catch(e => { console.log('fans error:', e.message); return null; }),
-        sendCGMinerCommand(ip, { command: 'devdetails' }).catch(e => { console.log('devdetails error:', e.message); return null; }),
-        sendCGMinerCommand(ip, { command: 'tunerstatus' }).catch(e => { console.log('tunerstatus error:', e.message); return null; })
+        sendCGMinerCommand(ip, { command: 'devs' }).catch(() => null),
+        sendCGMinerCommand(ip, { command: 'temps' }).catch(() => null),
+        sendCGMinerCommand(ip, { command: 'fans' }).catch(() => null),
+        sendCGMinerCommand(ip, { command: 'devdetails' }).catch(() => null),
+        sendCGMinerCommand(ip, { command: 'tunerstatus' }).catch(() => null)
       ]);
     } catch (e) {
-      console.log('Error fetching extended BOSminer commands:', e.message);
+      // Error fetching extended BOSminer commands - not critical
     }
 
     // Try to fetch REST API data
     try {
       restApiData = await fetchBraiinsRestApiStats(ip, config);
     } catch (e) {
-      console.log('REST API not available:', e.message);
+      // REST API not available - will use CGMiner data
     }
 
     const [summary, stats, pools] = await Promise.all([
@@ -2774,30 +2737,6 @@ async function getMinerStats(ip, config = {}) {
     ]);
 
     const summaryData = summary.SUMMARY?.[0] || {};
-    
-    // Log ALL stats entries for debugging
-    console.log('=== RAW STATS RESPONSE ===');
-    console.log('Number of STATS entries:', stats.STATS?.length || 0);
-    if (stats.STATS) {
-      stats.STATS.forEach((s, idx) => {
-        console.log(`\n--- STATS[${idx}] keys:`, Object.keys(s || {}).join(', '));
-        // Log all numeric values to help identify temp/fan fields
-        if (s && typeof s === 'object') {
-          const numericFields = Object.entries(s)
-            .filter(([k, v]) => typeof v === 'number')
-            .map(([k, v]) => `${k}=${v}`);
-          console.log(`  Numeric fields:`, numericFields.join(', '));
-        }
-      });
-    }
-    
-    // Also log devs response if available
-    if (devs?.DEVS) {
-      console.log('\n=== RAW DEVS RESPONSE ===');
-      devs.DEVS.forEach((d, idx) => {
-        console.log(`--- DEVS[${idx}]:`, JSON.stringify(d).substring(0, 500));
-      });
-    }
     
     // Collect ALL stats data from all STATS entries
     let allStatsData = {};
@@ -2839,16 +2778,6 @@ async function getMinerStats(ip, config = {}) {
       }
     }
     
-    // Log what we're working with
-    console.log('\n=== MERGED STATS DATA ===');
-    console.log('Keys:', Object.keys(statsData).join(', '));
-    console.log('Full data:', JSON.stringify(statsData, null, 2).substring(0, 3000));
-    
-    if (Object.keys(devsData).length > 0) {
-      console.log('\n=== MERGED DEVS DATA ===');
-      console.log('Keys:', Object.keys(devsData).join(', '));
-    }
-    
     const poolData = pools.POOLS?.[0] || {};
 
     // Calculate hashrate in TH/s - extract all available time ranges
@@ -2873,17 +2802,12 @@ async function getMinerStats(ip, config = {}) {
 
     // Try GraphQL data first (most reliable for Braiins OS)
     if (graphqlData?.data) {
-      console.log('=== PROCESSING GRAPHQL DATA ===');
-      console.log('Raw GraphQL data:', JSON.stringify(graphqlData.data, null, 2));
-      
       // Handle bosminer.info.fans and bosminer.info.tempCtrl format (BOSer)
       if (graphqlData.data.bosminer?.info) {
         const info = graphqlData.data.bosminer.info;
-        console.log('Found bosminer.info format');
-        
+
         // Extract fans - FanInfo has: name, speed, rpm
         if (info.fans && Array.isArray(info.fans)) {
-          console.log('Found fans array:', JSON.stringify(info.fans));
           info.fans.forEach((fan, idx) => {
             if (fan.rpm !== undefined && fan.rpm !== null) {
               fans[`speed${idx + 1}`] = fan.rpm;
@@ -2895,24 +2819,15 @@ async function getMinerStats(ip, config = {}) {
         
         // Extract temperature from tempCtrl - TempCtrlInfo has: targetC, hotC, dangerousC
         if (info.tempCtrl) {
-          console.log('Found tempCtrl:', JSON.stringify(info.tempCtrl));
           // Use targetC as the operating temperature
           if (info.tempCtrl.targetC !== undefined && info.tempCtrl.targetC !== null) {
             temps.chip = info.tempCtrl.targetC;
-          }
-          // hotC and dangerousC are thresholds, not current temps
-          if (info.tempCtrl.hotC !== undefined) {
-            console.log('Hot threshold:', info.tempCtrl.hotC);
-          }
-          if (info.tempCtrl.dangerousC !== undefined) {
-            console.log('Dangerous threshold:', info.tempCtrl.dangerousC);
           }
         }
         
         // Extract actual temperatures from workSolver.temperatures
         // Temperature type has: name, degreesC
         if (info.workSolver?.temperatures && Array.isArray(info.workSolver.temperatures)) {
-          console.log('Found workSolver.temperatures:', JSON.stringify(info.workSolver.temperatures));
           info.workSolver.temperatures.forEach((temp, idx) => {
             if (temp.degreesC !== undefined && temp.degreesC !== null) {
               const name = (temp.name || '').toLowerCase();
@@ -2945,14 +2860,11 @@ async function getMinerStats(ip, config = {}) {
         // Extract power consumption from tuner data
         if (info.workSolver?.tuner) {
           const tuner = info.workSolver.tuner;
-          console.log('Found tuner data:', JSON.stringify(tuner));
           // Prefer actual power consumption, fall back to power limit
           if (tuner.approximatePowerConsumptionW !== undefined && tuner.approximatePowerConsumptionW !== null) {
             graphqlPower = tuner.approximatePowerConsumptionW;
-            console.log('Got power from approximatePowerConsumptionW:', graphqlPower);
           } else if (tuner.powerLimitW !== undefined && tuner.powerLimitW !== null) {
             graphqlPower = tuner.powerLimitW;
-            console.log('Got power from powerLimitW:', graphqlPower);
           }
         }
       }
@@ -2961,7 +2873,6 @@ async function getMinerStats(ip, config = {}) {
       
       // Format 1: bosminer.hashChains with temperature objects
       if (graphqlData.data.bosminer?.hashChains) {
-        console.log('Found bosminer.hashChains format');
         const chains = graphqlData.data.bosminer.hashChains;
         chains.forEach((chain, idx) => {
           if (chain.temperature) {
@@ -2993,7 +2904,6 @@ async function getMinerStats(ip, config = {}) {
       
       // Format 2: Direct temperatures/fans arrays
       if (graphqlData.data.temperatures && Array.isArray(graphqlData.data.temperatures)) {
-        console.log('Found temperatures array format');
         graphqlData.data.temperatures.forEach((t, idx) => {
           if (t.celsius !== undefined && t.celsius !== null) {
             const name = (t.name || '').toLowerCase();
@@ -3010,7 +2920,6 @@ async function getMinerStats(ip, config = {}) {
       }
       
       if (graphqlData.data.fans && Array.isArray(graphqlData.data.fans)) {
-        console.log('Found fans array format');
         graphqlData.data.fans.forEach((f, idx) => {
           if (f.rpm !== undefined && f.rpm !== null) {
             fans[`speed${idx + 1}`] = f.rpm;
@@ -3020,7 +2929,6 @@ async function getMinerStats(ip, config = {}) {
       
       // Format 3: miner.hashboards
       if (graphqlData.data.miner?.hashboards) {
-        console.log('Found miner.hashboards format');
         graphqlData.data.miner.hashboards.forEach((board, idx) => {
           if (board.temperature !== undefined) {
             temps[`board${idx + 1}`] = board.temperature;
@@ -3042,7 +2950,6 @@ async function getMinerStats(ip, config = {}) {
       
       // Format 4: Tuner chain state
       if (graphqlData.data.bosminer?.info?.workSolver?.tuner?.chainTunerState) {
-        console.log('Found tuner chainTunerState format');
         const states = graphqlData.data.bosminer.info.workSolver.tuner.chainTunerState;
         if (Array.isArray(states)) {
           states.forEach((state, idx) => {
@@ -3055,7 +2962,6 @@ async function getMinerStats(ip, config = {}) {
       
       // Format 5: bosminer.hashboards with stats
       if (graphqlData.data.bosminer?.hashboards) {
-        console.log('Found bosminer.hashboards format');
         graphqlData.data.bosminer.hashboards.forEach((board, idx) => {
           if (board.stats?.temp !== undefined) {
             temps[`board${idx + 1}`] = board.stats.temp;
@@ -3071,13 +2977,10 @@ async function getMinerStats(ip, config = {}) {
         }
       }
       
-      console.log('Extracted from GraphQL - temps:', temps, 'fans:', fans);
     }
-    
+
     // Try HTTP API data if GraphQL didn't work
     if (httpApiData && temps.chip === null) {
-      console.log('=== TRYING HTTP API DATA ===');
-      console.log('HTTP API data:', JSON.stringify(httpApiData, null, 2).substring(0, 1000));
       
       // Try to extract from various HTTP API response formats
       if (httpApiData.temp) {
@@ -3092,8 +2995,6 @@ async function getMinerStats(ip, config = {}) {
     
     // Try TEMPS command from BOSminer (most reliable for newer Braiins OS)
     if (tempsCmd?.TEMPS && Array.isArray(tempsCmd.TEMPS)) {
-      console.log('=== PROCESSING TEMPS COMMAND ===');
-      console.log('TEMPS data:', JSON.stringify(tempsCmd.TEMPS));
 
       const tempBoards = [];
       const tempChips = [];
@@ -3113,32 +3014,23 @@ async function getMinerStats(ip, config = {}) {
         temps.chip = Math.max(...tempChips);
       }
 
-      console.log('Extracted from TEMPS command - temps:', temps);
     }
 
     // Try FANS command from BOSminer (most reliable for newer Braiins OS)
     if (fansCmd?.FANS && Array.isArray(fansCmd.FANS)) {
-      console.log('=== PROCESSING FANS COMMAND ===');
-      console.log('FANS data:', JSON.stringify(fansCmd.FANS));
-
       fansCmd.FANS.forEach((fanEntry, idx) => {
         if (fanEntry.RPM !== undefined && fanEntry.RPM !== null) {
           fans[`speed${idx + 1}`] = fanEntry.RPM;
         }
       });
 
-      console.log('Extracted from FANS command - fans:', fans);
     }
 
     // Fall back to CGMiner stats/devs data if GraphQL/HTTP API didn't provide temps
     if (temps.chip === null || temps.chip === 0) {
-      console.log('=== FALLING BACK TO CGMINER DATA ===');
       temps = extractTemperatures(statsData, devsData, allStatsData);
       fans = extractFanSpeeds(statsData, devsData, allStatsData);
     }
-
-    console.log('Final temperatures:', temps);
-    console.log('Final fans:', fans);
 
     // Get power from various sources - prioritize tunerstatus (most accurate), then GraphQL, then CGMiner API
     // DO NOT use fake estimates based on assumed W/TH - only show real data
@@ -3148,81 +3040,56 @@ async function getMinerStats(ip, config = {}) {
 
     // Extract tuner status data
     const tunerStatus = tunerstatusCmd?.TUNERSTATUS?.[0];
-    if (tunerStatus) {
-      console.log('Found TUNERSTATUS data:', JSON.stringify(tunerStatus));
-    }
 
     // Priority 1: CGMiner tunerstatus command (most accurate - actual measured power from BOSer)
     if (tunerStatus?.ApproximateMinerPowerConsumption > 0) {
       power = tunerStatus.ApproximateMinerPowerConsumption;
       powerSource = 'tunerstatus';
-      console.log('Using power from tunerstatus ApproximateMinerPowerConsumption:', power);
     }
     // Priority 2: GraphQL tuner data
     else if (graphqlPower !== null && graphqlPower > 0) {
       power = graphqlPower;
       powerSource = 'graphql';
-      console.log('Using power from GraphQL:', power);
     }
     // Priority 3: CGMiner stats API
     else if (statsData.Power && statsData.Power > 0) {
       power = statsData.Power;
       powerSource = 'cgminer-stats';
-      console.log('Using power from CGMiner stats:', power);
     }
     else if (statsData.power && statsData.power > 0) {
       power = statsData.power;
       powerSource = 'cgminer-stats';
-      console.log('Using power from CGMiner stats (lowercase):', power);
     }
     // Priority 4: CGMiner summary API
     else if (summaryData.Power && summaryData.Power > 0) {
       power = summaryData.Power;
       powerSource = 'cgminer-summary';
-      console.log('Using power from CGMiner summary:', power);
     }
     // Priority 5: REST API tuner-state (fallback for newer Braiins OS versions)
     else if (restApiData?.tunerState?.powerConsumptionW > 0) {
       power = restApiData.tunerState.powerConsumptionW;
       powerSource = 'rest-api';
-      console.log('Using power from REST API tunerState:', power);
     }
     else if (restApiData?.tunerState?.power?.consumptionW > 0) {
       power = restApiData.tunerState.power.consumptionW;
       powerSource = 'rest-api';
-      console.log('Using power from REST API tunerState.power:', power);
     }
     // Priority 6: REST API miner stats
     else if (restApiData?.minerStats?.powerConsumptionW > 0) {
       power = restApiData.minerStats.powerConsumptionW;
       powerSource = 'rest-api-stats';
-      console.log('Using power from REST API minerStats:', power);
     }
     // No fake fallbacks - if we can't get real power, leave it null
-    else {
-      console.log('WARNING: No real power data available from miner API');
-      // Log what REST API data we have for debugging
-      if (restApiData) {
-        console.log('REST API data available:', Object.keys(restApiData).filter(k => restApiData[k] !== null));
-        if (restApiData.tunerState) {
-          console.log('REST API tunerState keys:', Object.keys(restApiData.tunerState));
-        }
-      }
-    }
 
     // Extract power limit (configured target) from tunerstatus
     if (tunerStatus?.PowerLimit > 0) {
       powerLimit = tunerStatus.PowerLimit;
-      console.log('Power limit from tunerstatus:', powerLimit);
     } else if (tunerStatus?.DynamicPowerScaling?.ScaledPowerLimit > 0) {
       powerLimit = tunerStatus.DynamicPowerScaling.ScaledPowerLimit;
-      console.log('Power limit from DynamicPowerScaling:', powerLimit);
     } else if (restApiData?.tunerState?.powerTargetW > 0) {
       powerLimit = restApiData.tunerState.powerTargetW;
-      console.log('Power limit from REST API tunerState:', powerLimit);
     } else if (restApiData?.tunerState?.power?.targetW > 0) {
       powerLimit = restApiData.tunerState.power.targetW;
-      console.log('Power limit from REST API tunerState.power:', powerLimit);
     }
 
     const powerProfile = config.currentProfile || 'medium';
