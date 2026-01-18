@@ -4,7 +4,7 @@
 
 A comprehensive web-based dashboard for monitoring and controlling Bitcoin Antminer miners running Braiins OS, specifically designed for home heating applications in Norway. The app tracks mining performance, electricity costs with Norwegian pricing (including state subsidies), and efficiency metrics comparing mining heat output vs traditional heat pumps.
 
-**Version:** 1.4.1
+**Version:** 1.4.2
 **Author:** j1441
 **License:** MIT
 **Repository:** https://github.com/j1441/jacks-mining-dashboard-app
@@ -274,31 +274,52 @@ Dashboard (Main App)
 │
 ├── EfficiencyCard (aggregate profitability)
 │
-└── Miners Grid
-    └── MinerCard (one per miner)
-        ├── Stats Display (hashrate, temp, power, uptime)
-        ├── Efficiency Info (daily profit, SCOP)
-        ├── Fan Speeds
-        ├── Miner Control Section
-        │   ├── Status Badges (AUTO indicator, MINING/PAUSED state)
-        │   ├── ON/OFF Buttons (manual pause/resume)
-        │   └── SCOP Auto-Control Panel
-        │       ├── Enable/Disable Toggle
-        │       ├── SCOP Threshold Setting
-        │       ├── Min Board Temp Setting
-        │       ├── Efficiency Override Section
-        │       │   ├── Last Measured Display
-        │       │   ├── Power Override Input (W)
-        │       │   └── Hashrate Override Input (TH/s)
-        │       ├── Save Settings Button
-        │       └── Auto Control Status Display
-        │           ├── Current vs Intended State
-        │           ├── Measured vs Projected SCOP
-        │           ├── Decision Basis Indicator
-        │           ├── State Reason
-        │           └── Error Display (if any)
-        ├── Pool Stats
-        └── Remove Button
+├── Miners Grid
+│   └── MinerCard (one per miner)
+│       ├── Stats Display (hashrate, temp, power, uptime)
+│       ├── Efficiency Info (daily profit, SCOP)
+│       ├── Fan Speeds
+│       ├── Miner Control Section
+│       │   ├── Status Badges (AUTO indicator, MINING/PAUSED state)
+│       │   ├── ON/OFF Buttons (manual pause/resume)
+│       │   └── SCOP Auto-Control Panel
+│       │       ├── Enable/Disable Toggle
+│       │       ├── SCOP Threshold Setting
+│       │       ├── Min Board Temp Setting
+│       │       ├── Efficiency Override Section
+│       │       │   ├── Last Measured Display
+│       │       │   ├── Power Override Input (W)
+│       │       │   └── Hashrate Override Input (TH/s)
+│       │       ├── Save Settings Button
+│       │       └── Auto Control Status Display
+│       │           ├── Current vs Intended State
+│       │           ├── Measured vs Projected SCOP
+│       │           ├── Decision Basis Indicator
+│       │           ├── State Reason
+│       │           └── Error Display (if any)
+│       ├── Pool Stats
+│       └── Remove Button
+│
+├── API Terminal (debugging/troubleshooting)
+│   ├── Miner Selector
+│   ├── API Type Selector (CGMiner, gRPC, REST, GraphQL, Status, State)
+│   ├── Command Input (for CGMiner commands)
+│   ├── Quick Action Buttons
+│   │   ├── Test Login (gRPC authentication)
+│   │   ├── Check Status (mining/paused state)
+│   │   ├── View State (control state details)
+│   │   ├── Pause (test pause command)
+│   │   └── Resume (test resume command)
+│   ├── Command History (recent commands with success/failure)
+│   └── Output Display (JSON response with copy button)
+│
+└── Debug Stats Section
+    └── DebugStatsCard (per miner)
+        ├── API Availability Summary
+        ├── Miner Control State (DPS)
+        ├── BOSminer Commands Data
+        ├── REST API Data
+        └── GraphQL Data
 ```
 
 ### Modal Components
@@ -817,6 +838,44 @@ Alerts are persisted in `alertHistory` array (last 100).
 - Fields: timestamp, minerIp, minerName, hashrate, power, temperature, electricityPrice, btcPrice, networkDifficulty, dailyProfit, effectiveSCOP
 - API: `GET /api/history?days=7&minerIp=X.X.X.X`
 
+### 9. API Terminal (Debugging & Troubleshooting)
+
+A built-in terminal interface for testing and debugging miner API commands without redeploying the app.
+
+**Features:**
+- Execute commands against any configured miner
+- Support for multiple API types (CGMiner, gRPC, REST, GraphQL)
+- Quick action buttons for common operations
+- Command history with success/failure tracking
+- JSON output with copy-to-clipboard functionality
+
+**Supported Command Types:**
+
+| Type | Description | Example Use Case |
+|------|-------------|------------------|
+| **cgminer** | CGMiner API commands (port 4028) | Test summary, stats, pools, devs, temps, fans, tunerstatus |
+| **grpc-login** | Test gRPC authentication | Verify port 50051 connectivity and credentials |
+| **grpc-pause** | Pause mining via gRPC | Test pause functionality directly |
+| **grpc-resume** | Resume mining via gRPC | Test resume functionality directly |
+| **rest** | Fetch REST API stats | Verify REST API authentication and data |
+| **graphql** | Fetch GraphQL API data | Test GraphQL endpoint connectivity |
+| **status** | Get mining status | Check if miner is paused or running |
+| **state** | Get control state | View current control state and miner config |
+
+**Quick Actions:**
+- 🔐 Test Login - Verify gRPC authentication
+- 📊 Check Status - View current mining/paused state
+- ⚙️ View State - Inspect control state details
+- ⏸️ Pause - Execute pause command
+- ▶️ Resume - Execute resume command
+
+**Use Cases:**
+1. **Troubleshooting controls** - Test pause/resume commands to see exact error messages
+2. **Verifying connectivity** - Check if gRPC port 50051 is accessible
+3. **Testing credentials** - Confirm username/password work for authentication
+4. **Exploring API responses** - See raw data from different API endpoints
+5. **Quick debugging** - Rapidly test API changes without app redeploy
+
 ---
 
 ## Configuration Schema
@@ -953,6 +1012,44 @@ Alerts are persisted in `alertHistory` array (last 100).
 | GET | `/api/btc/price` | Get Bitcoin price |
 | GET | `/api/network/stats` | Get network stats |
 
+### API Terminal (Debugging/Troubleshooting)
+
+| Method | Endpoint | Body | Description |
+|--------|----------|------|-------------|
+| POST | `/api/terminal/execute` | `{ip, type, command}` | Execute API command for debugging |
+| GET | `/api/terminal/commands` | - | Get list of available terminal commands |
+
+**Terminal execute body example:**
+```json
+{
+  "ip": "192.168.1.100",
+  "type": "cgminer",
+  "command": "summary"
+}
+```
+
+**Available command types:**
+- `cgminer` - CGMiner API commands (summary, stats, pools, devs, temps, fans, tunerstatus, devdetails, version)
+- `grpc-login` - Test gRPC authentication
+- `grpc-pause` - Pause mining via gRPC
+- `grpc-resume` - Resume mining via gRPC
+- `rest` - Fetch REST API stats
+- `graphql` - Fetch GraphQL API data
+- `status` - Get current mining status (paused/running)
+- `state` - Get current control state and miner config
+
+**Response format:**
+```json
+{
+  "success": true,
+  "command": "summary",
+  "type": "cgminer",
+  "ip": "192.168.1.100",
+  "duration": "45ms",
+  "result": { /* API response data */ }
+}
+```
+
 ### History & Alerts
 
 | Method | Endpoint | Query Params | Description |
@@ -1045,6 +1142,24 @@ services:
 
 ## Troubleshooting
 
+### Using the API Terminal (Recommended First Step)
+
+The built-in **API Terminal** is the fastest way to diagnose miner control and connectivity issues:
+
+1. Navigate to the "API Terminal" section on the dashboard
+2. Select your miner from the dropdown
+3. Use the **Quick Actions** to test:
+   - **🔐 Test Login** - Verify gRPC authentication works
+   - **📊 Check Status** - See current mining/paused state
+   - **⚙️ View State** - Inspect control state and config
+   - **⏸️ Pause / ▶️ Resume** - Test control commands
+
+The terminal will show exact error messages and response times, making it easy to identify:
+- Authentication failures
+- Network connectivity issues
+- API compatibility problems
+- Control command errors
+
 ### Miner Connection Issues
 
 ```bash
@@ -1060,6 +1175,11 @@ curl -X POST http://localhost:3456/api/miner/test \
   -d '{"minerIP": "192.168.1.100"}'
 ```
 
+**Using API Terminal:**
+- Select miner and click **"🔐 Test Login"**
+- If successful: gRPC port 50051 is accessible and credentials are correct
+- If error: Check error message for details (connection refused, timeout, auth error)
+
 **Common causes:**
 - Miner not running Braiins OS
 - Firewall blocking port 4028 or 50051
@@ -1071,6 +1191,8 @@ curl -X POST http://localhost:3456/api/miner/test \
 
 **Symptom:** `UNAUTHENTICATED: Missing or invalid authentication token`
 
+**Quick Test:** Use API Terminal → **"🔐 Test Login"** to verify credentials immediately
+
 **Solutions:**
 1. Update miner credentials via API:
    ```bash
@@ -1081,6 +1203,23 @@ curl -X POST http://localhost:3456/api/miner/test \
 2. Check if you can log into miner web UI with same credentials
 3. Restart dashboard to clear cached tokens
 4. Newer Braiins OS versions require authentication for all APIs
+
+### Miner Control Not Working
+
+**Symptom:** ON/OFF buttons don't pause/resume mining
+
+**Diagnostic Steps:**
+1. Open **API Terminal**
+2. Click **"⚙️ View State"** to see current control state
+3. Click **"📊 Check Status"** to verify actual miner state
+4. Click **"⏸️ Pause"** or **"▶️ Resume"** to test directly
+5. Review error message in terminal output
+
+**Common issues:**
+- gRPC port 50051 not accessible (connection refused)
+- Authentication failure (check username/password in miner config)
+- Miner not running Braiins OS with gRPC support (requires 23.03.1+)
+- Token expired (terminal will show auth error)
 
 ### WebSocket Disconnects
 
@@ -1148,7 +1287,19 @@ Changes pushed to GitHub trigger automatic deployment to Umbrel server. Testing 
 
 ## Version History
 
-### v1.4.1 (Current)
+### v1.4.2 (Current)
+- **API Terminal**: Built-in debugging interface for testing miner API commands
+  - Support for CGMiner, gRPC, REST, GraphQL, Status, and State commands
+  - Quick action buttons for common operations (Login, Status, Pause, Resume)
+  - Command history with success/failure tracking
+  - JSON output display with copy-to-clipboard
+  - Eliminates need for app redeploy when testing API changes
+- **Reduced Debug Logging**: Removed verbose console logging from CGMiner commands and temperature/fan extraction
+  - Only logs errors during normal polling operations
+  - Cleaner server logs with less noise
+  - Enable DEBUG_CGMINER env var for detailed CGMiner command logging when needed
+
+### v1.4.1
 - **Per-Miner Authentication**: Added username/password fields per miner for Braiins OS auth
 - **gRPC Auth Retry**: Automatic token invalidation and retry on UNAUTHENTICATED errors
 - **REST API Auth Fix**: Fixed REST API authentication (changed default password from empty to 'root')
