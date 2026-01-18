@@ -3595,6 +3595,147 @@ app.post('/api/miner/auto-control', async (req, res) => {
   }
 });
 
+// ============================================================================
+// API Terminal - Execute custom API commands for debugging
+// ============================================================================
+
+app.post('/api/terminal/execute', async (req, res) => {
+  const startTime = Date.now();
+  try {
+    const { ip, command, type } = req.body;
+
+    if (!ip) {
+      return res.status(400).json({ error: 'No miner IP provided' });
+    }
+
+    if (!command) {
+      return res.status(400).json({ error: 'No command provided' });
+    }
+
+    const config = await loadConfig();
+    const minerConfig = config.miners.find(m => m.ip === ip) || {};
+
+    let result = null;
+    let commandType = type || 'cgminer';
+
+    switch (commandType) {
+      case 'cgminer':
+        // CGMiner API command (e.g., "summary", "stats", "pools", "devs")
+        try {
+          result = await sendCGMinerCommand(ip, { command });
+        } catch (err) {
+          result = { error: err.message };
+        }
+        break;
+
+      case 'grpc-login':
+        // Test gRPC login
+        try {
+          const username = minerConfig.username || 'root';
+          const password = minerConfig.password || 'root';
+          result = await braiinsLogin(ip, username, password);
+        } catch (err) {
+          result = { error: err.message };
+        }
+        break;
+
+      case 'grpc-pause':
+        // gRPC pause mining
+        try {
+          result = await pauseMining(ip, minerConfig);
+        } catch (err) {
+          result = { error: err.message };
+        }
+        break;
+
+      case 'grpc-resume':
+        // gRPC resume mining
+        try {
+          result = await resumeMining(ip, minerConfig);
+        } catch (err) {
+          result = { error: err.message };
+        }
+        break;
+
+      case 'rest':
+        // REST API call
+        try {
+          result = await fetchBraiinsRestApiStats(ip, minerConfig);
+        } catch (err) {
+          result = { error: err.message };
+        }
+        break;
+
+      case 'graphql':
+        // GraphQL API call
+        try {
+          result = await fetchBraiinsGraphQL(ip, minerConfig);
+        } catch (err) {
+          result = { error: err.message };
+        }
+        break;
+
+      case 'status':
+        // Get mining status (paused/running)
+        try {
+          result = await getMiningStatus(ip);
+        } catch (err) {
+          result = { error: err.message };
+        }
+        break;
+
+      case 'state':
+        // Get current control state
+        result = {
+          controlState: minerControlState[ip] || {},
+          minerConfig: {
+            ip: minerConfig.ip,
+            name: minerConfig.name,
+            username: minerConfig.username,
+            autoControl: minerConfig.autoControl
+          }
+        };
+        break;
+
+      default:
+        return res.status(400).json({ error: `Unknown command type: ${commandType}` });
+    }
+
+    const duration = Date.now() - startTime;
+    res.json({
+      success: true,
+      command,
+      type: commandType,
+      ip,
+      duration: `${duration}ms`,
+      result
+    });
+  } catch (err) {
+    const duration = Date.now() - startTime;
+    console.error('API terminal error:', err);
+    res.status(500).json({
+      error: err.message,
+      duration: `${duration}ms`
+    });
+  }
+});
+
+// Get available terminal commands
+app.get('/api/terminal/commands', (req, res) => {
+  res.json({
+    commands: [
+      { type: 'cgminer', description: 'CGMiner API commands (summary, stats, pools, devs, temps, fans, tunerstatus)', example: 'summary' },
+      { type: 'grpc-login', description: 'Test gRPC authentication', example: '' },
+      { type: 'grpc-pause', description: 'Pause mining via gRPC', example: '' },
+      { type: 'grpc-resume', description: 'Resume mining via gRPC', example: '' },
+      { type: 'rest', description: 'Fetch REST API stats', example: '' },
+      { type: 'graphql', description: 'Fetch GraphQL API data', example: '' },
+      { type: 'status', description: 'Get current mining status (paused/running)', example: '' },
+      { type: 'state', description: 'Get current control state and miner config', example: '' }
+    ]
+  });
+});
+
 app.post('/api/config', async (req, res) => {
   try {
     console.log('Received config POST:', req.body);
