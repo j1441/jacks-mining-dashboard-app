@@ -3494,7 +3494,27 @@ async function saveConfig(config) {
 async function loadHistory() {
   try {
     const data = await fs.readFile(HISTORY_FILE, 'utf8');
-    const parsed = JSON.parse(data);
+
+    // Handle empty file
+    if (!data || data.trim() === '') {
+      console.log('History file is empty, returning default structure');
+      return { version: 2, hourlySnapshots: [], dailyAverages: [] };
+    }
+
+    let parsed;
+    try {
+      parsed = JSON.parse(data);
+    } catch (parseErr) {
+      console.error('Failed to parse history.json, file may be corrupted:', parseErr.message);
+      // Backup corrupted file and return empty history
+      try {
+        await fs.writeFile(HISTORY_FILE + '.corrupted.' + Date.now(), data);
+        console.log('Corrupted history file backed up');
+      } catch (backupErr) {
+        console.error('Failed to backup corrupted file:', backupErr.message);
+      }
+      return { version: 2, hourlySnapshots: [], dailyAverages: [] };
+    }
 
     // Migrate old format to new format
     if (parsed.entries && !parsed.version) {
@@ -3511,7 +3531,8 @@ async function loadHistory() {
     if (err.code === 'ENOENT') {
       return { version: 2, hourlySnapshots: [], dailyAverages: [] };
     }
-    throw err;
+    console.error('Error loading history file:', err);
+    return { version: 2, hourlySnapshots: [], dailyAverages: [] };
   }
 }
 
@@ -4339,7 +4360,29 @@ app.get('/api/network/stats', async (req, res) => {
 
 app.get('/api/history', async (req, res) => {
   try {
-    const history = await loadHistory();
+    let history;
+    try {
+      history = await loadHistory();
+    } catch (loadErr) {
+      console.error('Failed to load history file:', loadErr);
+      // Return empty history instead of crashing
+      history = { version: 2, hourlySnapshots: [], dailyAverages: [] };
+    }
+
+    // Ensure history has the expected structure
+    if (!history || typeof history !== 'object') {
+      console.error('History is not an object, resetting');
+      history = { version: 2, hourlySnapshots: [], dailyAverages: [] };
+    }
+    if (!Array.isArray(history.hourlySnapshots)) {
+      console.warn('hourlySnapshots is not an array, resetting');
+      history.hourlySnapshots = [];
+    }
+    if (!Array.isArray(history.dailyAverages)) {
+      console.warn('dailyAverages is not an array, resetting');
+      history.dailyAverages = [];
+    }
+
     // Support fractional days (e.g., 0.0417 for 1 hour, 0.5 for 12 hours)
     // Also support 'hours' parameter for convenience
     let days;
