@@ -633,6 +633,550 @@ async function checkSCOPThresholds(minerIp, stats, minerConfig) {
 }
 
 // ============================================================================
+// Miner Capability Discovery Functions
+// ============================================================================
+
+/**
+ * Test all CGMiner API commands to determine which ones work
+ * @param {string} ip - Miner IP address
+ * @returns {Promise<object>} CGMiner capabilities
+ */
+async function discoverCGMinerCapabilities(ip) {
+  console.log(`[Discovery] Testing CGMiner API for ${ip}...`);
+
+  const result = {
+    available: false,
+    port: 4028,
+    commands: {}
+  };
+
+  const commands = ['summary', 'stats', 'pools', 'devs', 'temps', 'fans', 'devdetails', 'tunerstatus'];
+
+  for (const cmd of commands) {
+    try {
+      const response = await sendCGMinerCommand(ip, { command: cmd });
+      const hasData = response && (response.STATUS || response.SUMMARY || response[cmd.toUpperCase()]);
+      result.commands[cmd] = {
+        working: !!hasData,
+        hasData: !!hasData
+      };
+      if (hasData) result.available = true;
+    } catch (err) {
+      result.commands[cmd] = {
+        working: false,
+        error: err.message
+      };
+    }
+  }
+
+  console.log(`[Discovery] CGMiner for ${ip}: available=${result.available}, working commands: ${Object.entries(result.commands).filter(([k, v]) => v.working).map(([k]) => k).join(', ')}`);
+  return result;
+}
+
+/**
+ * Test GraphQL API capabilities with simplified queries (no powerLimitW)
+ * @param {string} ip - Miner IP address
+ * @param {object} minerConfig - Miner configuration
+ * @returns {Promise<object>} GraphQL capabilities
+ */
+async function discoverGraphQLCapabilities(ip, minerConfig = {}) {
+  console.log(`[Discovery] Testing GraphQL API for ${ip}...`);
+
+  const result = {
+    available: false,
+    port: 80,
+    authMethod: null,
+    workingQueryIndex: null,
+    error: null
+  };
+
+  try {
+    const username = minerConfig.username || 'root';
+    const password = minerConfig.password || 'root';
+
+    // Try to get session token
+    const sessionToken = await getSessionViaWebUI(ip, username, password);
+    result.authMethod = sessionToken ? 'session' : 'none';
+
+    // Test simplified queries WITHOUT powerLimitW
+    const testQueries = [
+      // Query 0: Fans and basic info only
+      `{ bosminer { info { fans { rpm } } } bos { hostname } }`,
+      // Query 1: Temperatures via workSolver
+      `{ bosminer { info { workSolver { temperatures { name degreesC } } } } }`,
+      // Query 2: Full info without tuner power fields
+      `{ bosminer { info { tempCtrl { targetC hotC dangerousC } fans { name speed rpm } workSolver { temperatures { name degreesC } } } } }`,
+      // Query 3: Just hostname (most basic)
+      `{ bos { hostname } }`
+    ];
+
+    for (let i = 0; i < testQueries.length; i++) {
+      try {
+        const response = await graphqlRequest(ip, testQueries[i], sessionToken);
+        if (response?.data && !response.errors) {
+          result.available = true;
+          result.workingQueryIndex = i;
+          console.log(`[Discovery] GraphQL for ${ip}: query ${i} works`);
+          break;
+        }
+      } catch (err) {
+        // Continue to next query
+      }
+    }
+
+    if (!result.available) {
+      result.error = 'No GraphQL queries succeeded';
+    }
+  } catch (err) {
+    result.error = err.message;
+  }
+
+  console.log(`[Discovery] GraphQL for ${ip}: available=${result.available}, authMethod=${result.authMethod}`);
+  return result;
+}
+
+/**
+ * Test REST API capabilities
+ * @param {string} ip - Miner IP address
+ * @param {object} minerConfig - Miner configuration
+ * @returns {Promise<object>} REST API capabilities
+ */
+async function discoverRESTCapabilities(ip, minerConfig = {}) {
+  console.log(`[Discovery] Testing REST API for ${ip}...`);
+
+  const result = {
+    available: false,
+    port: 80,
+    authWorking: false,
+    endpoints: {}
+  };
+
+  try {
+    const username = minerConfig.username || 'root';
+    const password = minerConfig.password || 'root';
+
+    // Try to authenticate
+    const token = await braiinsRestAuth(ip, username, password);
+    result.authWorking = !!token;
+
+    if (token) {
+      // Test key endpoints
+      const endpoints = [
+        '/api/v1/miner/stats',
+        '/api/v1/performance/tuner-state',
+        '/api/v1/miner/details'
+      ];
+
+      for (const endpoint of endpoints) {
+        try {
+          const response = await braiinsRestFetch(ip, endpoint, token);
+          result.endpoints[endpoint] = { working: !!response };
+          if (response) result.available = true;
+        } catch (err) {
+          result.endpoints[endpoint] = { working: false, error: err.message };
+        }
+      }
+    }
+  } catch (err) {
+    result.error = err.message;
+  }
+
+  console.log(`[Discovery] REST API for ${ip}: available=${result.available}, authWorking=${result.authWorking}`);
+  return result;
+}
+
+/**
+ * Test gRPC API capabilities
+ * @param {string} ip - Miner IP address
+ * @param {object} minerConfig - Miner configuration
+ * @returns {Promise<object>} gRPC capabilities
+ */
+async function discoverGRPCCapabilities(ip, minerConfig = {}) {
+  console.log(`[Discovery] Testing gRPC API for ${ip}...`);
+
+  const result = {
+    available: false,
+    port: 50051,
+    authWorking: false,
+    services: []
+  };
+
+  try {
+    const username = minerConfig.username || 'root';
+    const password = minerConfig.password || 'root';
+
+    // Try to login via gRPC
+    const loginResult = await braiinsLogin(ip, username, password);
+    if (loginResult?.token) {
+      result.available = true;
+      result.authWorking = true;
+      result.services = ['AuthenticationService', 'ActionsService'];
+    }
+  } catch (err) {
+    result.error = err.message;
+  }
+
+  console.log(`[Discovery] gRPC for ${ip}: available=${result.available}`);
+  return result;
+}
+
+/**
+ * Determine optimal data sources based on discovered capabilities
+ * @param {object} capabilities - Discovered capabilities
+ * @returns {object} Optimal data source mapping
+ */
+function determineOptimalDataSources(capabilities) {
+  const sources = {};
+  const cgminer = capabilities.apis?.cgminer;
+  const graphql = capabilities.apis?.graphql;
+  const rest = capabilities.apis?.rest;
+
+  // Hashrate - always CGMiner summary
+  if (cgminer?.commands?.summary?.working) {
+    sources.hashrate = { api: 'cgminer', command: 'summary' };
+  }
+
+  // Temperature - prefer CGMiner temps command, fallback to stats
+  if (cgminer?.commands?.temps?.working) {
+    sources.temperature = { api: 'cgminer', command: 'temps' };
+  } else if (graphql?.available) {
+    sources.temperature = { api: 'graphql' };
+  } else if (cgminer?.commands?.stats?.working) {
+    sources.temperature = { api: 'cgminer', command: 'stats' };
+  }
+
+  // Fans - prefer CGMiner fans command
+  if (cgminer?.commands?.fans?.working) {
+    sources.fans = { api: 'cgminer', command: 'fans' };
+  } else if (graphql?.available) {
+    sources.fans = { api: 'graphql' };
+  }
+
+  // Power - tunerstatus is most accurate
+  if (cgminer?.commands?.tunerstatus?.working) {
+    sources.power = { api: 'cgminer', command: 'tunerstatus' };
+  } else if (rest?.endpoints?.['/api/v1/performance/tuner-state']?.working) {
+    sources.power = { api: 'rest', endpoint: '/api/v1/performance/tuner-state' };
+  }
+
+  // Pools
+  if (cgminer?.commands?.pools?.working) {
+    sources.pools = { api: 'cgminer', command: 'pools' };
+  }
+
+  // Device details
+  if (cgminer?.commands?.devdetails?.working) {
+    sources.devdetails = { api: 'cgminer', command: 'devdetails' };
+  }
+
+  // Devs (for additional device info)
+  if (cgminer?.commands?.devs?.working) {
+    sources.devs = { api: 'cgminer', command: 'devs' };
+  }
+
+  return sources;
+}
+
+/**
+ * Run full capability discovery for a miner
+ * @param {string} ip - Miner IP address
+ * @param {object} minerConfig - Miner configuration
+ * @returns {Promise<object>} Complete capability profile
+ */
+async function discoverMinerCapabilities(ip, minerConfig = {}) {
+  console.log(`[Discovery] ========================================`);
+  console.log(`[Discovery] Starting full capability discovery for ${ip}`);
+  console.log(`[Discovery] ========================================`);
+
+  const capabilities = {
+    discoveredAt: new Date().toISOString(),
+    minerModel: null,
+    firmwareVersion: null,
+    apis: {},
+    dataSources: {},
+    consecutiveFailures: 0,
+    failureThreshold: 3,
+    lastFailure: null
+  };
+
+  // Test all APIs
+  capabilities.apis.cgminer = await discoverCGMinerCapabilities(ip);
+  capabilities.apis.graphql = await discoverGraphQLCapabilities(ip, minerConfig);
+  capabilities.apis.rest = await discoverRESTCapabilities(ip, minerConfig);
+  capabilities.apis.grpc = await discoverGRPCCapabilities(ip, minerConfig);
+
+  // Try to get miner model from devdetails
+  if (capabilities.apis.cgminer?.commands?.devdetails?.working) {
+    try {
+      const devdetails = await sendCGMinerCommand(ip, { command: 'devdetails' });
+      if (devdetails?.DEVDETAILS?.[0]?.Model) {
+        capabilities.minerModel = devdetails.DEVDETAILS[0].Model;
+      }
+      if (devdetails?.STATUS?.[0]?.Description) {
+        capabilities.firmwareVersion = devdetails.STATUS[0].Description;
+      }
+    } catch (err) {
+      // Ignore
+    }
+  }
+
+  // Determine optimal data sources
+  capabilities.dataSources = determineOptimalDataSources(capabilities);
+
+  console.log(`[Discovery] ========================================`);
+  console.log(`[Discovery] Discovery complete for ${ip}`);
+  console.log(`[Discovery] Model: ${capabilities.minerModel || 'Unknown'}`);
+  console.log(`[Discovery] Firmware: ${capabilities.firmwareVersion || 'Unknown'}`);
+  console.log(`[Discovery] Data sources: ${JSON.stringify(capabilities.dataSources)}`);
+  console.log(`[Discovery] ========================================`);
+
+  return capabilities;
+}
+
+/**
+ * Check if a miner needs capability re-discovery
+ * @param {object} minerConfig - Miner configuration
+ * @returns {{ rediscover: boolean, reason: string }}
+ */
+function shouldRediscover(minerConfig) {
+  const caps = minerConfig.capabilities;
+
+  // No profile exists
+  if (!caps || !caps.discoveredAt) {
+    return { rediscover: true, reason: 'No capability profile exists' };
+  }
+
+  // Failure threshold exceeded
+  if (caps.consecutiveFailures >= (caps.failureThreshold || 3)) {
+    return { rediscover: true, reason: `${caps.consecutiveFailures} consecutive failures exceeded threshold` };
+  }
+
+  // Profile is stale (>24h) and had a recent failure
+  const profileAge = Date.now() - new Date(caps.discoveredAt).getTime();
+  const maxAge = 24 * 60 * 60 * 1000; // 24 hours
+  if (profileAge > maxAge && caps.lastFailure) {
+    const failureAge = Date.now() - new Date(caps.lastFailure).getTime();
+    if (failureAge < 60 * 60 * 1000) { // Failure in last hour
+      return { rediscover: true, reason: 'Stale profile with recent failure' };
+    }
+  }
+
+  return { rediscover: false, reason: null };
+}
+
+/**
+ * Optimized miner stats collection using capability profile
+ * Only uses APIs that are known to work for this miner
+ * @param {string} ip - Miner IP address
+ * @param {object} minerConfig - Miner configuration with capabilities
+ * @returns {Promise<object>} Miner stats
+ */
+async function getMinerStatsOptimized(ip, minerConfig) {
+  const capabilities = minerConfig.capabilities;
+  const sources = capabilities?.dataSources || {};
+
+  // Collect which CGMiner commands we need
+  const cgminerCommands = new Set();
+
+  // Always need summary for hashrate
+  if (sources.hashrate?.api === 'cgminer') {
+    cgminerCommands.add(sources.hashrate.command);
+  } else {
+    cgminerCommands.add('summary'); // Fallback
+  }
+
+  // Add other needed commands
+  if (sources.temperature?.api === 'cgminer') cgminerCommands.add(sources.temperature.command);
+  if (sources.fans?.api === 'cgminer') cgminerCommands.add(sources.fans.command);
+  if (sources.power?.api === 'cgminer') cgminerCommands.add(sources.power.command);
+  if (sources.pools?.api === 'cgminer') cgminerCommands.add(sources.pools.command);
+  if (sources.devdetails?.api === 'cgminer') cgminerCommands.add(sources.devdetails.command);
+  if (sources.devs?.api === 'cgminer') cgminerCommands.add(sources.devs.command);
+
+  // Execute CGMiner commands in parallel
+  const cgminerResults = {};
+  const commandList = [...cgminerCommands];
+
+  const cgminerPromises = commandList.map(async (cmd) => {
+    try {
+      cgminerResults[cmd] = await sendCGMinerCommand(ip, { command: cmd });
+    } catch (err) {
+      cgminerResults[cmd] = { error: err.message };
+    }
+  });
+
+  await Promise.all(cgminerPromises);
+
+  // Extract data from results
+  const summaryData = cgminerResults.summary?.SUMMARY?.[0] || {};
+  const tempsData = cgminerResults.temps?.TEMPS || [];
+  const fansData = cgminerResults.fans?.FANS || [];
+  const tunerData = cgminerResults.tunerstatus?.TUNERSTATUS?.[0] || null;
+  const poolsData = cgminerResults.pools?.POOLS?.[0] || {};
+  const devsData = cgminerResults.devs?.DEVS || [];
+  const devdetailsData = cgminerResults.devdetails?.DEVDETAILS || [];
+
+  // Calculate hashrate
+  const mhs5s = summaryData['MHS 5s'] || 0;
+  const mhs15m = summaryData['MHS 15m'] || 0;
+  const hashrate = mhs5s / 1000000; // Convert MH/s to TH/s
+  const hashrate15m = mhs15m / 1000000;
+
+  // Extract temperatures
+  let temps = { board1: null, board2: null, board3: null, chip: null };
+  if (tempsData.length > 0) {
+    tempsData.forEach((t, idx) => {
+      if (t.Board !== undefined) temps[`board${idx + 1}`] = t.Board;
+      if (t.Chip !== undefined && (temps.chip === null || t.Chip > temps.chip)) {
+        temps.chip = t.Chip;
+      }
+    });
+  }
+
+  // Extract fans
+  let fans = { speed1: null, speed2: null, speed3: null, speed4: null };
+  if (fansData.length > 0) {
+    fansData.forEach((f, idx) => {
+      if (f.RPM !== undefined) fans[`speed${idx + 1}`] = f.RPM;
+    });
+  }
+
+  // Extract power
+  let power = null;
+  let powerLimit = null;
+  let powerSource = 'unavailable';
+
+  if (tunerData) {
+    if (tunerData.ApproximateMinerPowerConsumption > 0) {
+      power = tunerData.ApproximateMinerPowerConsumption;
+      powerSource = 'tunerstatus';
+    }
+    if (tunerData.PowerLimit > 0) {
+      powerLimit = tunerData.PowerLimit;
+    }
+  }
+
+  // Calculate reject rate
+  const accepted = poolsData.Accepted || 0;
+  const rejected = poolsData.Rejected || 0;
+  const rejectRate = accepted > 0 ? (rejected / (accepted + rejected)) * 100 : 0;
+
+  // Get currency and prices
+  const countryConfig = ELECTRICITY_ZONES[minerConfig.country || 'norway'];
+  const currency = countryConfig?.currency || 'NOK';
+  let btcPrice = btcPriceCache.priceNOK || 1000000;
+  if (currency === 'EUR') btcPrice = btcPriceCache.priceEUR || 90000;
+  if (currency === 'SEK') btcPrice = btcPriceCache.priceSEK || 1000000;
+  if (currency === 'USD') btcPrice = btcPriceCache.priceUSD || 95000;
+
+  // Calculate effective electricity price
+  const rawSpotPrice = electricityPriceCache.currentPrice || 1.0;
+  const gridFee = getGridFeeForTime(minerConfig);
+  const useNorgespris = minerConfig.priceMode === 'norgespris';
+
+  let basePrice, subsidyApplied = false, subsidyAmount = 0;
+  if (useNorgespris) {
+    basePrice = 0.50;
+  } else {
+    const threshold = 0.9375;
+    if (rawSpotPrice > threshold) {
+      const excessPrice = rawSpotPrice - threshold;
+      subsidyAmount = excessPrice * 0.90;
+      basePrice = rawSpotPrice - subsidyAmount;
+      subsidyApplied = true;
+    } else {
+      basePrice = rawSpotPrice;
+    }
+  }
+  const effectivePrice = basePrice + gridFee;
+
+  // Calculate efficiency
+  const efficiency = power !== null ? calculateEfficiency(hashrate, power, effectivePrice, btcPrice, currency) : null;
+  const efficiencyWPerTH = (power !== null && hashrate > 0) ? power / hashrate : null;
+
+  // Concise log output
+  const workingApis = commandList.filter(cmd => !cgminerResults[cmd]?.error).join(',');
+  console.log(`[Poll] ${ip}: CGMiner(${workingApis}) -> ${hashrate.toFixed(2)} TH/s, ${temps.chip || 'N/A'}°C, ${power || 'N/A'}W`);
+
+  return {
+    hashrate,
+    hashrate15m,
+    hashrate1m: (summaryData['MHS 1m'] || 0) / 1000000,
+    hashrate24h: (summaryData['MHS 24h'] || 0) / 1000000,
+    hashrateAv: (summaryData['MHS av'] || 0) / 1000000,
+    efficiencyWPerTH,
+    temperature: temps.chip,
+    powerDraw: power,
+    powerLimit,
+    powerSource,
+    uptime: summaryData.Elapsed || 0,
+    boards: [
+      { temp: temps.board1, chipTemp: tempsData[0]?.Chip || null },
+      { temp: temps.board2, chipTemp: tempsData[1]?.Chip || null },
+      { temp: temps.board3, chipTemp: tempsData[2]?.Chip || null }
+    ],
+    fans,
+    poolStatus: poolsData.Status === 'Alive' ? 'Connected' : 'Disconnected',
+    poolUrl: poolsData.URL || 'Not connected',
+    acceptedShares: accepted,
+    rejectedShares: rejected,
+    rejectRate,
+    powerProfile: minerConfig.powerProfile || 'medium',
+
+    electricity: {
+      rawSpotPrice,
+      basePrice,
+      gridFee,
+      effectivePrice,
+      subsidyApplied,
+      subsidyAmount,
+      priceMode: useNorgespris ? 'norgespris' : 'stromstotteavtale',
+      currentPrice: effectivePrice,
+      avgPrice: electricityPriceCache.avgPrice,
+      minPrice: electricityPriceCache.minPrice,
+      maxPrice: electricityPriceCache.maxPrice,
+      zone: electricityPriceCache.zone,
+      zoneName: electricityPriceCache.zoneName,
+      country: electricityPriceCache.country,
+      currency: electricityPriceCache.currency,
+      vatRate: electricityPriceCache.vatRate,
+      prices: electricityPriceCache.prices,
+      updatedAt: electricityPriceCache.fetchedAt
+    },
+
+    btcPrice: {
+      usd: btcPriceCache.priceUSD,
+      nok: btcPriceCache.priceNOK,
+      eur: btcPriceCache.priceEUR,
+      sek: btcPriceCache.priceSEK,
+      updatedAt: btcPriceCache.fetchedAt
+    },
+
+    network: {
+      difficulty: networkStatsCache.difficulty,
+      hashrate: networkStatsCache.hashrate,
+      hashrateFormatted: networkStatsCache.hashrateFormatted,
+      blockHeight: networkStatsCache.blockHeight,
+      blockReward: networkStatsCache.blockReward,
+      updatedAt: networkStatsCache.fetchedAt
+    },
+
+    efficiency,
+
+    // Minimal debug info
+    _debug: {
+      powerSource,
+      powerLimit,
+      capabilities: {
+        cgminerCommands: commandList,
+        model: capabilities?.minerModel,
+        firmware: capabilities?.firmwareVersion
+      }
+    }
+  };
+}
+
+// ============================================================================
 // Utility Functions
 // ============================================================================
 
@@ -3253,16 +3797,26 @@ app.post('/api/miners/add', async (req, res) => {
 
     // Add new miner with optional credentials
     const { username, password } = req.body;
-    config.miners.push({
+    const newMiner = {
       ip,
       name: name || `Miner ${config.miners.length + 1}`,
       powerProfile: 'medium',
       username: username || 'root',
       password: password || 'root'
-    });
+    };
 
+    // Run capability discovery for the new miner
+    console.log(`[API] Running capability discovery for new miner ${ip}...`);
+    try {
+      newMiner.capabilities = await discoverMinerCapabilities(ip, newMiner);
+    } catch (discErr) {
+      console.error(`[API] Discovery failed for ${ip}: ${discErr.message}`);
+      // Still add the miner, discovery will retry on first poll
+    }
+
+    config.miners.push(newMiner);
     await saveConfig(config);
-    res.json({ success: true, config });
+    res.json({ success: true, config, capabilities: newMiner.capabilities || null });
   } catch (err) {
     console.error('Add miner error:', err);
     res.status(500).json({ error: err.message });
@@ -3351,6 +3905,68 @@ app.post('/api/miner/test', async (req, res) => {
       error: err.message,
       hint: 'Make sure the miner is running Braiins OS and port 4028 is accessible'
     });
+  }
+});
+
+// Manual capability re-discovery endpoint
+app.post('/api/miners/rediscover', async (req, res) => {
+  try {
+    const { ip } = req.body;
+
+    if (!ip) {
+      return res.status(400).json({ error: 'No miner IP provided' });
+    }
+
+    const config = await loadConfig();
+    const miner = config.miners.find(m => m.ip === ip);
+
+    if (!miner) {
+      return res.status(404).json({ error: 'Miner not found in configuration' });
+    }
+
+    console.log(`[API] Manual capability re-discovery requested for ${ip}`);
+
+    // Run full capability discovery
+    miner.capabilities = await discoverMinerCapabilities(ip, miner);
+
+    // Save the updated config
+    await saveConfig(config);
+
+    res.json({
+      success: true,
+      ip: ip,
+      capabilities: miner.capabilities
+    });
+  } catch (err) {
+    console.error('Capability re-discovery error:', err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Get miner capabilities
+app.get('/api/miners/capabilities', async (req, res) => {
+  try {
+    const { ip } = req.query;
+    const config = await loadConfig();
+
+    if (ip) {
+      const miner = config.miners.find(m => m.ip === ip);
+      if (!miner) {
+        return res.status(404).json({ error: 'Miner not found' });
+      }
+      return res.json({ ip, capabilities: miner.capabilities || null });
+    }
+
+    // Return capabilities for all miners
+    const minerCapabilities = config.miners.map(m => ({
+      ip: m.ip,
+      name: m.name,
+      capabilities: m.capabilities || null
+    }));
+
+    res.json({ miners: minerCapabilities });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
   }
 });
 
@@ -3477,7 +4093,32 @@ async function pollMiners() {
     // Fetch stats for all miners in parallel
     const minerStatsPromises = config.miners.map(async (miner) => {
       try {
-        const stats = await getMinerStats(miner.ip, miner);
+        // Check if capability discovery is needed
+        const { rediscover, reason } = shouldRediscover(miner);
+        if (rediscover) {
+          console.log(`[Poll] ${miner.ip}: Discovery needed - ${reason}`);
+          try {
+            miner.capabilities = await discoverMinerCapabilities(miner.ip, miner);
+            // Save the updated capabilities to config
+            await saveConfig(config);
+          } catch (discErr) {
+            console.error(`[Poll] ${miner.ip}: Discovery failed - ${discErr.message}`);
+          }
+        }
+
+        // Use optimized polling if capabilities are available, otherwise fall back to full getMinerStats
+        let stats;
+        if (miner.capabilities?.dataSources && Object.keys(miner.capabilities.dataSources).length > 0) {
+          stats = await getMinerStatsOptimized(miner.ip, miner);
+        } else {
+          // Fall back to full getMinerStats for first run or if discovery failed
+          stats = await getMinerStats(miner.ip, miner);
+        }
+
+        // Track consecutive failures - reset on success
+        if (miner.capabilities) {
+          miner.capabilities.consecutiveFailures = 0;
+        }
 
         // Check SCOP thresholds and auto-control if enabled
         if (miner.autoControl?.enabled && stats.efficiency) {
@@ -3516,7 +4157,14 @@ async function pollMiners() {
           }
         };
       } catch (err) {
-        console.error(`Error fetching stats for ${miner.name} (${miner.ip}):`, err.message);
+        console.error(`[Poll] ${miner.ip}: Error - ${err.message}`);
+
+        // Track consecutive failures for re-discovery
+        if (miner.capabilities) {
+          miner.capabilities.consecutiveFailures = (miner.capabilities.consecutiveFailures || 0) + 1;
+          miner.capabilities.lastFailure = new Date().toISOString();
+        }
+
         const controlState = minerControlState[miner.ip] || {};
         return {
           minerIp: miner.ip,
