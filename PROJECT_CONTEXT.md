@@ -4,7 +4,7 @@
 
 A comprehensive web-based dashboard for monitoring and controlling Bitcoin Antminer miners running Braiins OS, specifically designed for home heating applications in Norway. The app tracks mining performance, electricity costs with Norwegian pricing (including state subsidies), and efficiency metrics comparing mining heat output vs traditional heat pumps.
 
-**Version:** 1.4.0
+**Version:** 1.4.1
 **Author:** j1441
 **License:** MIT
 **Repository:** https://github.com/j1441/jacks-mining-dashboard-app
@@ -485,19 +485,37 @@ https://api.blockchain.info/stats
 
 ### 3. Braiins REST API (Port 80) - Stats Only
 
-**Implementation:** `fetchBraiinsRestApiStats()` at line ~1200
+**Implementation:** `fetchBraiinsRestApiStats()` at line ~1548
+
+**Authentication:** Token-based via `/api/v1/auth/login` endpoint
+- Uses `braiinsRestAuth(ip, username, password)` to obtain token
+- Token passed as `Authorization: Bearer <token>` header
+- Credentials from miner config (default: root/root)
 
 **Stats Endpoints:**
 | Endpoint | Purpose |
 |----------|---------|
+| `/api/v1/auth/login` | Obtain auth token |
 | `/api/v1/miner/stats` | Mining statistics |
 | `/api/v1/miner/hw/hashboards` | Hashboard details |
 | `/api/v1/cooling/state` | Cooling status |
+| `/api/v1/miner/errors` | Error log |
+| `/api/v1/pools/` | Pool configuration |
 | `/api/v1/performance/target-profiles` | Power profiles |
+| `/api/v1/performance/tuner-state` | Tuner state (power data) |
+| `/api/v1/miner/details` | Miner details |
+
+**Power Data Extraction Priority:**
+1. CGMiner tunerstatus `ApproximateMinerPowerConsumption`
+2. GraphQL tuner data
+3. CGMiner stats API
+4. CGMiner summary API
+5. REST API tuner-state `powerConsumptionW`
+6. REST API miner-stats `powerConsumptionW`
 
 ### 4. Braiins gRPC API (Port 50051) - Miner Control
 
-**Implementation:** Lines ~90-310 in server.js
+**Implementation:** Lines ~90-350 in server.js
 
 **Protocol:** gRPC with Protocol Buffers (proto files in `proto/bos/v1/`)
 
@@ -529,6 +547,7 @@ actionsClient.PauseMining({}, metadata, { deadline }, callback);
 - Tokens cached in `minerControlState[ip]`
 - Auto-refresh 60 seconds before expiry
 - Default timeout: 3600 seconds
+- Auto-invalidation on UNAUTHENTICATED errors with retry
 
 **Key Functions:**
 | Function | Purpose |
@@ -537,8 +556,10 @@ actionsClient.PauseMining({}, metadata, { deadline }, callback);
 | `getGrpcClient(ip, service)` | Get/create cached gRPC client |
 | `braiinsLogin(ip, user, pass)` | Authenticate via gRPC |
 | `getMinerAuthToken(ip, config)` | Get/refresh cached auth token |
-| `pauseMining(ip, config)` | Pause mining via gRPC |
-| `resumeMining(ip, config)` | Resume mining via gRPC |
+| `invalidateAuthToken(ip)` | Clear cached token and gRPC clients |
+| `isAuthError(err)` | Detect authentication errors |
+| `pauseMining(ip, config)` | Pause mining via gRPC (with auto-retry) |
+| `resumeMining(ip, config)` | Resume mining via gRPC (with auto-retry) |
 
 ### Temperature Detection Patterns
 
@@ -808,6 +829,8 @@ Alerts are persisted in `alertHistory` array (last 100).
     {
       "ip": "192.168.1.100",
       "name": "Living Room Miner",
+      "username": "root",
+      "password": "root",
       "powerProfile": "medium",
       "autoControl": {
         "enabled": false,
@@ -894,9 +917,9 @@ Alerts are persisted in `alertHistory` array (last 100).
 | GET | `/api/miner/stats?ip=X.X.X.X` | - | Get single miner stats |
 | POST | `/api/miner/power` | `{ip, profile}` | Set power profile |
 | POST | `/api/miner/test` | `{minerIP}` | Test miner connection |
-| POST | `/api/miners/add` | `{ip, name}` | Add new miner |
+| POST | `/api/miners/add` | `{ip, name, username?, password?}` | Add new miner |
 | POST | `/api/miners/remove` | `{ip}` | Remove miner |
-| POST | `/api/miners/update` | `{ip, name?, powerProfile?}` | Update miner |
+| POST | `/api/miners/update` | `{ip, name?, powerProfile?, username?, password?}` | Update miner |
 
 ### Miner Control
 
@@ -1015,7 +1038,8 @@ services:
 - Run on private network only
 - Use Tailscale VPN for remote access
 - Consider adding authentication if exposing to internet
-- Default miner credentials (root:root) should be changed
+- Configure per-miner credentials if not using default (root:root)
+- Miner credentials stored in plaintext in config.json
 
 ---
 
@@ -1027,6 +1051,9 @@ services:
 # Test CGMiner API connectivity
 nc -zv [miner-ip] 4028
 
+# Test gRPC API connectivity
+nc -zv [miner-ip] 50051
+
 # Test with curl
 curl -X POST http://localhost:3456/api/miner/test \
   -H "Content-Type: application/json" \
@@ -1035,9 +1062,25 @@ curl -X POST http://localhost:3456/api/miner/test \
 
 **Common causes:**
 - Miner not running Braiins OS
-- Firewall blocking port 4028
+- Firewall blocking port 4028 or 50051
 - Incorrect IP address
 - CGMiner API disabled
+- Wrong authentication credentials
+
+### Authentication Issues
+
+**Symptom:** `UNAUTHENTICATED: Missing or invalid authentication token`
+
+**Solutions:**
+1. Update miner credentials via API:
+   ```bash
+   curl -X POST http://localhost:3456/api/miners/update \
+     -H "Content-Type: application/json" \
+     -d '{"ip": "192.168.1.100", "username": "root", "password": "YOUR_PASSWORD"}'
+   ```
+2. Check if you can log into miner web UI with same credentials
+3. Restart dashboard to clear cached tokens
+4. Newer Braiins OS versions require authentication for all APIs
 
 ### WebSocket Disconnects
 
@@ -1105,7 +1148,15 @@ Changes pushed to GitHub trigger automatic deployment to Umbrel server. Testing 
 
 ## Version History
 
-### v1.4.0 (Current)
+### v1.4.1 (Current)
+- **Per-Miner Authentication**: Added username/password fields per miner for Braiins OS auth
+- **gRPC Auth Retry**: Automatic token invalidation and retry on UNAUTHENTICATED errors
+- **REST API Auth Fix**: Fixed REST API authentication (changed default password from empty to 'root')
+- **REST API Power Fallback**: Added REST API tuner-state as fallback power data source
+- **REST API Error Handling**: Fixed error responses being passed through instead of null
+- **Credential Passthrough**: All API calls (gRPC, REST, GraphQL, HTTP) now use per-miner credentials
+
+### v1.4.0
 - **Enhanced Auto-Control**: Active monitoring ensures miner state matches intended state
 - **Projected SCOP**: Calculates expected SCOP when miner is paused (fixes resume issue)
 - **Efficiency Override**: Custom power/hashrate settings for projected SCOP calculations
