@@ -3475,45 +3475,237 @@ async function saveConfig(config) {
   console.log('Configuration saved:', config);
 }
 
+// ============================================================================
+// Historical Data Management (v2)
+// ============================================================================
+
+/**
+ * Load historical data with backward compatibility
+ * New format: { version: 2, hourlySnapshots: [], dailyAverages: [] }
+ * Old format: { entries: [] }
+ */
 async function loadHistory() {
   try {
     const data = await fs.readFile(HISTORY_FILE, 'utf8');
-    return JSON.parse(data);
+    const parsed = JSON.parse(data);
+
+    // Migrate old format to new format
+    if (parsed.entries && !parsed.version) {
+      console.log('Migrating history from v1 to v2 format...');
+      return {
+        version: 2,
+        hourlySnapshots: migrateV1Entries(parsed.entries),
+        dailyAverages: []
+      };
+    }
+
+    return parsed;
   } catch (err) {
     if (err.code === 'ENOENT') {
-      return { entries: [] };
+      return { version: 2, hourlySnapshots: [], dailyAverages: [] };
     }
     throw err;
   }
 }
 
-async function saveHistoryEntry(stats) {
-  try {
-    const history = await loadHistory();
-    const maxEntries = 720; // 30 days at 1 entry per hour
+/**
+ * Migrate old v1 entries to v2 format
+ * Groups entries by timestamp and creates snapshots
+ */
+function migrateV1Entries(entries) {
+  const timestampMap = {};
 
-    history.entries.push({
-      timestamp: new Date().toISOString(),
-      minerIp: stats.minerIp,
-      minerName: stats.minerName,
-      hashrate: stats.hashrate,
-      power: stats.powerDraw,
-      temperature: stats.temperature,
-      electricityPrice: stats.electricity?.effectivePrice,
-      btcPrice: stats.btcPrice?.nok,
-      networkDifficulty: stats.network?.difficulty,
-      dailyProfit: stats.efficiency?.dailyProfit,
-      effectiveSCOP: stats.efficiency?.effectiveSCOP
-    });
-
-    if (history.entries.length > maxEntries) {
-      history.entries = history.entries.slice(-maxEntries);
+  entries.forEach(entry => {
+    const ts = entry.timestamp;
+    if (!timestampMap[ts]) {
+      timestampMap[ts] = {
+        timestamp: ts,
+        miners: [],
+        market: {
+          btcPriceNOK: entry.btcPrice,
+          electricityPrice: entry.electricityPrice,
+          networkDifficulty: entry.networkDifficulty
+        }
+      };
     }
 
+    timestampMap[ts].miners.push({
+      ip: entry.minerIp,
+      name: entry.minerName,
+      hashrate: entry.hashrate || 0,
+      power: entry.power || 0,
+      temperature: entry.temperature || 0,
+      scop: entry.effectiveSCOP,
+      dailyProfit: entry.dailyProfit
+    });
+  });
+
+  // Convert to array and add aggregates
+  return Object.values(timestampMap).map(snapshot => {
+    const aggregate = {
+      totalHashrate: snapshot.miners.reduce((sum, m) => sum + (m.hashrate || 0), 0),
+      totalPower: snapshot.miners.reduce((sum, m) => sum + (m.power || 0), 0),
+      avgTemperature: snapshot.miners.reduce((sum, m) => sum + (m.temperature || 0), 0) / snapshot.miners.length,
+      totalDailyProfit: snapshot.miners.reduce((sum, m) => sum + (m.dailyProfit || 0), 0),
+      avgSCOP: snapshot.miners.reduce((sum, m) => sum + (m.scop || 0), 0) / snapshot.miners.length,
+      minerCount: snapshot.miners.length
+    };
+
+    return { ...snapshot, aggregate };
+  });
+}
+
+/**
+ * Save a complete hourly snapshot with all miners
+ * Called by background scheduler, not per-miner
+ */
+async function saveHistorySnapshot(allMinerStats) {
+  try {
+    if (!allMinerStats || allMinerStats.length === 0) {
+      console.log('No miner stats to save, skipping history snapshot');
+      return;
+    }
+
+    // Validate we have good data
+    const validMiners = allMinerStats.filter(stats =>
+      !stats.error &&
+      stats.hashrate != null &&
+      stats.powerDraw != null
+    );
+
+    if (validMiners.length === 0) {
+      console.log('No valid miner data to save, skipping history snapshot');
+      return;
+    }
+
+    const history = await loadHistory();
+    const timestamp = new Date().toISOString();
+
+    // Build miner entries
+    const miners = validMiners.map(stats => ({
+      ip: stats.minerIp,
+      name: stats.minerName,
+      hashrate: stats.hashrate || 0,
+      power: stats.powerDraw || 0,
+      temperature: stats.temperature || 0,
+      isPaused: stats.isPaused || false,
+      scop: stats.efficiency?.effectiveSCOP,
+      dailyProfit: stats.efficiency?.dailyProfit,
+      dailyBTC: stats.efficiency?.dailyBTC,
+      dailyCost: stats.efficiency?.dailyCost,
+      autoControlEnabled: stats.autoControl?.enabled || false,
+      autoControlState: stats.autoControlState?.intendedState
+    }));
+
+    // Calculate aggregates
+    const aggregate = {
+      totalHashrate: miners.reduce((sum, m) => sum + m.hashrate, 0),
+      totalPower: miners.reduce((sum, m) => sum + m.power, 0),
+      avgTemperature: miners.reduce((sum, m) => sum + m.temperature, 0) / miners.length,
+      totalDailyProfit: miners.reduce((sum, m) => sum + (m.dailyProfit || 0), 0),
+      totalDailyBTC: miners.reduce((sum, m) => sum + (m.dailyBTC || 0), 0),
+      totalDailyCost: miners.reduce((sum, m) => sum + (m.dailyCost || 0), 0),
+      avgSCOP: miners.reduce((sum, m) => sum + (m.scop || 0), 0) / miners.filter(m => m.scop).length || 0,
+      minerCount: miners.length,
+      activeMinerCount: miners.filter(m => !m.isPaused).length
+    };
+
+    // Get market data from cache
+    const market = {
+      btcPriceNOK: btcPriceCache.priceNOK,
+      btcPriceUSD: btcPriceCache.priceUSD,
+      btcPriceEUR: btcPriceCache.priceEUR,
+      btcPriceSEK: btcPriceCache.priceSEK,
+      electricityPrice: electricityPriceCache.effectivePrice,
+      electricitySpotPrice: electricityPriceCache.rawSpotPrice,
+      gridFee: electricityPriceCache.gridFee,
+      networkDifficulty: networkStatsCache.difficulty,
+      networkHashrate: networkStatsCache.hashrate
+    };
+
+    // Create snapshot
+    const snapshot = {
+      timestamp,
+      aggregate,
+      miners,
+      market
+    };
+
+    // Add to hourly snapshots
+    history.hourlySnapshots.push(snapshot);
+
+    // Retention: Keep last 168 hourly snapshots (7 days)
+    const maxHourlySnapshots = 168;
+    if (history.hourlySnapshots.length > maxHourlySnapshots) {
+      // Before removing old hourly data, aggregate into daily averages
+      const oldSnapshots = history.hourlySnapshots.slice(0, history.hourlySnapshots.length - maxHourlySnapshots);
+      aggregateToDailyAverages(history, oldSnapshots);
+
+      // Keep only recent hourly data
+      history.hourlySnapshots = history.hourlySnapshots.slice(-maxHourlySnapshots);
+    }
+
+    // Retention: Keep last 30 daily averages
+    const maxDailyAverages = 30;
+    if (history.dailyAverages.length > maxDailyAverages) {
+      history.dailyAverages = history.dailyAverages.slice(-maxDailyAverages);
+    }
+
+    // Save to file
     await fs.writeFile(HISTORY_FILE, JSON.stringify(history, null, 2));
+    console.log(`History snapshot saved: ${miners.length} miners, ${aggregate.totalHashrate.toFixed(1)} TH/s total`);
+
   } catch (err) {
-    console.error('Failed to save history:', err);
+    console.error('Failed to save history snapshot:', err);
   }
+}
+
+/**
+ * Aggregate hourly snapshots into daily averages
+ */
+function aggregateToDailyAverages(history, hourlySnapshots) {
+  // Group snapshots by date
+  const dailyGroups = {};
+
+  hourlySnapshots.forEach(snapshot => {
+    const date = snapshot.timestamp.split('T')[0]; // Get YYYY-MM-DD
+    if (!dailyGroups[date]) {
+      dailyGroups[date] = [];
+    }
+    dailyGroups[date].push(snapshot);
+  });
+
+  // Calculate daily averages
+  Object.entries(dailyGroups).forEach(([date, snapshots]) => {
+    // Skip if we already have this date
+    if (history.dailyAverages.some(d => d.date === date)) {
+      return;
+    }
+
+    const count = snapshots.length;
+    const daily = {
+      date,
+      sampleCount: count,
+      aggregate: {
+        avgHashrate: snapshots.reduce((sum, s) => sum + s.aggregate.totalHashrate, 0) / count,
+        avgPower: snapshots.reduce((sum, s) => sum + s.aggregate.totalPower, 0) / count,
+        avgTemperature: snapshots.reduce((sum, s) => sum + s.aggregate.avgTemperature, 0) / count,
+        totalDailyProfit: snapshots.reduce((sum, s) => sum + (s.aggregate.totalDailyProfit || 0), 0) / count,
+        avgSCOP: snapshots.reduce((sum, s) => sum + (s.aggregate.avgSCOP || 0), 0) / count,
+        avgMinerCount: snapshots.reduce((sum, s) => sum + s.aggregate.minerCount, 0) / count
+      },
+      market: {
+        avgBtcPrice: snapshots.reduce((sum, s) => sum + (s.market.btcPriceNOK || 0), 0) / count,
+        avgElectricityPrice: snapshots.reduce((sum, s) => sum + (s.market.electricityPrice || 0), 0) / count,
+        avgDifficulty: snapshots.reduce((sum, s) => sum + (s.market.networkDifficulty || 0), 0) / count
+      }
+    };
+
+    history.dailyAverages.push(daily);
+  });
+
+  // Sort daily averages by date
+  history.dailyAverages.sort((a, b) => a.date.localeCompare(b.date));
 }
 
 // ============================================================================
@@ -4140,14 +4332,72 @@ app.get('/api/history', async (req, res) => {
     const cutoff = new Date();
     cutoff.setDate(cutoff.getDate() - days);
 
-    let filtered = history.entries.filter(e => new Date(e.timestamp) >= cutoff);
+    // For backward compatibility, convert v2 format to v1-style entries
+    let entries = [];
+
+    // Add hourly snapshots (with null safety)
+    (history.hourlySnapshots || []).forEach(snapshot => {
+      const snapshotTime = new Date(snapshot.timestamp);
+      if (snapshotTime >= cutoff) {
+        snapshot.miners.forEach(miner => {
+          entries.push({
+            timestamp: snapshot.timestamp,
+            minerIp: miner.ip,
+            minerName: miner.name,
+            hashrate: miner.hashrate,
+            power: miner.power,
+            temperature: miner.temperature,
+            electricityPrice: snapshot.market.electricityPrice,
+            btcPrice: snapshot.market.btcPriceNOK,
+            networkDifficulty: snapshot.market.networkDifficulty,
+            dailyProfit: miner.dailyProfit,
+            effectiveSCOP: miner.scop,
+            isPaused: miner.isPaused,
+            autoControlEnabled: miner.autoControlEnabled
+          });
+        });
+      }
+    });
+
+    // For longer time ranges, include daily averages if needed
+    if (days > 7) {
+      (history.dailyAverages || []).forEach(daily => {
+        const dailyDate = new Date(daily.date);
+        if (dailyDate >= cutoff) {
+          // Create a synthetic entry representing the daily average
+          entries.push({
+            timestamp: daily.date + 'T12:00:00.000Z',
+            minerIp: 'daily-average',
+            minerName: 'Daily Average',
+            hashrate: daily.aggregate.avgHashrate,
+            power: daily.aggregate.avgPower,
+            temperature: daily.aggregate.avgTemperature,
+            electricityPrice: daily.market.avgElectricityPrice,
+            btcPrice: daily.market.avgBtcPrice,
+            networkDifficulty: daily.market.avgDifficulty,
+            dailyProfit: daily.aggregate.totalDailyProfit,
+            effectiveSCOP: daily.aggregate.avgSCOP,
+            isDaily: true,
+            sampleCount: daily.sampleCount
+          });
+        }
+      });
+    }
 
     // Filter by miner IP if specified
     if (minerIp) {
-      filtered = filtered.filter(e => e.minerIp === minerIp);
+      entries = entries.filter(e => e.minerIp === minerIp);
     }
 
-    res.json({ entries: filtered });
+    // Sort by timestamp
+    entries.sort((a, b) => new Date(a.timestamp) - new Date(b.timestamp));
+
+    res.json({
+      entries,
+      version: history.version || 1,
+      hasHourlyData: history.hourlySnapshots?.length > 0,
+      hasDailyData: history.dailyAverages?.length > 0
+    });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
@@ -4374,6 +4624,31 @@ function startBackgroundMinerPolling() {
   setInterval(pollMiners, MINER_POLL_INTERVAL);
 }
 
+/**
+ * Background history snapshot scheduler
+ * Saves hourly snapshots independent of WebSocket connections
+ */
+function startHistoryScheduler() {
+  console.log('📊 Starting history snapshot scheduler...');
+
+  // Calculate time until next hour
+  const now = new Date();
+  const msUntilNextHour = (60 - now.getMinutes()) * 60 * 1000 - now.getSeconds() * 1000 - now.getMilliseconds();
+
+  // Schedule first snapshot at the top of the next hour
+  setTimeout(() => {
+    // Save initial snapshot
+    saveHistorySnapshot(minerStatsCache.miners);
+
+    // Then save every hour on the hour
+    setInterval(() => {
+      saveHistorySnapshot(minerStatsCache.miners);
+    }, 60 * 60 * 1000);
+  }, msUntilNextHour);
+
+  console.log(`📊 First history snapshot in ${Math.round(msUntilNextHour / 1000 / 60)} minutes`);
+}
+
 // ============================================================================
 // Server Startup
 // ============================================================================
@@ -4400,6 +4675,9 @@ async function start() {
   // Start background miner polling immediately (miners connect before any client opens the dashboard)
   startBackgroundMinerPolling();
 
+  // Start history snapshot scheduler (saves hourly snapshots)
+  startHistoryScheduler();
+
   const server = app.listen(PORT, '0.0.0.0', () => {
     console.log('='.repeat(60));
     console.log(`Jack's Mining Dashboard v2.2`);
@@ -4415,9 +4693,6 @@ async function start() {
   });
 
   const wss = new WebSocket.Server({ server });
-  
-  let lastHistorySave = 0;
-  const historySaveInterval = 60 * 60 * 1000;
 
   wss.on('connection', async (ws) => {
     console.log('🔌 WebSocket client connected');
@@ -4436,16 +4711,6 @@ async function start() {
         };
 
         ws.send(JSON.stringify(response));
-
-        // Save history periodically
-        if (Date.now() - lastHistorySave > historySaveInterval) {
-          for (const stats of minerStatsCache.miners) {
-            if (!stats.error) {
-              saveHistoryEntry(stats);
-            }
-          }
-          lastHistorySave = Date.now();
-        }
       } catch (err) {
         console.error('WebSocket stats error:', err);
         ws.send(JSON.stringify({

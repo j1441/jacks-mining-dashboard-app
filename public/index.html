@@ -2166,9 +2166,11 @@
             const [aggregateMode, setAggregateMode] = useState('separate'); // 'separate' or 'sum'
             const [timeRange, setTimeRange] = useState(7);
             const [loading, setLoading] = useState(true);
+            const [error, setError] = useState(null);
             const [chartType, setChartType] = useState('hashrate');
             const [hoveredPoint, setHoveredPoint] = useState(null);
             const [mousePos, setMousePos] = useState({ x: 0, y: 0 });
+            const [dataInfo, setDataInfo] = useState({ version: 1, hasHourlyData: false, hasDailyData: false });
 
             useEffect(() => {
                 fetchHistoryData();
@@ -2179,12 +2181,44 @@
             const fetchHistoryData = async () => {
                 try {
                     setLoading(true);
+                    setError(null);
                     const minerParam = selectedMiner !== 'all' && selectedMiner !== 'sum' ? `&minerIp=${selectedMiner}` : '';
                     const response = await fetch(`/api/history?days=${timeRange}${minerParam}`);
+
+                    if (!response.ok) {
+                        throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+                    }
+
                     const data = await response.json();
-                    setHistoryData(data.entries || []);
+
+                    // Validate data structure
+                    if (!data.entries || !Array.isArray(data.entries)) {
+                        throw new Error('Invalid history data format');
+                    }
+
+                    // Filter out invalid entries (missing critical fields)
+                    const validEntries = data.entries.filter(entry =>
+                        entry.timestamp &&
+                        entry.minerIp &&
+                        (entry.hashrate != null || entry.power != null || entry.temperature != null)
+                    );
+
+                    setHistoryData(validEntries);
+                    setDataInfo({
+                        version: data.version || 1,
+                        hasHourlyData: data.hasHourlyData || false,
+                        hasDailyData: data.hasDailyData || false,
+                        totalEntries: validEntries.length,
+                        invalidEntries: data.entries.length - validEntries.length
+                    });
+
+                    if (validEntries.length === 0 && data.entries.length > 0) {
+                        console.warn('All history entries were invalid and filtered out');
+                    }
                 } catch (err) {
                     console.error('Failed to fetch history:', err);
+                    setError(err.message);
+                    setHistoryData([]);
                 } finally {
                     setLoading(false);
                 }
@@ -2418,18 +2452,83 @@
                         </div>
                     </div>
 
+                    {/* Data Info Badge */}
+                    {!loading && dataInfo.totalEntries > 0 && (
+                        <div style={{
+                            display: 'inline-flex',
+                            alignItems: 'center',
+                            gap: '0.5rem',
+                            padding: '0.5rem 0.75rem',
+                            backgroundColor: 'rgba(34, 197, 94, 0.1)',
+                            border: '1px solid rgba(34, 197, 94, 0.3)',
+                            borderRadius: '6px',
+                            fontSize: '0.75rem',
+                            color: '#86efac',
+                            marginBottom: '1rem'
+                        }}>
+                            <span>✓</span>
+                            <span>
+                                {dataInfo.totalEntries} data points
+                                {dataInfo.version === 2 && ' (v2 format)'}
+                                {dataInfo.hasHourlyData && ' • Hourly data available'}
+                                {dataInfo.hasDailyData && ' • Daily averages available'}
+                            </span>
+                        </div>
+                    )}
+
                     {loading && (
                         <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '300px' }}>
                             <div className="loading-spinner"></div>
                         </div>
                     )}
 
-                    {!loading && allTimestamps.length === 0 && (
+                    {!loading && error && (
+                        <div style={{
+                            textAlign: 'center',
+                            padding: '2rem',
+                            backgroundColor: 'rgba(239, 68, 68, 0.1)',
+                            border: '1px solid rgba(239, 68, 68, 0.3)',
+                            borderRadius: '8px',
+                            color: '#fca5a5'
+                        }}>
+                            <div style={{ fontSize: '2rem', marginBottom: '0.5rem' }}>⚠️</div>
+                            <div style={{ fontWeight: 'bold', marginBottom: '0.5rem' }}>Failed to load historical data</div>
+                            <div style={{ fontSize: '0.875rem', opacity: 0.8 }}>{error}</div>
+                            <button
+                                onClick={fetchHistoryData}
+                                style={{
+                                    marginTop: '1rem',
+                                    padding: '0.5rem 1rem',
+                                    backgroundColor: 'rgba(239, 68, 68, 0.2)',
+                                    border: '1px solid rgba(239, 68, 68, 0.5)',
+                                    borderRadius: '6px',
+                                    color: 'white',
+                                    cursor: 'pointer',
+                                    fontSize: '0.875rem'
+                                }}
+                            >
+                                Retry
+                            </button>
+                        </div>
+                    )}
+
+                    {!loading && !error && allTimestamps.length === 0 && (
                         <div style={{ textAlign: 'center', padding: '3rem', color: '#9ca3af' }}>
                             <div style={{ fontSize: '3rem', marginBottom: '1rem' }}>📊</div>
                             <div>No historical data available yet.</div>
                             <div style={{ fontSize: '0.875rem', marginTop: '0.5rem' }}>
                                 Data is collected hourly. Check back soon!
+                            </div>
+                            <div style={{
+                                marginTop: '1rem',
+                                padding: '0.75rem',
+                                backgroundColor: 'rgba(59, 130, 246, 0.1)',
+                                border: '1px solid rgba(59, 130, 246, 0.3)',
+                                borderRadius: '6px',
+                                fontSize: '0.75rem',
+                                display: 'inline-block'
+                            }}>
+                                💡 First snapshot will be saved at the top of the next hour
                             </div>
                         </div>
                     )}

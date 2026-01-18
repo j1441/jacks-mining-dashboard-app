@@ -237,18 +237,21 @@ The server maintains several in-memory caches to reduce API calls and improve re
 
 | Function | Location | Purpose |
 |----------|----------|---------|
-| `loadConfig()` | Line 2174 | Load config with backward compatibility |
-| `saveConfig(config)` | Line 2236 | Persist configuration to JSON |
-| `loadHistory()` | Line 2241 | Load historical data points |
-| `saveHistoryEntry(stats)` | Line 2253 | Append new data point (720 max) |
+| `loadConfig()` | Line ~3420 | Load config with backward compatibility |
+| `saveConfig(config)` | Line ~3474 | Persist configuration to JSON |
+| `loadHistory()` | Line ~3487 | Load history with v1→v2 migration |
+| `migrateV1Entries(entries)` | Line ~3515 | Convert old v1 entries to v2 format |
+| `saveHistorySnapshot(allMinerStats)` | Line ~3562 | Save complete hourly snapshot |
+| `aggregateToDailyAverages(history, snapshots)` | Line ~3666 | Compress hourly data to daily |
 
 #### Background Tasks
 
 | Function | Location | Purpose |
 |----------|----------|---------|
-| `pollMiners()` | Line 2616 | Fetch stats for all miners |
-| `startBackgroundMinerPolling()` | Line 2682 | Initialize 5-second polling loop |
-| `start()` | Line 2696 | Main startup sequence |
+| `pollMiners()` | Line ~4550 | Fetch stats for all miners |
+| `startBackgroundMinerPolling()` | Line ~4617 | Initialize 5-second polling loop |
+| `startHistoryScheduler()` | Line ~4631 | Start hourly history snapshot scheduler |
+| `start()` | Line ~4656 | Main startup sequence |
 
 ---
 
@@ -857,12 +860,113 @@ savings = heatPumpCost - electricityCost + btcEarnings
 
 Alerts are persisted in `alertHistory` array (last 100).
 
-### 8. Historical Data
+### 8. Historical Data (v2)
 
-- Hourly snapshots saved to `history.json`
-- Retains 720 entries (30 days)
-- Fields: timestamp, minerIp, minerName, hashrate, power, temperature, electricityPrice, btcPrice, networkDifficulty, dailyProfit, effectiveSCOP
-- API: `GET /api/history?days=7&minerIp=X.X.X.X`
+A reliable, independent background scheduler saves comprehensive hourly snapshots with two-tier retention.
+
+**Data Storage Format (v2):**
+```json
+{
+  "version": 2,
+  "hourlySnapshots": [
+    {
+      "timestamp": "2026-01-18T10:00:00.000Z",
+      "aggregate": {
+        "totalHashrate": 240.5,
+        "totalPower": 6400,
+        "avgTemperature": 62,
+        "totalDailyProfit": 45.50,
+        "totalDailyBTC": 0.00012,
+        "totalDailyCost": 32.00,
+        "avgSCOP": 2.8,
+        "minerCount": 2,
+        "activeMinerCount": 2
+      },
+      "miners": [
+        {
+          "ip": "192.168.1.100",
+          "name": "Living Room",
+          "hashrate": 120.5,
+          "power": 3200,
+          "temperature": 62,
+          "isPaused": false,
+          "scop": 2.8,
+          "dailyProfit": 22.75,
+          "dailyBTC": 0.00006,
+          "dailyCost": 16.00,
+          "autoControlEnabled": true,
+          "autoControlState": "mining"
+        }
+      ],
+      "market": {
+        "btcPriceNOK": 1050000,
+        "btcPriceUSD": 95000,
+        "btcPriceEUR": 88000,
+        "btcPriceSEK": 1020000,
+        "electricityPrice": 1.25,
+        "electricitySpotPrice": 0.85,
+        "gridFee": 0.40,
+        "networkDifficulty": 72000000000000,
+        "networkHashrate": 600000000000000000
+      }
+    }
+  ],
+  "dailyAverages": [
+    {
+      "date": "2026-01-17",
+      "sampleCount": 24,
+      "aggregate": {
+        "avgHashrate": 238.2,
+        "avgPower": 6350,
+        "avgTemperature": 61,
+        "totalDailyProfit": 44.80,
+        "avgSCOP": 2.75,
+        "avgMinerCount": 2
+      },
+      "market": {
+        "avgBtcPrice": 1045000,
+        "avgElectricityPrice": 1.22,
+        "avgDifficulty": 72000000000000
+      }
+    }
+  ]
+}
+```
+
+**Key Features:**
+- **Independent Background Scheduler**: Runs hourly on the hour, independent of WebSocket connections
+- **Data Validation**: Only saves entries with valid hashrate and power data
+- **Rich Metrics**: Includes SCOP, daily profit/BTC/cost, auto-control state, and full market data
+- **Two-Tier Retention**:
+  - Hourly snapshots: 168 entries (7 days)
+  - Daily averages: 30 entries (30 days)
+- **Auto-Compression**: Old hourly data automatically compressed to daily averages before deletion
+- **Backward Compatible**: Automatically migrates v1 format to v2 on load
+- **Pre-Aggregated Data**: Aggregate stats computed at save time for faster chart rendering
+
+**Backend Functions:**
+
+| Function | Location | Purpose |
+|----------|----------|---------|
+| `loadHistory()` | Line ~3487 | Load history with v1→v2 migration |
+| `migrateV1Entries()` | Line ~3515 | Convert old entries to v2 format |
+| `saveHistorySnapshot()` | Line ~3562 | Save complete hourly snapshot |
+| `aggregateToDailyAverages()` | Line ~3666 | Compress hourly data to daily |
+| `startHistoryScheduler()` | Line ~4631 | Start background save scheduler |
+
+**API:** `GET /api/history?days=7&minerIp=X.X.X.X`
+
+**Response:**
+```json
+{
+  "entries": [...],
+  "version": 2,
+  "hasHourlyData": true,
+  "hasDailyData": true
+}
+```
+
+**Note:** The API returns v1-style flat entries for backward compatibility with the frontend chart component.
 
 ### 9. API Terminal (Debugging & Troubleshooting)
 
@@ -1308,13 +1412,29 @@ Changes pushed to GitHub trigger automatic deployment to Umbrel server. Testing 
 | Electricity price refresh | 30 minutes |
 | BTC price refresh | 5 minutes |
 | Network stats refresh | 10 minutes |
-| History retention | 720 entries (30 days) |
+| History retention | 168 hourly (7 days) + 30 daily (30 days) |
+| History save interval | Hourly (on the hour) |
 
 ---
 
 ## Version History
 
-### v1.5.0 (Current)
+### v1.6.0 (Current)
+- **📊 Historical Data v2**: Complete redesign of historical data storage and collection
+  - **Independent Background Scheduler**: Hourly snapshots saved on the hour, independent of WebSocket connections
+  - **Two-Tier Retention**: 168 hourly snapshots (7 days) + 30 daily averages (30 days)
+  - **Auto-Compression**: Old hourly data automatically compressed to daily averages before deletion
+  - **Rich Metrics**: Now stores SCOP, daily profit/BTC/cost, auto-control state, and full market data (4 currencies)
+  - **Pre-Aggregated Data**: Aggregate stats (total hashrate, avg temp, etc.) computed at save time
+  - **Data Validation**: Only saves entries with valid hashrate and power data
+  - **Backward Compatible**: Automatically migrates v1 format to v2 on load
+- **🎨 Improved Historical Charts UI**:
+  - Data info badge showing entry count and data version
+  - Better error handling with retry button
+  - Helpful empty state with info about when first snapshot will be saved
+  - Validation of fetched data before display
+
+### v1.5.0
 - **🔧 SCOP Auto-Control Fix**: Fixed critical startup issue where auto-control defaulted to "always on"
   - System now **requires** manual efficiency override for auto-control to function
   - Override SCOP is **always used** for control decisions (never measured SCOP)
