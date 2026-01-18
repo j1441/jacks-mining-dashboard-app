@@ -205,9 +205,9 @@ The server maintains several in-memory caches to reduce API calls and improve re
 | `pauseMining(ip, minerConfig)` | Line ~175 | Pause mining via PUT /api/v1/actions/pause |
 | `resumeMining(ip, minerConfig)` | Line ~226 | Resume mining via PUT /api/v1/actions/resume |
 | `getMiningStatus(ip)` | Line ~310 | Check if miner is paused (via hashrate) |
-| `calculateProjectedSCOP(power, hashrate, price, btcPrice)` | Line ~355 | Calculate projected SCOP for paused miner |
-| `determineIntendedState(scop, projectedSCOP, boardTemp, threshold, minTemp, isPaused)` | Line ~380 | Determine intended miner state |
-| `checkSCOPThresholds(minerIp, stats, minerConfig)` | Line ~428 | Active auto-control with state sync |
+| `calculateProjectedSCOP(power, hashrate, price, btcPrice)` | Line ~355 | Calculate override SCOP from manual settings |
+| `determineIntendedState(projectedSCOP, boardTemp, threshold, minTemp)` | Line ~437 | Determine intended state using override SCOP only |
+| `checkSCOPThresholds(minerIp, stats, minerConfig)` | Line ~489 | Active auto-control with state sync and efficiency tracking |
 
 #### Data Extraction
 
@@ -668,15 +668,24 @@ Every 5 seconds:
       lastControlAction,// Date - when last control command sent
       controlAttempts,  // number - consecutive sync failures
       lastSyncError,    // string - last error message
-      // Efficiency tracking
-      scopUsed,         // number - SCOP value used for decision
-      scopType,         // 'measured' | 'projected'
-      projectedSCOP,    // number - calculated projected SCOP
-      projectedSource,  // 'override' | 'measured' | 'none'
-      measuredPower,    // number - last measured power (W)
-      measuredHashrate, // number - last measured hashrate (TH/s)
-      projectedPower,   // number - power used for projection
-      projectedHashrate,// number - hashrate used for projection
+      // Efficiency tracking (control)
+      scopUsed,         // number - SCOP value used for decision (from override)
+      scopType,         // 'override' | 'none'
+      projectedSCOP,    // number - calculated override SCOP (used for control)
+      projectedSource,  // 'override' | 'none'
+      projectedPower,   // number - power from override (W)
+      projectedHashrate,// number - hashrate from override (TH/s)
+      // Efficiency tracking (measurement - reference only)
+      measuredPower,    // number - instant measured power (W)
+      measuredHashrate, // number - instant measured hashrate (TH/s)
+      measuredEfficiency, // number - instant efficiency (W/TH)
+      measuredAvgPower,    // number - rolling avg power (W)
+      measuredAvgHashrate, // number - rolling avg hashrate (TH/s)
+      measuredAvgEfficiency, // number - rolling avg efficiency (W/TH)
+      best1hPower,      // number - best 1h avg power (W)
+      best1hHashrate,   // number - best 1h avg hashrate (TH/s)
+      best1hEfficiency, // number - best 1h avg efficiency (W/TH)
+      best1hTimestamp,  // Date - when best 1h was recorded
       lastEfficiencyUpdate // Date - when efficiency was last measured
     }
   }],
@@ -753,35 +762,45 @@ Automatically pause/resume mining based on efficiency thresholds and heating nee
 | `enabled` | Enable auto-control | false |
 | `scopThreshold` | Pause if SCOP drops below this | 2.0 |
 | `minTemperature` | Keep ON if board temp below this | (not set) |
-| `efficiencyOverride.power` | Expected power consumption (W) | (auto from measured) |
-| `efficiencyOverride.hashrate` | Expected hashrate (TH/s) | (auto from measured) |
+| `efficiencyOverride.power` | **Required**: Expected power consumption (W) | none |
+| `efficiencyOverride.hashrate` | **Required**: Expected hashrate (TH/s) | none |
 
-**Dual SCOP System:**
-- **Measured SCOP**: Calculated from actual live mining data (used when miner is running)
-- **Projected SCOP**: Calculated from expected efficiency (used when miner is paused)
+**⚠️ IMPORTANT**: The efficiency override is **required** for auto-control to function. It is **always used** for control decisions, never the measured efficiency.
 
-This solves the problem where a paused miner would never restart because its measured SCOP is 0.
+**Override-Only Control System:**
+- **Override SCOP**: Calculated from manual efficiency override (**ALWAYS used for control decisions**)
+- **Measured SCOP**: Calculated from actual live mining data (**for comparison/reference only**)
 
-**Efficiency Tracking:**
-- When mining: System records power and hashrate for future projections
-- When paused: System uses either custom override or last measured values
-- Priority: 1) Custom override, 2) Last measured values, 3) Default to mining
+This ensures predictable, deterministic behavior that works even when power stats are unavailable (e.g., at startup when power shows "N/A").
+
+**Efficiency Tracking (For Reference Only):**
+When miner is actively mining, the system tracks:
+- **Current measurements**: Instant power, hashrate, and efficiency (W/TH)
+- **Rolling average**: Average over last 720 samples (1 hour at 5s intervals)
+- **Best 1h efficiency**: Best rolling average ever achieved (can be reset)
+
+These measurements are displayed in the UI to help you:
+1. Verify your override matches reality
+2. Calibrate your override settings
+3. Monitor performance over time
 
 **Control Logic:**
 ```
 Every poll cycle (when auto-control enabled):
 ├── Track actual miner state from hashrate (>0.1 TH/s = mining)
-├── If miner is actively mining:
-│   └── Record measured efficiency (power, hashrate)
 │
-├── Calculate projected SCOP using expected efficiency
+├── If miner is actively mining:
+│   ├── Record instant measurements (power, hashrate, efficiency)
+│   ├── Update rolling average (last 720 samples)
+│   └── Update best 1h efficiency if new record
+│
+├── Calculate override SCOP using manual efficiency settings
+│   └── If no override configured → cannot control (defaults to mining)
 │
 ├── Determine intended state:
 │   ├── Priority 1: If boardTemp < minTemp → MINING (heating needed)
-│   ├── Priority 2: Use appropriate SCOP for decision:
-│   │   ├── If currently MINING: Use measured SCOP
-│   │   └── If currently PAUSED: Use projected SCOP
-│   └── If SCOP >= threshold → MINING, else → PAUSED
+│   ├── Priority 2: If override SCOP >= threshold → MINING
+│   └── Otherwise → PAUSED
 │
 └── Sync actual state to intended state:
     ├── If states don't match AND cooldown expired (30s):
@@ -791,9 +810,10 @@ Every poll cycle (when auto-control enabled):
 
 **State Display:**
 - Shows current state vs intended state
-- Displays both measured and projected SCOP
-- Indicates which SCOP is being used for decisions
-- Shows state reason and any sync errors
+- Displays measured SCOP (for reference) vs override SCOP (controls miner)
+- Shows current average efficiency and best 1h efficiency
+- Indicates control decision basis and state reason
+- Shows any sync errors
 
 **Board Temperature:**
 - Uses average of all available board temps (not chip temp)
@@ -803,6 +823,12 @@ Every poll cycle (when auto-control enabled):
 **Rate Limiting:**
 - Control actions rate-limited to 30 seconds between commands
 - Prevents rapid toggling when near threshold
+
+**Best Efficiency Tracking:**
+- Automatically tracks best 1h rolling average efficiency
+- Displayed in UI with reset button
+- Useful for understanding peak performance capabilities
+- API: `POST /api/miner/reset-best-efficiency` with `{ip: "X.X.X.X"}`
 
 ### 6. Efficiency Metrics
 
@@ -988,6 +1014,7 @@ A built-in terminal interface for testing and debugging miner API commands witho
 | POST | `/api/miner/resume` | `{ip}` | Resume mining on miner |
 | GET | `/api/miner/status?ip=X.X.X.X` | - | Get mining status (paused/running) |
 | POST | `/api/miner/auto-control` | `{ip, enabled, scopThreshold, minTemperature, efficiencyOverride}` | Update auto-control settings |
+| POST | `/api/miner/reset-best-efficiency` | `{ip}` | Reset best 1h efficiency tracking |
 
 **Auto-control body example:**
 ```json
@@ -1287,7 +1314,28 @@ Changes pushed to GitHub trigger automatic deployment to Umbrel server. Testing 
 
 ## Version History
 
-### v1.4.2 (Current)
+### v1.5.0 (Current)
+- **🔧 SCOP Auto-Control Fix**: Fixed critical startup issue where auto-control defaulted to "always on"
+  - System now **requires** manual efficiency override for auto-control to function
+  - Override SCOP is **always used** for control decisions (never measured SCOP)
+  - Measured efficiency tracked separately for reference/comparison only
+  - Fixes N/A power stats at startup causing incorrect control decisions
+- **📊 Enhanced Efficiency Tracking**: Comprehensive efficiency monitoring for reference
+  - **Rolling average**: Tracks average efficiency over last 1 hour (720 samples at 5s intervals)
+  - **Best 1h efficiency**: Automatically tracks best rolling average ever achieved
+  - **Reset capability**: API endpoint to reset best efficiency tracking (`POST /api/miner/reset-best-efficiency`)
+  - All measurements displayed in UI to help calibrate override settings
+- **🎨 Improved UI Clarity**: Better visualization of control vs measurement
+  - Clear labels: "Measured SCOP (for reference)" vs "Override SCOP (controls miner)"
+  - Current average efficiency display with W/TH units
+  - Best 1h efficiency display with reset button
+  - Warning: Override required for auto-control to function
+- **📈 Efficiency Comparison**: Compare manual override against measured reality
+  - See instant, average, and best efficiency measurements
+  - Use measured data to calibrate your override settings
+  - Understand how your miner performs under different conditions
+
+### v1.4.2
 - **API Terminal**: Built-in debugging interface for testing miner API commands
   - Support for CGMiner, gRPC, REST, GraphQL, Status, and State commands
   - Quick action buttons for common operations (Login, Status, Pause, Resume)
