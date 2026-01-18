@@ -672,12 +672,15 @@ function httpsGet(url) {
  * Fetch temperature and fan data from Braiins OS GraphQL API
  * This is more reliable than CGMiner API for temperature data
  */
-async function fetchBraiinsGraphQL(ip) {
+async function fetchBraiinsGraphQL(ip, minerConfig = {}) {
   console.log('=== STARTING GRAPHQL DISCOVERY ===');
-  
+
+  const username = minerConfig.username || 'root';
+  const password = minerConfig.password || 'root';
+
   // First, authenticate with LuCI to get a session token
   console.log('Authenticating with LuCI...');
-  const sessionToken = await getSessionViaWebUI(ip, 'root', 'root');
+  const sessionToken = await getSessionViaWebUI(ip, username, password);
   
   if (sessionToken) {
     console.log('Got session token, will use for GraphQL requests');
@@ -1378,10 +1381,13 @@ function graphqlRequest(ip, query, sessionCookie = null) {
 /**
  * Alternative: Fetch from Braiins OS HTTP API
  */
-async function fetchBraiinsHTTPApi(ip) {
+async function fetchBraiinsHTTPApi(ip, minerConfig = {}) {
+  const username = minerConfig.username || 'root';
+  const password = minerConfig.password || 'root';
+
   return new Promise((resolve, reject) => {
-    // Create Basic Auth header with root:root credentials (Braiins OS default)
-    const authHeader = 'Basic ' + Buffer.from('root:root').toString('base64');
+    // Create Basic Auth header with miner credentials
+    const authHeader = 'Basic ' + Buffer.from(`${username}:${password}`).toString('base64');
     
     const options = {
       hostname: ip,
@@ -1432,7 +1438,7 @@ async function fetchBraiinsHTTPApi(ip) {
  * Authenticate with Braiins OS Public REST API
  * Returns an auth token for subsequent requests
  */
-async function braiinsRestAuth(ip, username = 'root', password = '') {
+async function braiinsRestAuth(ip, username = 'root', password = 'root') {
   return new Promise((resolve, reject) => {
     const postData = JSON.stringify({ username, password });
 
@@ -1539,10 +1545,12 @@ async function braiinsRestFetch(ip, endpoint, token = null) {
  * Fetch all available stats from Braiins OS Public REST API
  * Returns comprehensive debug data
  */
-async function fetchBraiinsRestApiStats(ip) {
+async function fetchBraiinsRestApiStats(ip, minerConfig = {}) {
   try {
     // Try to authenticate first
-    const token = await braiinsRestAuth(ip);
+    const username = minerConfig.username || 'root';
+    const password = minerConfig.password || 'root';
+    const token = await braiinsRestAuth(ip, username, password);
 
     // Fetch from all documented endpoints (even without auth, some may work)
     const [
@@ -2165,17 +2173,17 @@ async function getMinerStats(ip, config = {}) {
     // Try to get data from Braiins OS GraphQL API (has temperature/fan data)
     let graphqlData = null;
     let httpApiData = null;
-    
+
     try {
-      graphqlData = await fetchBraiinsGraphQL(ip);
+      graphqlData = await fetchBraiinsGraphQL(ip, config);
     } catch (e) {
       console.log('GraphQL not available:', e.message);
     }
-    
+
     // Try HTTP API as fallback
     if (!graphqlData) {
       try {
-        httpApiData = await fetchBraiinsHTTPApi(ip);
+        httpApiData = await fetchBraiinsHTTPApi(ip, config);
       } catch (e) {
         console.log('HTTP API not available:', e.message);
       }
@@ -2204,7 +2212,7 @@ async function getMinerStats(ip, config = {}) {
 
     // Try to fetch REST API data
     try {
-      restApiData = await fetchBraiinsRestApiStats(ip);
+      restApiData = await fetchBraiinsRestApiStats(ip, config);
     } catch (e) {
       console.log('REST API not available:', e.message);
     }
@@ -3002,12 +3010,14 @@ app.get('/api/miner/stats', async (req, res) => {
   try {
     const config = await loadConfig();
     const ip = req.query.ip || config.minerIP;
-    
+
     if (!ip) {
       return res.status(400).json({ error: 'No miner IP configured' });
     }
 
-    const stats = await getMinerStats(ip, config);
+    // Find miner-specific config for credentials
+    const minerConfig = config.miners?.find(m => m.ip === ip) || {};
+    const stats = await getMinerStats(ip, minerConfig);
     res.json(stats);
   } catch (err) {
     console.error('API stats error:', err);
@@ -3205,11 +3215,14 @@ app.post('/api/miners/add', async (req, res) => {
       return res.status(400).json({ error: 'Miner with this IP already exists' });
     }
 
-    // Add new miner
+    // Add new miner with optional credentials
+    const { username, password } = req.body;
     config.miners.push({
       ip,
       name: name || `Miner ${config.miners.length + 1}`,
-      powerProfile: 'medium'
+      powerProfile: 'medium',
+      username: username || 'root',
+      password: password || 'root'
     });
 
     await saveConfig(config);
@@ -3243,7 +3256,7 @@ app.post('/api/miners/remove', async (req, res) => {
 // Update miner details
 app.post('/api/miners/update', async (req, res) => {
   try {
-    const { ip, name, powerProfile } = req.body;
+    const { ip, name, powerProfile, username, password } = req.body;
 
     if (!ip) {
       return res.status(400).json({ error: 'Miner IP is required' });
@@ -3258,6 +3271,13 @@ app.post('/api/miners/update', async (req, res) => {
 
     if (name) miner.name = name;
     if (powerProfile) miner.powerProfile = powerProfile;
+    if (username !== undefined) miner.username = username;
+    if (password !== undefined) miner.password = password;
+
+    // Invalidate cached auth token when credentials change
+    if (username !== undefined || password !== undefined) {
+      invalidateAuthToken(ip);
+    }
 
     await saveConfig(config);
     res.json({ success: true, config });
@@ -3421,7 +3441,7 @@ async function pollMiners() {
     // Fetch stats for all miners in parallel
     const minerStatsPromises = config.miners.map(async (miner) => {
       try {
-        const stats = await getMinerStats(miner.ip, config);
+        const stats = await getMinerStats(miner.ip, miner);
 
         // Check SCOP thresholds and auto-control if enabled
         if (miner.autoControl?.enabled && stats.efficiency) {
