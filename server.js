@@ -3446,6 +3446,12 @@ async function loadConfig() {
       await saveConfig(config);
     }
 
+    // Add default history sample interval if not present (in minutes)
+    if (config.historySampleInterval === undefined) {
+      config.historySampleInterval = 5; // Default: sample every 5 minutes
+      await saveConfig(config);
+    }
+
     return config;
   } catch (err) {
     if (err.code === 'ENOENT') {
@@ -3463,7 +3469,8 @@ async function loadConfig() {
         electricityZone: 'NO5',
         gridFeeWeekdayDay: 0.50,
         gridFeeWeekendNight: 0.30,
-        priceMode: 'stromstotteavtale' // 'norgespris' or 'stromstotteavtale'
+        priceMode: 'stromstotteavtale', // 'norgespris' or 'stromstotteavtale'
+        historySampleInterval: 5 // Sample history every 5 minutes
       };
     }
     throw err;
@@ -3556,8 +3563,9 @@ function migrateV1Entries(entries) {
 }
 
 /**
- * Save a complete hourly snapshot with all miners
- * Called by background scheduler, not per-miner
+ * Save a complete snapshot with all miners
+ * Called by background scheduler based on configured interval
+ * Retention is dynamic: keeps 7 days of snapshots at the configured interval
  */
 async function saveHistorySnapshot(allMinerStats) {
   try {
@@ -3578,6 +3586,7 @@ async function saveHistorySnapshot(allMinerStats) {
       return;
     }
 
+    const config = await loadConfig();
     const history = await loadHistory();
     const timestamp = new Date().toISOString();
 
@@ -3631,18 +3640,22 @@ async function saveHistorySnapshot(allMinerStats) {
       market
     };
 
-    // Add to hourly snapshots
+    // Add to snapshots array
     history.hourlySnapshots.push(snapshot);
 
-    // Retention: Keep last 168 hourly snapshots (7 days)
-    const maxHourlySnapshots = 168;
-    if (history.hourlySnapshots.length > maxHourlySnapshots) {
-      // Before removing old hourly data, aggregate into daily averages
-      const oldSnapshots = history.hourlySnapshots.slice(0, history.hourlySnapshots.length - maxHourlySnapshots);
+    // Dynamic retention based on sample interval
+    // Keep 7 days worth of snapshots at the configured interval
+    const sampleIntervalMinutes = config.historySampleInterval || 5;
+    const samplesPerHour = 60 / sampleIntervalMinutes;
+    const maxSnapshots = Math.ceil(samplesPerHour * 24 * 7); // 7 days of data
+
+    if (history.hourlySnapshots.length > maxSnapshots) {
+      // Before removing old data, aggregate into daily averages
+      const oldSnapshots = history.hourlySnapshots.slice(0, history.hourlySnapshots.length - maxSnapshots);
       aggregateToDailyAverages(history, oldSnapshots);
 
-      // Keep only recent hourly data
-      history.hourlySnapshots = history.hourlySnapshots.slice(-maxHourlySnapshots);
+      // Keep only recent data
+      history.hourlySnapshots = history.hourlySnapshots.slice(-maxSnapshots);
     }
 
     // Retention: Keep last 30 daily averages
@@ -3653,7 +3666,7 @@ async function saveHistorySnapshot(allMinerStats) {
 
     // Save to file
     await fs.writeFile(HISTORY_FILE, JSON.stringify(history, null, 2));
-    console.log(`History snapshot saved: ${miners.length} miners, ${aggregate.totalHashrate.toFixed(1)} TH/s total`);
+    console.log(`History snapshot saved: ${miners.length} miners, ${aggregate.totalHashrate.toFixed(1)} TH/s total (interval: ${sampleIntervalMinutes}min)`);
 
   } catch (err) {
     console.error('Failed to save history snapshot:', err);
@@ -4327,10 +4340,17 @@ app.get('/api/network/stats', async (req, res) => {
 app.get('/api/history', async (req, res) => {
   try {
     const history = await loadHistory();
-    const days = parseInt(req.query.days) || 7;
+    // Support fractional days (e.g., 0.0417 for 1 hour, 0.5 for 12 hours)
+    // Also support 'hours' parameter for convenience
+    let days;
+    if (req.query.hours) {
+      days = parseFloat(req.query.hours) / 24;
+    } else {
+      days = parseFloat(req.query.days) || 7;
+    }
     const minerIp = req.query.minerIp;
     const cutoff = new Date();
-    cutoff.setDate(cutoff.getDate() - days);
+    cutoff.setTime(cutoff.getTime() - (days * 24 * 60 * 60 * 1000));
 
     // For backward compatibility, convert v2 format to v1-style entries
     let entries = [];
@@ -4434,6 +4454,55 @@ app.post('/api/alerts/clear', async (req, res) => {
   try {
     alertHistory = [];
     res.json({ success: true });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Update history sample interval
+app.post('/api/history/interval', async (req, res) => {
+  try {
+    const { interval } = req.body;
+
+    // Validate interval (1, 5, 10, 15, 30, or 60 minutes)
+    const validIntervals = [1, 5, 10, 15, 30, 60];
+    if (!validIntervals.includes(interval)) {
+      return res.status(400).json({
+        error: `Invalid interval. Must be one of: ${validIntervals.join(', ')} minutes`
+      });
+    }
+
+    const config = await loadConfig();
+    config.historySampleInterval = interval;
+    await saveConfig(config);
+
+    // Restart the history scheduler with the new interval
+    await startHistoryScheduler();
+
+    res.json({
+      success: true,
+      interval,
+      message: `History sampling interval updated to ${interval} minute(s)`
+    });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Get history settings
+app.get('/api/history/settings', async (req, res) => {
+  try {
+    const config = await loadConfig();
+    const history = await loadHistory();
+
+    res.json({
+      sampleInterval: config.historySampleInterval || 5,
+      validIntervals: [1, 5, 10, 15, 30, 60],
+      snapshotCount: history.hourlySnapshots?.length || 0,
+      dailyAverageCount: history.dailyAverages?.length || 0,
+      oldestSnapshot: history.hourlySnapshots?.[0]?.timestamp || null,
+      newestSnapshot: history.hourlySnapshots?.[history.hourlySnapshots.length - 1]?.timestamp || null
+    });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
@@ -4625,29 +4694,48 @@ function startBackgroundMinerPolling() {
   setInterval(pollMiners, MINER_POLL_INTERVAL);
 }
 
+// Store interval ID so we can restart the scheduler when config changes
+let historySchedulerInterval = null;
+
 /**
  * Background history snapshot scheduler
- * Saves hourly snapshots independent of WebSocket connections
+ * Saves snapshots at the configured interval (default: 5 minutes)
  */
-function startHistoryScheduler() {
-  console.log('📊 Starting history snapshot scheduler...');
+async function startHistoryScheduler() {
+  const config = await loadConfig();
+  const intervalMinutes = config.historySampleInterval || 5;
+  const intervalMs = intervalMinutes * 60 * 1000;
 
-  // Calculate time until next hour
+  console.log(`📊 Starting history snapshot scheduler (interval: ${intervalMinutes} minutes)...`);
+
+  // Clear any existing interval
+  if (historySchedulerInterval) {
+    clearInterval(historySchedulerInterval);
+  }
+
+  // Calculate time until next aligned interval
+  // For 5-minute intervals, align to :00, :05, :10, etc.
   const now = new Date();
-  const msUntilNextHour = (60 - now.getMinutes()) * 60 * 1000 - now.getSeconds() * 1000 - now.getMilliseconds();
+  const minutesSinceHour = now.getMinutes();
+  const minutesUntilNextInterval = intervalMinutes - (minutesSinceHour % intervalMinutes);
+  const msUntilNextInterval = minutesUntilNextInterval * 60 * 1000 - now.getSeconds() * 1000 - now.getMilliseconds();
 
-  // Schedule first snapshot at the top of the next hour
+  // Save first snapshot immediately (so we have data right away)
+  console.log('📊 Saving initial history snapshot...');
+  await saveHistorySnapshot(minerStatsCache.miners);
+
+  // Schedule subsequent snapshots at aligned intervals
   setTimeout(() => {
-    // Save initial snapshot
+    // Save at the next aligned interval
     saveHistorySnapshot(minerStatsCache.miners);
 
-    // Then save every hour on the hour
-    setInterval(() => {
+    // Then continue at the configured interval
+    historySchedulerInterval = setInterval(() => {
       saveHistorySnapshot(minerStatsCache.miners);
-    }, 60 * 60 * 1000);
-  }, msUntilNextHour);
+    }, intervalMs);
+  }, msUntilNextInterval);
 
-  console.log(`📊 First history snapshot in ${Math.round(msUntilNextHour / 1000 / 60)} minutes`);
+  console.log(`📊 Next aligned snapshot in ${Math.round(msUntilNextInterval / 1000 / 60)} minutes, then every ${intervalMinutes} minutes`);
 }
 
 // ============================================================================
@@ -4676,8 +4764,10 @@ async function start() {
   // Start background miner polling immediately (miners connect before any client opens the dashboard)
   startBackgroundMinerPolling();
 
-  // Start history snapshot scheduler (saves hourly snapshots)
-  startHistoryScheduler();
+  // Start history snapshot scheduler after a short delay to let miner data be collected first
+  setTimeout(async () => {
+    await startHistoryScheduler();
+  }, 10000); // 10 second delay to allow first miner poll to complete
 
   const server = app.listen(PORT, '0.0.0.0', () => {
     console.log('='.repeat(60));

@@ -203,7 +203,19 @@
             const [priceMode, setPriceMode] = useState(config.priceMode || 'stromstotteavtale');
             const [gridFeeWeekdayDay, setGridFeeWeekdayDay] = useState(config.gridFeeWeekdayDay || 0.50);
             const [gridFeeWeekendNight, setGridFeeWeekendNight] = useState(config.gridFeeWeekendNight || 0.30);
+            const [historySampleInterval, setHistorySampleInterval] = useState(config.historySampleInterval || 5);
             const [saving, setSaving] = useState(false);
+            const [savingInterval, setSavingInterval] = useState(false);
+
+            // Valid sample interval options (in minutes)
+            const sampleIntervalOptions = [
+                { value: 1, label: '1 minutt', description: 'Høy oppløsning, mer lagringsplass' },
+                { value: 5, label: '5 minutter', description: 'Anbefalt - god balanse' },
+                { value: 10, label: '10 minutter', description: 'Moderat oppløsning' },
+                { value: 15, label: '15 minutter', description: 'Mindre data' },
+                { value: 30, label: '30 minutter', description: 'Minimal lagring' },
+                { value: 60, label: '1 time', description: 'Lavest oppløsning' }
+            ];
 
             useEffect(() => {
                 setCountry(config.country || 'norway');
@@ -211,7 +223,24 @@
                 setPriceMode(config.priceMode || 'stromstotteavtale');
                 setGridFeeWeekdayDay(config.gridFeeWeekdayDay || 0.50);
                 setGridFeeWeekendNight(config.gridFeeWeekendNight || 0.30);
+                setHistorySampleInterval(config.historySampleInterval || 5);
             }, [config]);
+
+            const handleSaveInterval = async () => {
+                setSavingInterval(true);
+                try {
+                    const response = await fetch('/api/history/interval', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ interval: parseInt(historySampleInterval) })
+                    });
+                    if (!response.ok) throw new Error('Failed to update interval');
+                } catch (err) {
+                    console.error('Failed to save history interval:', err);
+                } finally {
+                    setSavingInterval(false);
+                }
+            };
 
             const handleSave = async () => {
                 setSaving(true);
@@ -340,7 +369,45 @@
                                 ))}
                             </select>
                         </div>
-                        
+
+                        {/* History Sample Interval */}
+                        <div style={{ marginBottom: '1.5rem', paddingTop: '1rem', borderTop: '1px solid rgba(255,255,255,0.1)' }}>
+                            <label style={{ display: 'block', marginBottom: '0.5rem', color: '#9ca3af', fontSize: '0.875rem' }}>
+                                📊 Historikk - Samplingsintervall
+                            </label>
+                            <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
+                                <select
+                                    value={historySampleInterval}
+                                    onChange={(e) => setHistorySampleInterval(parseInt(e.target.value))}
+                                    style={{ flex: 1 }}
+                                >
+                                    {sampleIntervalOptions.map(opt => (
+                                        <option key={opt.value} value={opt.value}>{opt.label}</option>
+                                    ))}
+                                </select>
+                                <button
+                                    onClick={handleSaveInterval}
+                                    disabled={savingInterval}
+                                    style={{
+                                        padding: '0.5rem 1rem',
+                                        backgroundColor: '#059669',
+                                        borderRadius: '0.375rem',
+                                        border: 'none',
+                                        color: 'white',
+                                        cursor: savingInterval ? 'not-allowed' : 'pointer',
+                                        opacity: savingInterval ? 0.5 : 1,
+                                        fontSize: '0.875rem'
+                                    }}
+                                >
+                                    {savingInterval ? '...' : 'Oppdater'}
+                                </button>
+                            </div>
+                            <div style={{ fontSize: '0.75rem', color: '#6b7280', marginTop: '0.5rem' }}>
+                                {sampleIntervalOptions.find(o => o.value === historySampleInterval)?.description || ''}
+                                {' '}(lagrer data hvert {historySampleInterval} minutt{historySampleInterval > 1 ? 'er' : ''})
+                            </div>
+                        </div>
+
                         <div style={{ display: 'flex', gap: '0.5rem', justifyContent: 'flex-end' }}>
                             <button
                                 onClick={onClose}
@@ -2164,13 +2231,24 @@
             const [historyData, setHistoryData] = useState([]);
             const [selectedMiner, setSelectedMiner] = useState('all');
             const [aggregateMode, setAggregateMode] = useState('separate'); // 'separate' or 'sum'
-            const [timeRange, setTimeRange] = useState(7);
+            const [timeRange, setTimeRange] = useState(1); // Default to 24 hours
             const [loading, setLoading] = useState(true);
             const [error, setError] = useState(null);
             const [chartType, setChartType] = useState('hashrate');
             const [hoveredPoint, setHoveredPoint] = useState(null);
             const [mousePos, setMousePos] = useState({ x: 0, y: 0 });
             const [dataInfo, setDataInfo] = useState({ version: 1, hasHourlyData: false, hasDailyData: false });
+
+            // Time range options: value is in days (fractions for hours)
+            const timeRangeOptions = [
+                { value: 1/24, label: 'Last 1 Hour' },      // 0.0417 days
+                { value: 6/24, label: 'Last 6 Hours' },     // 0.25 days
+                { value: 12/24, label: 'Last 12 Hours' },   // 0.5 days
+                { value: 1, label: 'Last 24 Hours' },
+                { value: 7, label: 'Last 7 Days' },
+                { value: 14, label: 'Last 14 Days' },
+                { value: 30, label: 'Last 30 Days' }
+            ];
 
             useEffect(() => {
                 fetchHistoryData();
@@ -2183,7 +2261,9 @@
                     setLoading(true);
                     setError(null);
                     const minerParam = selectedMiner !== 'all' && selectedMiner !== 'sum' ? `&minerIp=${selectedMiner}` : '';
-                    const response = await fetch(`/api/history?days=${timeRange}${minerParam}`);
+                    // Use hours parameter for sub-day ranges, days for longer ranges
+                    const timeParam = timeRange < 1 ? `hours=${timeRange * 24}` : `days=${timeRange}`;
+                    const response = await fetch(`/api/history?${timeParam}${minerParam}`);
 
                     if (!response.ok) {
                         throw new Error(`HTTP ${response.status}: ${response.statusText}`);
@@ -2337,8 +2417,8 @@
             // Format timestamp for display
             const formatTimestamp = (timestamp, index, total) => {
                 const date = new Date(timestamp);
-                if (timeRange === 1) {
-                    // For 24 hours, show hour
+                if (timeRange <= 1) {
+                    // For 24 hours or less, show hour:minute
                     return date.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' });
                 } else {
                     // For longer periods, show date
@@ -2434,7 +2514,7 @@
                             {/* Time Range Selector */}
                             <select
                                 value={timeRange}
-                                onChange={(e) => setTimeRange(parseInt(e.target.value))}
+                                onChange={(e) => setTimeRange(parseFloat(e.target.value))}
                                 style={{
                                     background: 'rgba(255, 255, 255, 0.1)',
                                     color: '#e0e0e0',
@@ -2444,10 +2524,9 @@
                                     fontSize: '0.875rem'
                                 }}
                             >
-                                <option value="1">Last 24 Hours</option>
-                                <option value="7">Last 7 Days</option>
-                                <option value="14">Last 14 Days</option>
-                                <option value="30">Last 30 Days</option>
+                                {timeRangeOptions.map(opt => (
+                                    <option key={opt.value} value={opt.value}>{opt.label}</option>
+                                ))}
                             </select>
                         </div>
                     </div>
@@ -2720,7 +2799,7 @@
                                 <div>
                                     <div style={{ color: '#9ca3af', fontSize: '0.75rem' }}>Time Range</div>
                                     <div style={{ fontWeight: '600', color: '#9ca3af' }}>
-                                        {timeRange === 1 ? '24 hours' : `${timeRange} days`}
+                                        {timeRangeOptions.find(o => o.value === timeRange)?.label || `${timeRange} days`}
                                     </div>
                                 </div>
                             </div>
