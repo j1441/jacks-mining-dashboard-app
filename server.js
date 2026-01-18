@@ -4338,7 +4338,8 @@ app.get('/api/history', async (req, res) => {
     // Add hourly snapshots (with null safety)
     (history.hourlySnapshots || []).forEach(snapshot => {
       const snapshotTime = new Date(snapshot.timestamp);
-      if (snapshotTime >= cutoff) {
+      if (snapshotTime >= cutoff && snapshot.miners && Array.isArray(snapshot.miners)) {
+        const market = snapshot.market || {};
         snapshot.miners.forEach(miner => {
           entries.push({
             timestamp: snapshot.timestamp,
@@ -4347,9 +4348,9 @@ app.get('/api/history', async (req, res) => {
             hashrate: miner.hashrate,
             power: miner.power,
             temperature: miner.temperature,
-            electricityPrice: snapshot.market.electricityPrice,
-            btcPrice: snapshot.market.btcPriceNOK,
-            networkDifficulty: snapshot.market.networkDifficulty,
+            electricityPrice: market.electricityPrice,
+            btcPrice: market.btcPriceNOK,
+            networkDifficulty: market.networkDifficulty,
             dailyProfit: miner.dailyProfit,
             effectiveSCOP: miner.scop,
             isPaused: miner.isPaused,
@@ -4363,7 +4364,7 @@ app.get('/api/history', async (req, res) => {
     if (days > 7) {
       (history.dailyAverages || []).forEach(daily => {
         const dailyDate = new Date(daily.date);
-        if (dailyDate >= cutoff) {
+        if (dailyDate >= cutoff && daily.aggregate && daily.market) {
           // Create a synthetic entry representing the daily average
           entries.push({
             timestamp: daily.date + 'T12:00:00.000Z',
