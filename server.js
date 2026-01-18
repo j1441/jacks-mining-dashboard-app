@@ -1518,7 +1518,13 @@ async function braiinsRestFetch(ip, endpoint, token = null) {
       res.on('end', () => {
         try {
           const parsed = JSON.parse(data);
-          resolve(parsed);
+          // Check if response is an error object
+          if (parsed.error || parsed.message?.includes('authentication')) {
+            console.error(`REST API error for ${endpoint}:`, parsed.error || parsed.message);
+            resolve(null);
+          } else {
+            resolve(parsed);
+          }
         } catch (err) {
           console.error(`Failed to parse REST response from ${endpoint}:`, err.message);
           resolve(null);
@@ -2631,9 +2637,33 @@ async function getMinerStats(ip, config = {}) {
       powerSource = 'cgminer-summary';
       console.log('Using power from CGMiner summary:', power);
     }
+    // Priority 5: REST API tuner-state (fallback for newer Braiins OS versions)
+    else if (restApiData?.tunerState?.powerConsumptionW > 0) {
+      power = restApiData.tunerState.powerConsumptionW;
+      powerSource = 'rest-api';
+      console.log('Using power from REST API tunerState:', power);
+    }
+    else if (restApiData?.tunerState?.power?.consumptionW > 0) {
+      power = restApiData.tunerState.power.consumptionW;
+      powerSource = 'rest-api';
+      console.log('Using power from REST API tunerState.power:', power);
+    }
+    // Priority 6: REST API miner stats
+    else if (restApiData?.minerStats?.powerConsumptionW > 0) {
+      power = restApiData.minerStats.powerConsumptionW;
+      powerSource = 'rest-api-stats';
+      console.log('Using power from REST API minerStats:', power);
+    }
     // No fake fallbacks - if we can't get real power, leave it null
     else {
       console.log('WARNING: No real power data available from miner API');
+      // Log what REST API data we have for debugging
+      if (restApiData) {
+        console.log('REST API data available:', Object.keys(restApiData).filter(k => restApiData[k] !== null));
+        if (restApiData.tunerState) {
+          console.log('REST API tunerState keys:', Object.keys(restApiData.tunerState));
+        }
+      }
     }
 
     // Extract power limit (configured target) from tunerstatus
@@ -2643,6 +2673,12 @@ async function getMinerStats(ip, config = {}) {
     } else if (tunerStatus?.DynamicPowerScaling?.ScaledPowerLimit > 0) {
       powerLimit = tunerStatus.DynamicPowerScaling.ScaledPowerLimit;
       console.log('Power limit from DynamicPowerScaling:', powerLimit);
+    } else if (restApiData?.tunerState?.powerTargetW > 0) {
+      powerLimit = restApiData.tunerState.powerTargetW;
+      console.log('Power limit from REST API tunerState:', powerLimit);
+    } else if (restApiData?.tunerState?.power?.targetW > 0) {
+      powerLimit = restApiData.tunerState.power.targetW;
+      console.log('Power limit from REST API tunerState.power:', powerLimit);
     }
 
     const powerProfile = config.currentProfile || 'medium';
