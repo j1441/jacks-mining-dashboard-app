@@ -436,45 +436,46 @@ function calculateProjectedSCOP(powerWatts, hashrateTHs, electricityPrice, btcPr
 
 /**
  * Determine what state the miner should be in based on SCOP and temperature
+ * Always uses projected SCOP from manual override for decisions
  * @returns {{ intendedState: 'mining'|'paused', reason: string, scopUsed: number, scopType: string }}
  */
-function determineIntendedState(scop, projectedSCOP, boardTemp, threshold, minTemp, isPaused) {
+function determineIntendedState(projectedSCOP, boardTemp, threshold, minTemp) {
   // Priority 1: Temperature override - if board temp is below minimum, must mine for heat
   if (minTemp !== undefined && boardTemp !== undefined && boardTemp < minTemp) {
     return {
       intendedState: 'mining',
       reason: `Board temp ${boardTemp.toFixed(1)}°C < min ${minTemp}°C (heating needed)`,
-      scopUsed: isPaused ? projectedSCOP : scop,
-      scopType: isPaused ? 'projected' : 'measured'
+      scopUsed: projectedSCOP,
+      scopType: 'override'
     };
   }
 
   // Priority 2: SCOP-based decision
-  // When paused, use projected SCOP to decide if we should resume
-  // When mining, use actual SCOP to decide if we should pause
-  const scopToUse = isPaused ? projectedSCOP : scop;
-  const scopType = isPaused ? 'projected' : 'measured';
+  // ALWAYS use projected SCOP (from manual override) for control decisions
+  // The measured SCOP is only used for comparison/validation
+  const scopToUse = projectedSCOP;
+  const scopType = 'override';
 
   if (scopToUse === undefined || scopToUse === null) {
     return {
       intendedState: 'mining',
-      reason: `${scopType} SCOP unavailable, defaulting to mining`,
+      reason: `Override SCOP not configured, defaulting to mining`,
       scopUsed: null,
-      scopType
+      scopType: 'none'
     };
   }
 
   if (scopToUse >= threshold) {
     return {
       intendedState: 'mining',
-      reason: `${scopType} SCOP ${scopToUse.toFixed(2)} >= threshold ${threshold} (profitable)`,
+      reason: `Override SCOP ${scopToUse.toFixed(2)} >= threshold ${threshold} (profitable)`,
       scopUsed: scopToUse,
       scopType
     };
   } else {
     return {
       intendedState: 'paused',
-      reason: `${scopType} SCOP ${scopToUse.toFixed(2)} < threshold ${threshold} (unprofitable)`,
+      reason: `Override SCOP ${scopToUse.toFixed(2)} < threshold ${threshold} (unprofitable)`,
       scopUsed: scopToUse,
       scopType
     };
@@ -525,14 +526,59 @@ async function checkSCOPThresholds(minerIp, stats, minerConfig) {
   const actuallyMining = hashrate > 0.1; // More than 0.1 TH/s means mining
   const isPaused = !actuallyMining;
 
-  // If miner is actively mining, update measured efficiency
+  // If miner is actively mining, update measured efficiency tracking
   if (actuallyMining && hashrate > 0 && power > 0) {
+    const currentEfficiency = power / hashrate; // W/TH
+    const now = new Date();
+
+    // Initialize efficiency tracking if not exists
+    if (!state.efficiencyTracking) {
+      state.efficiencyTracking = {
+        samples: [],
+        best1hPower: null,
+        best1hHashrate: null,
+        best1hEfficiency: null,
+        best1hTimestamp: null
+      };
+    }
+
+    // Add current sample (keep last 12 samples = 1 hour at 5s intervals)
+    state.efficiencyTracking.samples.push({
+      power,
+      hashrate,
+      efficiency: currentEfficiency,
+      timestamp: now
+    });
+
+    // Keep only last 12 samples (1 minute at 5-second polling)
+    // For 1h we'd need 720 samples, but let's keep a rolling window
+    const maxSamples = 720; // 1 hour of data at 5-second intervals
+    if (state.efficiencyTracking.samples.length > maxSamples) {
+      state.efficiencyTracking.samples = state.efficiencyTracking.samples.slice(-maxSamples);
+    }
+
+    // Calculate average from all samples
+    const avgPower = state.efficiencyTracking.samples.reduce((sum, s) => sum + s.power, 0) / state.efficiencyTracking.samples.length;
+    const avgHashrate = state.efficiencyTracking.samples.reduce((sum, s) => sum + s.hashrate, 0) / state.efficiencyTracking.samples.length;
+    const avgEfficiency = avgPower / avgHashrate;
+
+    // Update best 1h efficiency if this is better (lower W/TH is better)
+    if (state.efficiencyTracking.best1hEfficiency === null || avgEfficiency < state.efficiencyTracking.best1hEfficiency) {
+      state.efficiencyTracking.best1hPower = avgPower;
+      state.efficiencyTracking.best1hHashrate = avgHashrate;
+      state.efficiencyTracking.best1hEfficiency = avgEfficiency;
+      state.efficiencyTracking.best1hTimestamp = now;
+    }
+
     minerControlState[minerIp] = {
       ...state,
-      measuredEfficiency: power / hashrate, // J/TH (watts per TH/s)
       measuredPower: power,
       measuredHashrate: hashrate,
-      lastEfficiencyUpdate: new Date()
+      measuredEfficiency: currentEfficiency,
+      measuredAvgPower: avgPower,
+      measuredAvgHashrate: avgHashrate,
+      measuredAvgEfficiency: avgEfficiency,
+      lastEfficiencyUpdate: now
     };
   }
 
@@ -543,19 +589,16 @@ async function checkSCOPThresholds(minerIp, stats, minerConfig) {
     lastSCOPCheck: new Date()
   };
 
-  // Calculate projected SCOP for when miner would be running
-  // Priority: 1) Custom override, 2) Last measured values, 3) null
+  // Calculate projected SCOP using ONLY the manual override
+  // Measured efficiency is tracked separately for comparison only
   let projectedPower, projectedHashrate, projectedSource;
 
   if (efficiencyOverride?.power && efficiencyOverride?.hashrate) {
     projectedPower = efficiencyOverride.power;
     projectedHashrate = efficiencyOverride.hashrate;
     projectedSource = 'override';
-  } else if (minerControlState[minerIp]?.measuredPower && minerControlState[minerIp]?.measuredHashrate) {
-    projectedPower = minerControlState[minerIp].measuredPower;
-    projectedHashrate = minerControlState[minerIp].measuredHashrate;
-    projectedSource = 'measured';
   } else {
+    // No override configured - auto-control cannot function
     projectedPower = null;
     projectedHashrate = null;
     projectedSource = 'none';
@@ -576,7 +619,7 @@ async function checkSCOPThresholds(minerIp, stats, minerConfig) {
 
   // Determine what state the miner SHOULD be in
   const { intendedState, reason, scopUsed, scopType } = determineIntendedState(
-    scop, projectedSCOP, boardTemp, threshold, minTemp, isPaused
+    projectedSCOP, boardTemp, threshold, minTemp
   );
 
   // Always update the intended state and reason
@@ -3595,6 +3638,32 @@ app.post('/api/miner/auto-control', async (req, res) => {
   }
 });
 
+// Reset best efficiency tracking for a miner
+app.post('/api/miner/reset-best-efficiency', async (req, res) => {
+  try {
+    const { ip } = req.body;
+
+    if (!ip) {
+      return res.status(400).json({ error: 'No miner IP provided' });
+    }
+
+    if (minerControlState[ip]?.efficiencyTracking) {
+      minerControlState[ip].efficiencyTracking.best1hPower = null;
+      minerControlState[ip].efficiencyTracking.best1hHashrate = null;
+      minerControlState[ip].efficiencyTracking.best1hEfficiency = null;
+      minerControlState[ip].efficiencyTracking.best1hTimestamp = null;
+
+      console.log(`Best efficiency tracking reset for ${ip}`);
+      res.json({ success: true, message: 'Best efficiency tracking reset' });
+    } else {
+      res.json({ success: true, message: 'No efficiency tracking found' });
+    }
+  } catch (err) {
+    console.error('API reset-best-efficiency error:', err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // ============================================================================
 // API Terminal - Execute custom API commands for debugging
 // ============================================================================
@@ -4159,9 +4228,18 @@ async function pollMiners() {
             projectedSource: controlState.projectedSource || null,
             measuredPower: controlState.measuredPower || null,
             measuredHashrate: controlState.measuredHashrate || null,
+            measuredEfficiency: controlState.measuredEfficiency || null,
+            measuredAvgPower: controlState.measuredAvgPower || null,
+            measuredAvgHashrate: controlState.measuredAvgHashrate || null,
+            measuredAvgEfficiency: controlState.measuredAvgEfficiency || null,
             projectedPower: controlState.projectedPower || null,
             projectedHashrate: controlState.projectedHashrate || null,
-            lastEfficiencyUpdate: controlState.lastEfficiencyUpdate || null
+            lastEfficiencyUpdate: controlState.lastEfficiencyUpdate || null,
+            // Best 1h efficiency tracking
+            best1hPower: controlState.efficiencyTracking?.best1hPower || null,
+            best1hHashrate: controlState.efficiencyTracking?.best1hHashrate || null,
+            best1hEfficiency: controlState.efficiencyTracking?.best1hEfficiency || null,
+            best1hTimestamp: controlState.efficiencyTracking?.best1hTimestamp || null
           }
         };
       } catch (err) {
@@ -4197,9 +4275,18 @@ async function pollMiners() {
             projectedSource: controlState.projectedSource || null,
             measuredPower: controlState.measuredPower || null,
             measuredHashrate: controlState.measuredHashrate || null,
+            measuredEfficiency: controlState.measuredEfficiency || null,
+            measuredAvgPower: controlState.measuredAvgPower || null,
+            measuredAvgHashrate: controlState.measuredAvgHashrate || null,
+            measuredAvgEfficiency: controlState.measuredAvgEfficiency || null,
             projectedPower: controlState.projectedPower || null,
             projectedHashrate: controlState.projectedHashrate || null,
-            lastEfficiencyUpdate: controlState.lastEfficiencyUpdate || null
+            lastEfficiencyUpdate: controlState.lastEfficiencyUpdate || null,
+            // Best 1h efficiency tracking
+            best1hPower: controlState.efficiencyTracking?.best1hPower || null,
+            best1hHashrate: controlState.efficiencyTracking?.best1hHashrate || null,
+            best1hEfficiency: controlState.efficiencyTracking?.best1hEfficiency || null,
+            best1hTimestamp: controlState.efficiencyTracking?.best1hTimestamp || null
           }
         };
       }
