@@ -264,12 +264,48 @@ function createAuthMetadata(token) {
 }
 
 /**
+ * Invalidate cached auth token for a miner (forces re-login on next request)
+ * @param {string} ip - Miner IP address
+ */
+function invalidateAuthToken(ip) {
+  if (minerControlState[ip]) {
+    delete minerControlState[ip].authToken;
+    delete minerControlState[ip].tokenExpiry;
+    console.log(`Invalidated auth token for ${ip}`);
+  }
+  // Also clear the gRPC client cache for this IP to force fresh connections
+  const authKey = `${ip}:auth`;
+  const actionsKey = `${ip}:actions`;
+  if (grpcClientCache[authKey]) {
+    delete grpcClientCache[authKey];
+  }
+  if (grpcClientCache[actionsKey]) {
+    delete grpcClientCache[actionsKey];
+  }
+}
+
+/**
+ * Check if error is an authentication error that should trigger re-auth
+ * @param {Error} err - The error to check
+ * @returns {boolean}
+ */
+function isAuthError(err) {
+  if (!err) return false;
+  const msg = err.message || '';
+  return msg.includes('UNAUTHENTICATED') ||
+         msg.includes('authentication') ||
+         msg.includes('token') ||
+         (err.code === 16); // gRPC UNAUTHENTICATED status code
+}
+
+/**
  * Pause mining on a Braiins OS miner via gRPC
  * @param {string} ip - Miner IP address
  * @param {object} minerConfig - Optional miner config
+ * @param {boolean} isRetry - Whether this is a retry after re-authentication
  * @returns {Promise<{success: boolean, wasAlreadyPaused: boolean}>}
  */
-async function pauseMining(ip, minerConfig = {}) {
+async function pauseMining(ip, minerConfig = {}, isRetry = false) {
   const token = await getMinerAuthToken(ip, minerConfig);
   const metadata = createAuthMetadata(token);
 
@@ -279,9 +315,21 @@ async function pauseMining(ip, minerConfig = {}) {
     const deadline = new Date();
     deadline.setSeconds(deadline.getSeconds() + 10);
 
-    client.PauseMining({}, metadata, { deadline }, (err, response) => {
+    client.PauseMining({}, metadata, { deadline }, async (err, response) => {
       if (err) {
-        reject(new Error(`gRPC PauseMining failed: ${err.message}`));
+        // If auth error and not already retrying, invalidate token and retry once
+        if (isAuthError(err) && !isRetry) {
+          console.log(`Auth error on PauseMining for ${ip}, invalidating token and retrying...`);
+          invalidateAuthToken(ip);
+          try {
+            const result = await pauseMining(ip, minerConfig, true);
+            resolve(result);
+          } catch (retryErr) {
+            reject(retryErr);
+          }
+        } else {
+          reject(new Error(`gRPC PauseMining failed: ${err.code} ${err.message}`));
+        }
       } else {
         const wasAlreadyPaused = response.already_paused || false;
         minerControlState[ip] = { ...minerControlState[ip], isPaused: true };
@@ -296,9 +344,10 @@ async function pauseMining(ip, minerConfig = {}) {
  * Resume mining on a Braiins OS miner via gRPC
  * @param {string} ip - Miner IP address
  * @param {object} minerConfig - Optional miner config
+ * @param {boolean} isRetry - Whether this is a retry after re-authentication
  * @returns {Promise<{success: boolean, wasAlreadyMining: boolean}>}
  */
-async function resumeMining(ip, minerConfig = {}) {
+async function resumeMining(ip, minerConfig = {}, isRetry = false) {
   const token = await getMinerAuthToken(ip, minerConfig);
   const metadata = createAuthMetadata(token);
 
@@ -308,9 +357,21 @@ async function resumeMining(ip, minerConfig = {}) {
     const deadline = new Date();
     deadline.setSeconds(deadline.getSeconds() + 10);
 
-    client.ResumeMining({}, metadata, { deadline }, (err, response) => {
+    client.ResumeMining({}, metadata, { deadline }, async (err, response) => {
       if (err) {
-        reject(new Error(`gRPC ResumeMining failed: ${err.message}`));
+        // If auth error and not already retrying, invalidate token and retry once
+        if (isAuthError(err) && !isRetry) {
+          console.log(`Auth error on ResumeMining for ${ip}, invalidating token and retrying...`);
+          invalidateAuthToken(ip);
+          try {
+            const result = await resumeMining(ip, minerConfig, true);
+            resolve(result);
+          } catch (retryErr) {
+            reject(retryErr);
+          }
+        } else {
+          reject(new Error(`gRPC ResumeMining failed: ${err.code} ${err.message}`));
+        }
       } else {
         const wasAlreadyMining = response.already_mining || false;
         minerControlState[ip] = { ...minerControlState[ip], isPaused: false };
