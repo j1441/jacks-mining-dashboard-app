@@ -4551,6 +4551,61 @@ app.get('/api/history/settings', async (req, res) => {
   }
 });
 
+// Debug endpoint to diagnose history issues
+app.get('/api/history/debug', async (req, res) => {
+  try {
+    const result = {
+      dataDir: DATA_DIR,
+      historyFile: HISTORY_FILE,
+      fileExists: false,
+      fileSize: null,
+      fileContent: null,
+      parseError: null,
+      loadedHistory: null
+    };
+
+    // Check if file exists and get its size
+    try {
+      const stats = await fs.stat(HISTORY_FILE);
+      result.fileExists = true;
+      result.fileSize = stats.size;
+    } catch (statErr) {
+      result.fileExists = false;
+      result.statError = statErr.message;
+    }
+
+    // Try to read raw file content (first 1000 chars)
+    if (result.fileExists) {
+      try {
+        const rawContent = await fs.readFile(HISTORY_FILE, 'utf8');
+        result.fileContent = rawContent.substring(0, 1000) + (rawContent.length > 1000 ? '...[truncated]' : '');
+        result.fullLength = rawContent.length;
+      } catch (readErr) {
+        result.readError = readErr.message;
+      }
+    }
+
+    // Try to load history through the normal function
+    try {
+      const history = await loadHistory();
+      result.loadedHistory = {
+        version: history.version,
+        hourlySnapshotsCount: history.hourlySnapshots?.length || 0,
+        dailyAveragesCount: history.dailyAverages?.length || 0,
+        isHourlyArray: Array.isArray(history.hourlySnapshots),
+        isDailyArray: Array.isArray(history.dailyAverages)
+      };
+    } catch (loadErr) {
+      result.loadError = loadErr.message;
+      result.loadStack = loadErr.stack;
+    }
+
+    res.json(result);
+  } catch (err) {
+    res.status(500).json({ error: err.message, stack: err.stack });
+  }
+});
+
 // ============================================================================
 // Background Miner Polling
 // ============================================================================
