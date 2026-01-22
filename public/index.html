@@ -464,14 +464,34 @@
         }
 
         // Network Stats Card
-        function NetworkCard({ network }) {
+        function NetworkCard({ network, btcPrice }) {
             if (!network?.hashrate) return null;
-            
+
             const difficultyT = network.difficulty ? (network.difficulty / 1e12).toFixed(2) : 'N/A';
-            
+
             return (
                 <div className="stat-card">
                     <h2 style={{ fontSize: '1.25rem', fontWeight: 'bold', marginBottom: '1rem', marginTop: 0 }}>🌐 Bitcoin Nettverk</h2>
+
+                    {/* BTC Price - prominent display */}
+                    {btcPrice?.nok && (
+                        <div style={{
+                            marginBottom: '1rem',
+                            padding: '1rem',
+                            background: 'rgba(247, 147, 26, 0.1)',
+                            borderRadius: '0.5rem',
+                            border: '1px solid rgba(247, 147, 26, 0.3)'
+                        }}>
+                            <div style={{ color: '#9ca3af', fontSize: '0.75rem', marginBottom: '0.25rem' }}>₿ Bitcoin Pris</div>
+                            <div style={{ fontSize: '1.5rem', fontWeight: 'bold', color: '#f7931a' }}>
+                                {btcPrice.nok?.toLocaleString()} NOK
+                            </div>
+                            <div style={{ fontSize: '0.75rem', color: '#6b7280' }}>
+                                ${btcPrice.usd?.toLocaleString()} USD
+                            </div>
+                        </div>
+                    )}
+
                     <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1rem' }}>
                         <div>
                             <div style={{ color: '#9ca3af', fontSize: '0.75rem' }}>Hashrate</div>
@@ -3530,7 +3550,7 @@
                                 <div className="grid grid-cols-1 md-grid-cols-3" style={{ marginBottom: '1.5rem' }}>
                                     <ElectricityCard electricity={globalData.electricity} />
                                     <BTCPriceCard btcPrice={globalData.btcPrice} currency={currency} />
-                                    <NetworkCard network={globalData.network} />
+                                    <NetworkCard network={globalData.network} btcPrice={globalData.btcPrice} />
                                 </div>
 
                                 {/* 24-Hour Price Graph */}
