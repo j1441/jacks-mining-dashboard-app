@@ -4893,7 +4893,13 @@ async function start() {
         const response = {
           miners: minerStatsCache.miners,
           electricity: electricityPriceCache,
-          btcPrice: btcPriceCache,
+          btcPrice: {
+            usd: btcPriceCache.priceUSD,
+            nok: btcPriceCache.priceNOK,
+            eur: btcPriceCache.priceEUR,
+            sek: btcPriceCache.priceSEK,
+            updatedAt: btcPriceCache.fetchedAt
+          },
           network: networkStatsCache,
           alerts: minerStatsCache.alerts,
           alertHistory: alertHistory.slice(-20)
@@ -4906,7 +4912,13 @@ async function start() {
           error: err.message,
           miners: [],
           electricity: electricityPriceCache,
-          btcPrice: btcPriceCache,
+          btcPrice: {
+            usd: btcPriceCache.priceUSD,
+            nok: btcPriceCache.priceNOK,
+            eur: btcPriceCache.priceEUR,
+            sek: btcPriceCache.priceSEK,
+            updatedAt: btcPriceCache.fetchedAt
+          },
           network: networkStatsCache
         }));
       }
