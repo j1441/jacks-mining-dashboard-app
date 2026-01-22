@@ -1262,16 +1262,26 @@ function httpsGet(url) {
     const protocol = url.startsWith('https') ? https : http;
     const request = protocol.get(url, (res) => {
       let data = '';
+
+      // Check for HTTP error status codes
+      if (res.statusCode < 200 || res.statusCode >= 300) {
+        res.on('data', chunk => data += chunk);
+        res.on('end', () => {
+          reject(new Error(`HTTP ${res.statusCode}: ${data.slice(0, 200)}`));
+        });
+        return;
+      }
+
       res.on('data', chunk => data += chunk);
       res.on('end', () => {
         try {
           resolve(JSON.parse(data));
         } catch (err) {
-          resolve(data);
+          reject(new Error(`Invalid JSON response: ${data.slice(0, 200)}`));
         }
       });
     });
-    
+
     request.on('error', reject);
     request.setTimeout(10000, () => {
       request.destroy();
@@ -2283,7 +2293,7 @@ async function fetchBTCPrice() {
   try {
     const url = 'https://api.coingecko.com/api/v3/simple/price?ids=bitcoin&vs_currencies=usd,nok,eur,sek';
     const data = await httpsGet(url);
-    
+
     if (data.bitcoin) {
       btcPriceCache = {
         priceUSD: data.bitcoin.usd,
@@ -2292,10 +2302,12 @@ async function fetchBTCPrice() {
         priceSEK: data.bitcoin.sek,
         fetchedAt: new Date().toISOString()
       };
-      
+
       console.log(`BTC price updated: $${btcPriceCache.priceUSD.toLocaleString()} / ${btcPriceCache.priceNOK.toLocaleString()} NOK`);
+    } else {
+      console.error('BTC price API response missing bitcoin data:', JSON.stringify(data).slice(0, 200));
     }
-    
+
     return btcPriceCache;
   } catch (err) {
     console.error('Failed to fetch BTC price:', err.message);
