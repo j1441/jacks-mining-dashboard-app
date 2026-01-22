@@ -1260,7 +1260,16 @@ async function ensureDataDir() {
 function httpsGet(url) {
   return new Promise((resolve, reject) => {
     const protocol = url.startsWith('https') ? https : http;
-    const request = protocol.get(url, (res) => {
+    const parsedUrl = new URL(url);
+    const options = {
+      hostname: parsedUrl.hostname,
+      path: parsedUrl.pathname + parsedUrl.search,
+      headers: {
+        'User-Agent': 'MiningDashboard/1.0'
+      }
+    };
+
+    const request = protocol.get(options, (res) => {
       let data = '';
 
       // Check for HTTP error status codes
