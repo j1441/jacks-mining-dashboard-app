@@ -488,15 +488,18 @@ function determineIntendedState(projectedSCOP, boardTemp, threshold, minTemp) {
  * Called periodically during miner polling
  */
 async function checkSCOPThresholds(minerIp, stats, minerConfig) {
+  // Determine actual miner state from hashrate (more reliable than stored state)
+  const hashrate = stats.hashrate || 0;
+  const actuallyMining = hashrate > 0.1; // More than 0.1 TH/s means mining
+  const actualState = actuallyMining ? 'mining' : 'paused';
+
   if (!minerConfig.autoControl?.enabled) {
-    // Clear intended state if auto-control is disabled
-    if (minerControlState[minerIp]?.intendedState) {
-      minerControlState[minerIp] = {
-        ...minerControlState[minerIp],
-        intendedState: null,
-        stateReason: null
-      };
-    }
+    // For manual control, intended state matches actual state (user controls it)
+    minerControlState[minerIp] = {
+      ...minerControlState[minerIp],
+      intendedState: actualState,
+      stateReason: 'Manual control - state set by user'
+    };
     return;
   }
 
@@ -519,11 +522,7 @@ async function checkSCOPThresholds(minerIp, stats, minerConfig) {
   const efficiencyOverride = minerConfig.autoControl.efficiencyOverride; // { power: watts, hashrate: TH/s }
 
   const state = minerControlState[minerIp] || {};
-
-  // Determine actual miner state from hashrate (more reliable than stored state)
-  const hashrate = stats.hashrate || 0;
   const power = stats.power || 0;
-  const actuallyMining = hashrate > 0.1; // More than 0.1 TH/s means mining
   const isPaused = !actuallyMining;
 
   // If miner is actively mining, update measured efficiency tracking
@@ -629,7 +628,6 @@ async function checkSCOPThresholds(minerIp, stats, minerConfig) {
   minerControlState[minerIp].scopType = scopType;
 
   // Check if actual state matches intended state
-  const actualState = isPaused ? 'paused' : 'mining';
   const stateMatches = actualState === intendedState;
 
   console.log(`[SCOP Auto-Control] ${minerIp}: measured SCOP=${scop?.toFixed(2) || 'N/A'}, projected SCOP=${projectedSCOP?.toFixed(2) || 'N/A'} (${projectedSource})`);
