@@ -97,9 +97,23 @@ let minerControlState = {};
 //     measuredEfficiency: number,  // Last measured J/TH when mining
 //     measuredPower: number,       // Last measured power in watts when mining
 //     measuredHashrate: number,    // Last measured hashrate in TH/s when mining
-//     lastEfficiencyUpdate: Date   // When efficiency was last measured
+//     lastEfficiencyUpdate: Date,  // When efficiency was last measured
+//     // Auto mining control state
+//     autoMiningControlState: {
+//       lastCheck: Date,
+//       lastAdjustment: Date,
+//       lastAdjustmentType: string,
+//       currentTargetPower: number,
+//       adjustmentReason: string,
+//       readings: object,
+//       violations: object
+//     }
 //   }
 // }
+
+// Auto mining control logs buffer (in-memory, per miner)
+let autoControlLogs = {}; // { [ip]: LogEntry[] }
+const MAX_AUTO_CONTROL_LOGS = 100;
 
 // ============================================================================
 // Braiins OS gRPC API Functions (for miner pause/resume control)
@@ -671,6 +685,352 @@ async function checkSCOPThresholds(minerIp, stats, minerConfig) {
     minerControlState[minerIp].controlAttempts = 0;
     minerControlState[minerIp].lastSyncError = null;
   }
+}
+
+// ============================================================================
+// Auto Mining Control Functions (Comprehensive Hardware Monitoring)
+// ============================================================================
+
+/**
+ * Get default threshold values for auto mining control
+ */
+function getDefaultAutoMiningThresholds() {
+  return {
+    maxChipTemp: 95,       // Pause if exceeded (critical)
+    maxBoardTemp: 75,      // Power down if exceeded
+    minBoardTemp: 20,      // Override SCOP for heating
+    maxFanSpeed: 6000,     // Power down if exceeded
+    maxPower: 3500,        // Max watts
+    minPower: 1500,        // Min watts floor
+    minHashrate: 100,      // Alert if below (TH/s)
+    minActiveBoards: 3     // Alert if below
+  };
+}
+
+/**
+ * Get default behavior values for auto mining control
+ */
+function getDefaultAutoMiningBehavior() {
+  return {
+    powerStepDown: 250,        // Watts to reduce per adjustment
+    powerStepUp: 100,          // Watts to increase per adjustment
+    cooldownSeconds: 60,       // Minimum seconds between adjustments
+    recoveryDelaySeconds: 300  // Delay before increasing power after reduction
+  };
+}
+
+/**
+ * Log an auto control event to the buffer
+ */
+function logAutoControlEvent(minerIp, event) {
+  if (!autoControlLogs[minerIp]) {
+    autoControlLogs[minerIp] = [];
+  }
+
+  const logEntry = {
+    timestamp: new Date().toISOString(),
+    ...event
+  };
+
+  // Add to beginning (newest first)
+  autoControlLogs[minerIp].unshift(logEntry);
+
+  // Trim to max entries
+  if (autoControlLogs[minerIp].length > MAX_AUTO_CONTROL_LOGS) {
+    autoControlLogs[minerIp] = autoControlLogs[minerIp].slice(0, MAX_AUTO_CONTROL_LOGS);
+  }
+
+  // Console log for debugging
+  const prefix = `[AutoMiningControl ${minerIp}]`;
+  if (event.severity === 'critical') {
+    console.error(`${prefix} ${event.message}`);
+  } else if (event.severity === 'warning') {
+    console.warn(`${prefix} ${event.message}`);
+  } else {
+    console.log(`${prefix} ${event.message}`);
+  }
+}
+
+/**
+ * Gather current readings from miner stats
+ */
+function gatherMinerReadings(stats) {
+  const boardTemps = stats.boards?.map(b => b.temp).filter(t => t > 0) || [];
+  const chipTemps = stats.boards?.map(b => b.chipTemp).filter(t => t > 0) || [];
+  const fanSpeeds = [
+    stats.fans?.speed1,
+    stats.fans?.speed2,
+    stats.fans?.speed3,
+    stats.fans?.speed4
+  ].filter(s => s > 0);
+
+  // Count active boards (has hashrate or reasonable temp)
+  const activeBoards = stats.boards?.filter(b =>
+    (b.hashrate && b.hashrate > 0) || (b.temp && b.temp > 20)
+  ).length || 0;
+
+  const maxChipTemp = chipTemps.length > 0 ? Math.max(...chipTemps) : stats.temperature;
+  const avgBoardTemp = boardTemps.length > 0
+    ? boardTemps.reduce((a, b) => a + b, 0) / boardTemps.length
+    : null;
+  const maxBoardTemp = boardTemps.length > 0 ? Math.max(...boardTemps) : null;
+  const avgFanSpeed = fanSpeeds.length > 0
+    ? Math.round(fanSpeeds.reduce((a, b) => a + b, 0) / fanSpeeds.length)
+    : null;
+  const maxFanSpeed = fanSpeeds.length > 0 ? Math.max(...fanSpeeds) : null;
+
+  return {
+    chipTemp: maxChipTemp || 0,
+    boardTemps,
+    avgBoardTemp,
+    maxBoardTemp,
+    fanSpeeds,
+    avgFanSpeed,
+    maxFanSpeed,
+    hashrate: stats.hashrate1m || stats.hashrate || 0,
+    power: stats.powerDraw || 0,
+    powerLimit: stats.powerLimit || stats.powerDraw || 0,
+    activeBoards,
+    totalBoards: stats.boards?.length || 0,
+    isPaused: (stats.hashrate || 0) < 0.1
+  };
+}
+
+/**
+ * Check for threshold violations
+ */
+function checkMiningViolations(readings, thresholds) {
+  return {
+    chipTempCritical: readings.chipTemp > thresholds.maxChipTemp,
+    boardTempHigh: readings.maxBoardTemp !== null && readings.maxBoardTemp > thresholds.maxBoardTemp,
+    boardTempLow: readings.avgBoardTemp !== null && readings.avgBoardTemp < thresholds.minBoardTemp,
+    fanSpeedHigh: readings.maxFanSpeed !== null && readings.maxFanSpeed > thresholds.maxFanSpeed,
+    powerHigh: readings.power > thresholds.maxPower,
+    hashrateLow: readings.hashrate < thresholds.minHashrate && !readings.isPaused,
+    boardsLow: readings.activeBoards < thresholds.minActiveBoards,
+
+    // Severity flags
+    hasCritical: readings.chipTemp > thresholds.maxChipTemp,
+    hasWarning: (
+      (readings.maxBoardTemp !== null && readings.maxBoardTemp > thresholds.maxBoardTemp) ||
+      (readings.maxFanSpeed !== null && readings.maxFanSpeed > thresholds.maxFanSpeed)
+    )
+  };
+}
+
+/**
+ * Determine what action to take based on readings and violations
+ */
+function determineMiningAction(readings, violations, thresholds, behavior, state) {
+  const now = Date.now();
+  const lastAdjustment = state?.lastAdjustment ? new Date(state.lastAdjustment).getTime() : 0;
+  const timeSinceAdjustment = (now - lastAdjustment) / 1000;
+
+  // Cooldown check (except for critical situations)
+  if (timeSinceAdjustment < behavior.cooldownSeconds && !violations.hasCritical) {
+    return null;
+  }
+
+  // Priority 1: Critical chip temperature - PAUSE IMMEDIATELY
+  if (violations.chipTempCritical) {
+    return {
+      type: 'PAUSE',
+      reason: `CRITICAL: Chip temp ${readings.chipTemp}°C exceeds max ${thresholds.maxChipTemp}°C`,
+      severity: 'critical'
+    };
+  }
+
+  // Priority 2: Board temp low (heating needed) - RESUME if paused, increase power
+  if (violations.boardTempLow && readings.isPaused) {
+    return {
+      type: 'RESUME',
+      reason: `Heating needed: Board temp ${readings.avgBoardTemp?.toFixed(1)}°C below min ${thresholds.minBoardTemp}°C`,
+      severity: 'info'
+    };
+  }
+
+  if (violations.boardTempLow && !readings.isPaused && readings.powerLimit < thresholds.maxPower) {
+    return {
+      type: 'POWER_UP',
+      targetPower: Math.min(readings.powerLimit + behavior.powerStepUp, thresholds.maxPower),
+      reason: `Heating needed: Board temp ${readings.avgBoardTemp?.toFixed(1)}°C below min ${thresholds.minBoardTemp}°C`,
+      severity: 'info'
+    };
+  }
+
+  // Priority 3: High board temp or high fan speed - reduce power
+  if ((violations.boardTempHigh || violations.fanSpeedHigh) && !readings.isPaused) {
+    const newPower = Math.max(
+      readings.powerLimit - behavior.powerStepDown,
+      thresholds.minPower
+    );
+
+    if (newPower < readings.powerLimit) {
+      const reasons = [];
+      if (violations.boardTempHigh) {
+        reasons.push(`Board temp ${readings.maxBoardTemp}°C > max ${thresholds.maxBoardTemp}°C`);
+      }
+      if (violations.fanSpeedHigh) {
+        reasons.push(`Fan speed ${readings.maxFanSpeed} RPM > max ${thresholds.maxFanSpeed} RPM`);
+      }
+
+      return {
+        type: 'POWER_DOWN',
+        targetPower: newPower,
+        reason: `Thermal protection: ${reasons.join(', ')}`,
+        severity: 'warning'
+      };
+    }
+  }
+
+  // Priority 4: Recovery - increase power if stable for a while
+  if (timeSinceAdjustment > behavior.recoveryDelaySeconds &&
+      !violations.hasWarning &&
+      !violations.hasCritical &&
+      readings.powerLimit < thresholds.maxPower &&
+      state?.lastAdjustmentType === 'POWER_DOWN') {
+
+    return {
+      type: 'POWER_UP',
+      targetPower: Math.min(readings.powerLimit + behavior.powerStepUp, thresholds.maxPower),
+      reason: `Recovery: Stable temps for ${Math.round(timeSinceAdjustment)}s, increasing power`,
+      severity: 'info'
+    };
+  }
+
+  return null;
+}
+
+/**
+ * Execute a control action on the miner
+ */
+async function executeMiningControlAction(minerIp, action, minerConfig, readings) {
+  const startTime = Date.now();
+
+  try {
+    switch (action.type) {
+      case 'PAUSE':
+        logAutoControlEvent(minerIp, {
+          type: 'ADJUSTMENT',
+          severity: action.severity,
+          message: `PAUSING MINER: ${action.reason}`,
+          details: { action: 'pause', readings }
+        });
+        await pauseMining(minerIp, minerConfig);
+        break;
+
+      case 'RESUME':
+        logAutoControlEvent(minerIp, {
+          type: 'ADJUSTMENT',
+          severity: action.severity,
+          message: `RESUMING MINER: ${action.reason}`,
+          details: { action: 'resume', readings }
+        });
+        await resumeMining(minerIp, minerConfig);
+        break;
+
+      case 'POWER_DOWN':
+      case 'POWER_UP':
+        const arrow = action.type === 'POWER_DOWN' ? '↓' : '↑';
+        logAutoControlEvent(minerIp, {
+          type: 'ADJUSTMENT',
+          severity: action.severity,
+          message: `POWER ${arrow}: ${readings.powerLimit}W -> ${action.targetPower}W - ${action.reason}`,
+          details: {
+            action: 'power_adjust',
+            direction: action.type,
+            oldPower: readings.powerLimit,
+            newPower: action.targetPower,
+            readings
+          }
+        });
+        await sendCGMinerCommand(minerIp, {
+          command: 'ascset',
+          parameter: `0,power,${action.targetPower}`
+        });
+        break;
+    }
+
+    const duration = Date.now() - startTime;
+    logAutoControlEvent(minerIp, {
+      type: 'ADJUSTMENT',
+      severity: 'info',
+      message: `Action completed in ${duration}ms`,
+      details: { action: action.type, duration, success: true }
+    });
+
+    return { success: true, duration };
+
+  } catch (err) {
+    logAutoControlEvent(minerIp, {
+      type: 'ERROR',
+      severity: 'critical',
+      message: `Action failed: ${err.message}`,
+      details: { action: action.type, error: err.message }
+    });
+    return { success: false, error: err.message };
+  }
+}
+
+/**
+ * Main auto mining control check - called during each poll cycle
+ */
+async function checkAutoMiningControl(minerIp, stats, minerConfig) {
+  const config = minerConfig.autoMiningControl;
+  if (!config?.enabled) return;
+
+  const thresholds = { ...getDefaultAutoMiningThresholds(), ...config.thresholds };
+  const behavior = { ...getDefaultAutoMiningBehavior(), ...config.behavior };
+
+  // Initialize state if needed
+  if (!minerControlState[minerIp]) {
+    minerControlState[minerIp] = {};
+  }
+  const state = minerControlState[minerIp].autoMiningControlState || {};
+
+  // Step 1: Gather current readings
+  const readings = gatherMinerReadings(stats);
+
+  // Step 2: Check violations
+  const violations = checkMiningViolations(readings, thresholds);
+
+  // Step 3: Log current state check
+  const tempInfo = `Chip ${readings.chipTemp}°C`;
+  const boardInfo = readings.avgBoardTemp !== null ? `, Board ${readings.avgBoardTemp.toFixed(1)}°C` : '';
+  const fanInfo = readings.avgFanSpeed !== null ? `, Fan ${readings.avgFanSpeed} RPM` : '';
+  const powerInfo = `, Power ${readings.power}W`;
+  const hashrateInfo = `, ${readings.hashrate.toFixed(1)} TH/s`;
+
+  logAutoControlEvent(minerIp, {
+    type: 'CHECK',
+    severity: violations.hasCritical ? 'critical' : violations.hasWarning ? 'warning' : 'info',
+    message: `State check: ${tempInfo}${boardInfo}${fanInfo}${powerInfo}${hashrateInfo}`,
+    details: { readings, thresholds, violations }
+  });
+
+  // Step 4: Determine and execute action
+  const action = determineMiningAction(readings, violations, thresholds, behavior, state);
+
+  if (action) {
+    await executeMiningControlAction(minerIp, action, minerConfig, readings);
+
+    // Update state after action
+    minerControlState[minerIp].autoMiningControlState = {
+      ...state,
+      lastAdjustment: new Date().toISOString(),
+      lastAdjustmentType: action.type,
+      currentTargetPower: action.targetPower || readings.powerLimit,
+      adjustmentReason: action.reason
+    };
+  }
+
+  // Step 5: Update state with current readings
+  minerControlState[minerIp].autoMiningControlState = {
+    ...minerControlState[minerIp].autoMiningControlState,
+    lastCheck: new Date().toISOString(),
+    readings,
+    violations
+  };
 }
 
 // ============================================================================
@@ -3927,6 +4287,74 @@ app.post('/api/miner/auto-control', async (req, res) => {
   }
 });
 
+// Update auto mining control settings (comprehensive hardware monitoring)
+app.post('/api/miner/auto-mining-control', async (req, res) => {
+  try {
+    const { ip, enabled, thresholds, behavior } = req.body;
+
+    if (!ip) {
+      return res.status(400).json({ error: 'No miner IP provided' });
+    }
+
+    const config = await loadConfig();
+    const miner = config.miners.find(m => m.ip === ip);
+
+    if (!miner) {
+      return res.status(404).json({ error: 'Miner not found' });
+    }
+
+    // Initialize or update autoMiningControl settings
+    miner.autoMiningControl = {
+      enabled: enabled !== undefined ? enabled : (miner.autoMiningControl?.enabled || false),
+      thresholds: {
+        ...(miner.autoMiningControl?.thresholds || getDefaultAutoMiningThresholds()),
+        ...thresholds
+      },
+      behavior: {
+        ...(miner.autoMiningControl?.behavior || getDefaultAutoMiningBehavior()),
+        ...behavior
+      }
+    };
+
+    await saveConfig(config);
+
+    console.log(`Auto mining control settings updated for ${ip}:`, miner.autoMiningControl);
+    res.json({ success: true, autoMiningControl: miner.autoMiningControl });
+  } catch (err) {
+    console.error('API auto-mining-control error:', err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Get auto-control logs for a miner
+app.get('/api/miner/auto-control/logs/:ip', async (req, res) => {
+  try {
+    const ip = req.params.ip;
+    const limit = parseInt(req.query.limit) || 50;
+    const logs = (autoControlLogs[ip] || []).slice(0, limit);
+    res.json({ logs });
+  } catch (err) {
+    console.error('API auto-control logs error:', err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Clear auto-control logs for a miner
+app.post('/api/miner/auto-control/clear-logs', async (req, res) => {
+  try {
+    const { ip } = req.body;
+    if (!ip) {
+      return res.status(400).json({ error: 'No miner IP provided' });
+    }
+    autoControlLogs[ip] = [];
+    console.log(`Auto-control logs cleared for ${ip}`);
+    res.json({ success: true });
+  } catch (err) {
+    console.error('API clear-logs error:', err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // Reset best efficiency tracking for a miner
 app.post('/api/miner/reset-best-efficiency', async (req, res) => {
   try {
@@ -4683,6 +5111,11 @@ async function pollMiners() {
           await checkSCOPThresholds(miner.ip, stats, miner);
         }
 
+        // Check auto mining control (comprehensive hardware monitoring) if enabled
+        if (miner.autoMiningControl?.enabled) {
+          await checkAutoMiningControl(miner.ip, stats, miner);
+        }
+
         // Get current control state with enhanced details
         const controlState = minerControlState[miner.ip] || {};
 
@@ -4692,6 +5125,9 @@ async function pollMiners() {
           minerName: miner.name,
           powerProfile: miner.powerProfile,
           autoControl: miner.autoControl || { enabled: false },
+          autoMiningControl: miner.autoMiningControl || { enabled: false },
+          autoMiningControlState: controlState.autoMiningControlState || null,
+          autoControlLogs: (autoControlLogs[miner.ip] || []).slice(0, 20),
           isPaused: controlState.isPaused || false,
           // Enhanced auto-control state
           autoControlState: {
@@ -4739,6 +5175,9 @@ async function pollMiners() {
           error: err.message,
           powerProfile: miner.powerProfile,
           autoControl: miner.autoControl || { enabled: false },
+          autoMiningControl: miner.autoMiningControl || { enabled: false },
+          autoMiningControlState: controlState.autoMiningControlState || null,
+          autoControlLogs: (autoControlLogs[miner.ip] || []).slice(0, 20),
           isPaused: controlState.isPaused || false,
           // Enhanced auto-control state
           autoControlState: {

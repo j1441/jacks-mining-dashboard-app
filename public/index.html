@@ -1240,6 +1240,493 @@
             );
         }
 
+        // ============================================================================
+        // Auto Mining Control Components (Comprehensive Hardware Monitoring)
+        // ============================================================================
+
+        // Single reading display with threshold comparison
+        function ReadingDisplay({ label, value, threshold, isViolation, unit = '' }) {
+            return (
+                <div style={{
+                    padding: '0.5rem',
+                    backgroundColor: isViolation ? 'rgba(239, 68, 68, 0.2)' : 'rgba(255, 255, 255, 0.05)',
+                    borderRadius: '0.375rem',
+                    border: isViolation ? '1px solid rgba(239, 68, 68, 0.4)' : '1px solid transparent'
+                }}>
+                    <div style={{ color: '#9ca3af', fontSize: '0.625rem', marginBottom: '0.25rem' }}>{label}</div>
+                    <div style={{
+                        fontWeight: '600',
+                        fontSize: '0.875rem',
+                        color: isViolation ? '#f87171' : '#4ade80'
+                    }}>
+                        {value}{unit}
+                    </div>
+                    <div style={{ color: '#6b7280', fontSize: '0.5rem', marginTop: '0.125rem' }}>
+                        Limit: {threshold}
+                    </div>
+                </div>
+            );
+        }
+
+        // Settings input component
+        function SettingInput({ label, value, onChange, unit = '', min, max, step = 1 }) {
+            return (
+                <div style={{ marginBottom: '0.5rem' }}>
+                    <label style={{ fontSize: '0.625rem', color: '#9ca3af', display: 'block', marginBottom: '0.25rem' }}>
+                        {label} {unit && `(${unit})`}
+                    </label>
+                    <input
+                        type="number"
+                        value={value || ''}
+                        onChange={(e) => onChange(parseFloat(e.target.value) || 0)}
+                        min={min}
+                        max={max}
+                        step={step}
+                        style={{
+                            width: '100%',
+                            padding: '0.375rem 0.5rem',
+                            backgroundColor: 'rgba(255,255,255,0.1)',
+                            border: '1px solid rgba(255,255,255,0.2)',
+                            borderRadius: '0.25rem',
+                            color: 'white',
+                            fontSize: '0.75rem'
+                        }}
+                    />
+                </div>
+            );
+        }
+
+        // Auto control settings panel
+        function AutoControlSettingsPanel({ settings, onSave, isLoading }) {
+            const [isOpen, setIsOpen] = useState(false);
+            const [localSettings, setLocalSettings] = useState(settings);
+
+            useEffect(() => {
+                setLocalSettings(settings);
+            }, [settings]);
+
+            const updateThreshold = (key, value) => {
+                setLocalSettings(prev => ({
+                    ...prev,
+                    thresholds: { ...prev.thresholds, [key]: value }
+                }));
+            };
+
+            const updateBehavior = (key, value) => {
+                setLocalSettings(prev => ({
+                    ...prev,
+                    behavior: { ...prev.behavior, [key]: value }
+                }));
+            };
+
+            const handleSave = () => {
+                onSave(localSettings);
+            };
+
+            const thresholds = localSettings.thresholds || {};
+            const behavior = localSettings.behavior || {};
+
+            return (
+                <div style={{ marginTop: '0.75rem' }}>
+                    <button
+                        onClick={() => setIsOpen(!isOpen)}
+                        style={{
+                            width: '100%',
+                            padding: '0.5rem',
+                            backgroundColor: 'rgba(59, 130, 246, 0.2)',
+                            border: '1px solid rgba(59, 130, 246, 0.4)',
+                            borderRadius: isOpen ? '0.375rem 0.375rem 0 0' : '0.375rem',
+                            color: '#60a5fa',
+                            fontSize: '0.75rem',
+                            cursor: 'pointer',
+                            display: 'flex',
+                            justifyContent: 'space-between',
+                            alignItems: 'center'
+                        }}
+                    >
+                        <span>Settings</span>
+                        <span>{isOpen ? '▲' : '▼'}</span>
+                    </button>
+
+                    {isOpen && (
+                        <div style={{
+                            padding: '1rem',
+                            backgroundColor: 'rgba(0, 0, 0, 0.3)',
+                            borderRadius: '0 0 0.375rem 0.375rem',
+                            border: '1px solid rgba(59, 130, 246, 0.4)',
+                            borderTop: 'none'
+                        }}>
+                            {/* Thresholds Section */}
+                            <h5 style={{ margin: '0 0 0.75rem 0', color: '#f59e0b', fontSize: '0.75rem', fontWeight: '600' }}>
+                                Temperature Thresholds
+                            </h5>
+                            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '0.5rem', marginBottom: '1rem' }}>
+                                <SettingInput
+                                    label="Max Chip Temp"
+                                    value={thresholds.maxChipTemp}
+                                    onChange={(v) => updateThreshold('maxChipTemp', v)}
+                                    unit="°C"
+                                />
+                                <SettingInput
+                                    label="Max Board Temp"
+                                    value={thresholds.maxBoardTemp}
+                                    onChange={(v) => updateThreshold('maxBoardTemp', v)}
+                                    unit="°C"
+                                />
+                                <SettingInput
+                                    label="Min Board Temp"
+                                    value={thresholds.minBoardTemp}
+                                    onChange={(v) => updateThreshold('minBoardTemp', v)}
+                                    unit="°C"
+                                />
+                            </div>
+
+                            <h5 style={{ margin: '0 0 0.75rem 0', color: '#a78bfa', fontSize: '0.75rem', fontWeight: '600' }}>
+                                Power & Fan Limits
+                            </h5>
+                            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '0.5rem', marginBottom: '1rem' }}>
+                                <SettingInput
+                                    label="Max Power"
+                                    value={thresholds.maxPower}
+                                    onChange={(v) => updateThreshold('maxPower', v)}
+                                    unit="W"
+                                />
+                                <SettingInput
+                                    label="Min Power"
+                                    value={thresholds.minPower}
+                                    onChange={(v) => updateThreshold('minPower', v)}
+                                    unit="W"
+                                />
+                                <SettingInput
+                                    label="Max Fan Speed"
+                                    value={thresholds.maxFanSpeed}
+                                    onChange={(v) => updateThreshold('maxFanSpeed', v)}
+                                    unit="RPM"
+                                />
+                            </div>
+
+                            <h5 style={{ margin: '0 0 0.75rem 0', color: '#10b981', fontSize: '0.75rem', fontWeight: '600' }}>
+                                Control Behavior
+                            </h5>
+                            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: '0.5rem', marginBottom: '1rem' }}>
+                                <SettingInput
+                                    label="Power Step Down"
+                                    value={behavior.powerStepDown}
+                                    onChange={(v) => updateBehavior('powerStepDown', v)}
+                                    unit="W"
+                                />
+                                <SettingInput
+                                    label="Power Step Up"
+                                    value={behavior.powerStepUp}
+                                    onChange={(v) => updateBehavior('powerStepUp', v)}
+                                    unit="W"
+                                />
+                                <SettingInput
+                                    label="Cooldown"
+                                    value={behavior.cooldownSeconds}
+                                    onChange={(v) => updateBehavior('cooldownSeconds', v)}
+                                    unit="sec"
+                                />
+                                <SettingInput
+                                    label="Recovery Delay"
+                                    value={behavior.recoveryDelaySeconds}
+                                    onChange={(v) => updateBehavior('recoveryDelaySeconds', v)}
+                                    unit="sec"
+                                />
+                            </div>
+
+                            <button
+                                onClick={handleSave}
+                                disabled={isLoading}
+                                style={{
+                                    width: '100%',
+                                    padding: '0.5rem',
+                                    backgroundColor: isLoading ? '#374151' : '#2563eb',
+                                    border: 'none',
+                                    borderRadius: '0.375rem',
+                                    color: 'white',
+                                    fontWeight: '600',
+                                    fontSize: '0.75rem',
+                                    cursor: isLoading ? 'not-allowed' : 'pointer'
+                                }}
+                            >
+                                {isLoading ? 'Saving...' : 'Save Settings'}
+                            </button>
+                        </div>
+                    )}
+                </div>
+            );
+        }
+
+        // Main Auto Control Terminal Component
+        function AutoControlTerminal({ miner, onUpdateSettings, onClearLogs }) {
+            const [isExpanded, setIsExpanded] = useState(true);
+            const [isSaving, setIsSaving] = useState(false);
+            const logsRef = useRef(null);
+
+            const settings = miner.autoMiningControl || { enabled: false, thresholds: {}, behavior: {} };
+            const state = miner.autoMiningControlState || {};
+            const logs = miner.autoControlLogs || [];
+            const readings = state.readings || {};
+            const violations = state.violations || {};
+            const thresholds = settings.thresholds || {};
+
+            // Auto-scroll logs
+            useEffect(() => {
+                if (logsRef.current) {
+                    logsRef.current.scrollTop = 0; // Newest at top
+                }
+            }, [logs]);
+
+            const getSeverityColor = (severity) => ({
+                critical: '#ef4444',
+                warning: '#f59e0b',
+                info: '#60a5fa'
+            }[severity] || '#9ca3af');
+
+            const getLogTypeIcon = (type) => ({
+                CHECK: '🔍',
+                ADJUSTMENT: '⚡',
+                VIOLATION: '⚠️',
+                RECOVERY: '✅',
+                ERROR: '❌'
+            }[type] || '📋');
+
+            const handleSaveSettings = async (newSettings) => {
+                setIsSaving(true);
+                await onUpdateSettings(miner.minerIp, newSettings);
+                setIsSaving(false);
+            };
+
+            const handleClearLogs = () => {
+                onClearLogs(miner.minerIp);
+            };
+
+            const handleToggleEnabled = async () => {
+                setIsSaving(true);
+                await onUpdateSettings(miner.minerIp, {
+                    ...settings,
+                    enabled: !settings.enabled
+                });
+                setIsSaving(false);
+            };
+
+            return (
+                <div style={{
+                    marginTop: '1rem',
+                    backgroundColor: 'rgba(0, 0, 0, 0.2)',
+                    borderRadius: '0.5rem',
+                    border: settings.enabled ? '1px solid rgba(16, 185, 129, 0.3)' : '1px solid rgba(255, 255, 255, 0.1)',
+                    overflow: 'hidden'
+                }}>
+                    {/* Header */}
+                    <div
+                        onClick={() => setIsExpanded(!isExpanded)}
+                        style={{
+                            padding: '0.75rem 1rem',
+                            display: 'flex',
+                            justifyContent: 'space-between',
+                            alignItems: 'center',
+                            cursor: 'pointer',
+                            backgroundColor: 'rgba(0, 0, 0, 0.2)'
+                        }}
+                    >
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                            <span style={{ fontSize: '1rem' }}>🤖</span>
+                            <span style={{ fontWeight: '600', fontSize: '0.875rem', color: '#10b981' }}>
+                                Auto Mining Control
+                            </span>
+                            {settings.enabled && (
+                                <span style={{
+                                    fontSize: '0.625rem',
+                                    padding: '0.125rem 0.5rem',
+                                    backgroundColor: 'rgba(16, 185, 129, 0.3)',
+                                    color: '#4ade80',
+                                    borderRadius: '0.25rem',
+                                    fontWeight: '600'
+                                }}>
+                                    ACTIVE
+                                </span>
+                            )}
+                        </div>
+                        <span style={{ color: '#9ca3af' }}>{isExpanded ? '▼' : '▶'}</span>
+                    </div>
+
+                    {isExpanded && (
+                        <div style={{ padding: '1rem' }}>
+                            {/* Enable Toggle */}
+                            <div style={{ marginBottom: '1rem' }}>
+                                <label style={{
+                                    display: 'flex',
+                                    alignItems: 'center',
+                                    gap: '0.75rem',
+                                    cursor: 'pointer'
+                                }}>
+                                    <div
+                                        onClick={handleToggleEnabled}
+                                        style={{
+                                            width: '44px',
+                                            height: '24px',
+                                            backgroundColor: settings.enabled ? '#10b981' : '#374151',
+                                            borderRadius: '12px',
+                                            position: 'relative',
+                                            transition: 'background-color 0.2s',
+                                            cursor: isSaving ? 'not-allowed' : 'pointer',
+                                            opacity: isSaving ? 0.5 : 1
+                                        }}
+                                    >
+                                        <div style={{
+                                            width: '20px',
+                                            height: '20px',
+                                            backgroundColor: 'white',
+                                            borderRadius: '50%',
+                                            position: 'absolute',
+                                            top: '2px',
+                                            left: settings.enabled ? '22px' : '2px',
+                                            transition: 'left 0.2s'
+                                        }} />
+                                    </div>
+                                    <span style={{ fontSize: '0.875rem', fontWeight: '500' }}>
+                                        Enable Auto Mining Control
+                                    </span>
+                                </label>
+                                <p style={{ fontSize: '0.7rem', color: '#9ca3af', marginTop: '0.5rem', marginLeft: '3.25rem' }}>
+                                    Automatically adjusts power based on temperature and fan speed thresholds
+                                </p>
+                            </div>
+
+                            {settings.enabled && (
+                                <>
+                                    {/* Current Readings Grid */}
+                                    {readings.chipTemp !== undefined && (
+                                        <div style={{
+                                            display: 'grid',
+                                            gridTemplateColumns: 'repeat(3, 1fr)',
+                                            gap: '0.5rem',
+                                            marginBottom: '1rem'
+                                        }}>
+                                            <ReadingDisplay
+                                                label="Chip Temp"
+                                                value={readings.chipTemp || 0}
+                                                unit="°C"
+                                                threshold={`<${thresholds.maxChipTemp || 95}°C`}
+                                                isViolation={violations.chipTempCritical}
+                                            />
+                                            <ReadingDisplay
+                                                label="Board Temp"
+                                                value={readings.avgBoardTemp?.toFixed(1) || 'N/A'}
+                                                unit={readings.avgBoardTemp ? '°C' : ''}
+                                                threshold={`${thresholds.minBoardTemp || 20}-${thresholds.maxBoardTemp || 75}°C`}
+                                                isViolation={violations.boardTempHigh || violations.boardTempLow}
+                                            />
+                                            <ReadingDisplay
+                                                label="Fan Speed"
+                                                value={readings.avgFanSpeed || 'N/A'}
+                                                unit={readings.avgFanSpeed ? ' RPM' : ''}
+                                                threshold={`<${thresholds.maxFanSpeed || 6000}`}
+                                                isViolation={violations.fanSpeedHigh}
+                                            />
+                                            <ReadingDisplay
+                                                label="Power"
+                                                value={readings.power || 0}
+                                                unit="W"
+                                                threshold={`${thresholds.minPower || 1500}-${thresholds.maxPower || 3500}W`}
+                                                isViolation={violations.powerHigh}
+                                            />
+                                            <ReadingDisplay
+                                                label="Hashrate"
+                                                value={(readings.hashrate || 0).toFixed(1)}
+                                                unit=" TH/s"
+                                                threshold={`>${thresholds.minHashrate || 100}`}
+                                                isViolation={violations.hashrateLow}
+                                            />
+                                            <ReadingDisplay
+                                                label="Hashboards"
+                                                value={`${readings.activeBoards || 0}/${readings.totalBoards || 0}`}
+                                                unit=""
+                                                threshold={`>=${thresholds.minActiveBoards || 3}`}
+                                                isViolation={violations.boardsLow}
+                                            />
+                                        </div>
+                                    )}
+
+                                    {/* Terminal Log Display */}
+                                    <div style={{ marginBottom: '0.75rem' }}>
+                                        <div style={{
+                                            display: 'flex',
+                                            justifyContent: 'space-between',
+                                            alignItems: 'center',
+                                            marginBottom: '0.5rem'
+                                        }}>
+                                            <span style={{ fontSize: '0.75rem', fontWeight: '600', color: '#9ca3af' }}>
+                                                Control Log
+                                            </span>
+                                            <button
+                                                onClick={handleClearLogs}
+                                                style={{
+                                                    padding: '0.25rem 0.5rem',
+                                                    backgroundColor: 'rgba(107, 114, 128, 0.3)',
+                                                    border: '1px solid rgba(107, 114, 128, 0.5)',
+                                                    borderRadius: '0.25rem',
+                                                    color: '#9ca3af',
+                                                    fontSize: '0.625rem',
+                                                    cursor: 'pointer'
+                                                }}
+                                            >
+                                                Clear
+                                            </button>
+                                        </div>
+                                        <div
+                                            ref={logsRef}
+                                            style={{
+                                                backgroundColor: '#0d0d0d',
+                                                borderRadius: '0.375rem',
+                                                padding: '0.75rem',
+                                                height: '200px',
+                                                overflowY: 'auto',
+                                                fontFamily: 'Monaco, "Cascadia Code", "Fira Code", Consolas, monospace',
+                                                fontSize: '0.65rem',
+                                                lineHeight: '1.5'
+                                            }}
+                                        >
+                                            {logs.length === 0 ? (
+                                                <div style={{ color: '#6b7280', textAlign: 'center', paddingTop: '4rem' }}>
+                                                    Waiting for control events...
+                                                </div>
+                                            ) : (
+                                                logs.map((log, idx) => (
+                                                    <div key={idx} style={{
+                                                        marginBottom: '0.375rem',
+                                                        paddingLeft: '0.5rem',
+                                                        borderLeft: `2px solid ${getSeverityColor(log.severity)}`
+                                                    }}>
+                                                        <span style={{ color: '#6b7280' }}>
+                                                            [{new Date(log.timestamp).toLocaleTimeString()}]
+                                                        </span>
+                                                        <span style={{ marginLeft: '0.375rem' }}>{getLogTypeIcon(log.type)}</span>
+                                                        <span style={{ color: getSeverityColor(log.severity), marginLeft: '0.375rem' }}>
+                                                            {log.message}
+                                                        </span>
+                                                    </div>
+                                                ))
+                                            )}
+                                        </div>
+                                    </div>
+
+                                    {/* Settings Panel */}
+                                    <AutoControlSettingsPanel
+                                        settings={settings}
+                                        onSave={handleSaveSettings}
+                                        isLoading={isSaving}
+                                    />
+                                </>
+                            )}
+                        </div>
+                    )}
+                </div>
+            );
+        }
+
         // API Terminal Component for debugging and testing API commands
         function ApiTerminal({ miners }) {
             const [selectedMiner, setSelectedMiner] = useState(miners[0]?.minerIp || '');
@@ -1556,7 +2043,7 @@
             );
         }
 
-        function MinerCard({ miner, globalData, currency, onRemove, onSetPowerProfile, onPauseMining, onResumeMining, onUpdateAutoControl }) {
+        function MinerCard({ miner, globalData, currency, onRemove, onSetPowerProfile, onPauseMining, onResumeMining, onUpdateAutoControl, onUpdateAutoMiningControl, onClearAutoControlLogs }) {
             const [isControlling, setIsControlling] = useState(false);
             const [showAutoControl, setShowAutoControl] = useState(false);
             const [scopThreshold, setScopThreshold] = useState(miner.autoControl?.scopThreshold || 2.0);
@@ -2242,6 +2729,13 @@
                             <div style={{ fontWeight: '600', color: '#f87171' }}>{miner.rejectedShares?.toLocaleString() || 0}</div>
                         </div>
                     </div>
+
+                    {/* Auto Mining Control Terminal */}
+                    <AutoControlTerminal
+                        miner={miner}
+                        onUpdateSettings={onUpdateAutoMiningControl}
+                        onClearLogs={onClearAutoControlLogs}
+                    />
                 </div>
             );
         }
@@ -3418,6 +3912,40 @@
                 }
             };
 
+            // Update auto mining control settings (comprehensive hardware monitoring)
+            const updateAutoMiningControl = async (minerIp, settings) => {
+                try {
+                    const response = await fetch('/api/miner/auto-mining-control', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ ip: minerIp, ...settings })
+                    });
+                    const data = await response.json();
+                    if (!response.ok) {
+                        throw new Error(data.error || 'Failed to update auto mining control settings');
+                    }
+                    console.log('Auto mining control settings updated:', data);
+                    // Reload config to get updated settings
+                    loadConfig();
+                } catch (err) {
+                    setError(err.message);
+                }
+            };
+
+            // Clear auto control logs for a miner
+            const clearAutoControlLogs = async (minerIp) => {
+                try {
+                    await fetch('/api/miner/auto-control/clear-logs', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ ip: minerIp })
+                    });
+                    console.log('Auto control logs cleared for:', minerIp);
+                } catch (err) {
+                    console.error('Failed to clear auto control logs:', err);
+                }
+            };
+
             const currency = globalData?.electricity?.currency || (config.country === 'norway' ? 'NOK' : 'EUR');
             const hasMiners = miners.length > 0;
             const connectedMiners = minersStats.filter(m => !m.error).length;
@@ -3593,6 +4121,8 @@
                                                 onPauseMining={pauseMining}
                                                 onResumeMining={resumeMining}
                                                 onUpdateAutoControl={updateAutoControl}
+                                                onUpdateAutoMiningControl={updateAutoMiningControl}
+                                                onClearAutoControlLogs={clearAutoControlLogs}
                                             />
                                         ))}
                                     </div>
