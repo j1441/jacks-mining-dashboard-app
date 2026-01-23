@@ -1300,12 +1300,24 @@
         function AutoControlSettingsPanel({ settings, onSave, isLoading }) {
             const [isOpen, setIsOpen] = useState(false);
             const [localSettings, setLocalSettings] = useState(settings);
+            const [isDirty, setIsDirty] = useState(false);
 
+            // Only sync from props when panel is closed or user hasn't made changes
             useEffect(() => {
-                setLocalSettings(settings);
-            }, [settings]);
+                if (!isOpen || !isDirty) {
+                    setLocalSettings(settings);
+                }
+            }, [settings, isOpen, isDirty]);
+
+            // Reset dirty flag when panel closes
+            useEffect(() => {
+                if (!isOpen) {
+                    setIsDirty(false);
+                }
+            }, [isOpen]);
 
             const updateThreshold = (key, value) => {
+                setIsDirty(true);
                 setLocalSettings(prev => ({
                     ...prev,
                     thresholds: { ...prev.thresholds, [key]: value }
@@ -1313,6 +1325,7 @@
             };
 
             const updateBehavior = (key, value) => {
+                setIsDirty(true);
                 setLocalSettings(prev => ({
                     ...prev,
                     behavior: { ...prev.behavior, [key]: value }
@@ -1321,6 +1334,7 @@
 
             const handleSave = () => {
                 onSave(localSettings);
+                setIsDirty(false);
             };
 
             const thresholds = localSettings.thresholds || {};

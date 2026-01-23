@@ -4,7 +4,7 @@
 
 A comprehensive web-based dashboard for monitoring and controlling Bitcoin Antminer miners running Braiins OS, specifically designed for home heating applications in Norway. The app tracks mining performance, electricity costs with Norwegian pricing (including state subsidies), and efficiency metrics comparing mining heat output vs traditional heat pumps.
 
-**Version:** 1.7.0
+**Version:** 1.7.1
 **Author:** j1441
 **License:** MIT
 **Repository:** https://github.com/j1441/jacks-mining-dashboard-app
@@ -325,7 +325,8 @@ Dashboard (Main App)
 │       │       ├── Temperature Thresholds (max chip, max/min board)
 │       │       ├── Power & Fan Limits (max/min power, max fan)
 │       │       ├── Control Behavior (step sizes, cooldown, recovery)
-│       │       └── Save Settings button
+│       │       ├── Save Settings button
+│       │       └── (Form state protected from poll updates while editing)
 │       └── Remove Button
 │
 ├── API Terminal (debugging/troubleshooting)
@@ -1613,7 +1614,14 @@ Changes pushed to GitHub trigger automatic deployment to Umbrel server. Testing 
 
 ## Version History
 
-### v1.7.0 (Current)
+### v1.7.1 (Current)
+- **🛡️ Settings Form State Protection**: Fixed issue where editing settings values would reset on poll updates
+  - Settings panel now tracks "dirty" state when user modifies values
+  - Polling updates no longer overwrite unsaved user edits
+  - Dirty state automatically resets when panel is closed or settings are saved
+  - Users can now take their time editing thresholds without racing the 5-second poll interval
+
+### v1.7.0
 - **🤖 Auto Mining Control**: Comprehensive hardware-based automatic control system
   - **Real-time Monitoring**: Continuously monitors chip temp, board temp, fan speed, power, hashrate, and active hashboards
   - **Automatic Power Adjustment**: Dynamically adjusts miner power based on thermal conditions
