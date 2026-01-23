@@ -4381,6 +4381,82 @@ app.post('/api/miner/reset-best-efficiency', async (req, res) => {
   }
 });
 
+// Fetch current miner configuration settings from the miner itself
+app.get('/api/miner/config/:ip', async (req, res) => {
+  try {
+    const ip = req.params.ip;
+
+    if (!ip) {
+      return res.status(400).json({ error: 'No miner IP provided' });
+    }
+
+    const config = await loadConfig();
+    const minerConfig = config.miners?.find(m => m.ip === ip) || {};
+    const username = minerConfig.username || 'root';
+    const password = minerConfig.password || 'root';
+
+    // Authenticate with the miner
+    const token = await braiinsRestAuth(ip, username, password);
+
+    // Fetch cooling mode configuration and tuner state in parallel
+    const [coolingMode, tunerState, performanceProfiles] = await Promise.all([
+      braiinsRestFetch(ip, '/api/v1/cooling/mode', token),
+      braiinsRestFetch(ip, '/api/v1/performance/tuner-state', token),
+      braiinsRestFetch(ip, '/api/v1/performance/target-profiles', token)
+    ]);
+
+    // Extract configuration values
+    const result = {
+      success: true,
+      cooling: null,
+      power: null,
+      profiles: null
+    };
+
+    // Parse cooling mode settings
+    if (coolingMode) {
+      const mode = coolingMode.mode || coolingMode;
+      result.cooling = {
+        mode: mode.mode || (typeof mode === 'string' ? mode : 'unknown'),
+        targetTemp: mode.target_temperature ?? mode.targetTemperature ?? null,
+        hotTemp: mode.hot_temperature ?? mode.hotTemperature ?? null,
+        dangerousTemp: mode.dangerous_temperature ?? mode.dangerousTemperature ?? null,
+        minFanSpeed: mode.min_fan_speed ?? mode.minFanSpeed ?? null,
+        maxFanSpeed: mode.max_fan_speed ?? mode.maxFanSpeed ?? null,
+        fanSpeedRatio: mode.fan_speed_ratio ?? mode.fanSpeedRatio ?? null
+      };
+    }
+
+    // Parse tuner/power settings
+    if (tunerState) {
+      result.power = {
+        currentPower: tunerState.powerConsumptionW ?? tunerState.power_consumption_w ?? null,
+        powerTarget: tunerState.powerTargetW ?? tunerState.power_target_w ?? tunerState.powerTarget ?? null,
+        minPower: tunerState.minPowerTargetW ?? tunerState.min_power_target_w ?? null,
+        maxPower: tunerState.maxPowerTargetW ?? tunerState.max_power_target_w ?? null,
+        tunerRunning: tunerState.tunerRunning ?? tunerState.tuner_running ?? null,
+        tunerState: tunerState.state ?? null
+      };
+    }
+
+    // Parse available power profiles
+    if (performanceProfiles && Array.isArray(performanceProfiles)) {
+      result.profiles = performanceProfiles.map(p => ({
+        name: p.name,
+        powerTarget: p.powerTargetW ?? p.power_target_w ?? null,
+        minPower: p.minPowerTargetW ?? p.min_power_target_w ?? null,
+        maxPower: p.maxPowerTargetW ?? p.max_power_target_w ?? null
+      }));
+    }
+
+    console.log(`Fetched miner config for ${ip}:`, JSON.stringify(result, null, 2));
+    res.json(result);
+  } catch (err) {
+    console.error('API miner config error:', err);
+    res.status(500).json({ error: err.message, success: false });
+  }
+});
+
 // ============================================================================
 // API Terminal - Execute custom API commands for debugging
 // ============================================================================

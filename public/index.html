@@ -1297,10 +1297,13 @@
         }
 
         // Auto control settings panel
-        function AutoControlSettingsPanel({ settings, onSave, isLoading }) {
+        function AutoControlSettingsPanel({ settings, onSave, isLoading, minerIp }) {
             const [isOpen, setIsOpen] = useState(false);
             const [localSettings, setLocalSettings] = useState(settings);
             const [isDirty, setIsDirty] = useState(false);
+            const [isFetching, setIsFetching] = useState(false);
+            const [minerConfig, setMinerConfig] = useState(null);
+            const [fetchError, setFetchError] = useState(null);
 
             // Only sync from props when panel is closed or user hasn't made changes
             useEffect(() => {
@@ -1337,6 +1340,55 @@
                 setIsDirty(false);
             };
 
+            const fetchMinerConfig = async () => {
+                if (!minerIp) return;
+                setIsFetching(true);
+                setFetchError(null);
+                try {
+                    const response = await fetch(`/api/miner/config/${encodeURIComponent(minerIp)}`);
+                    const data = await response.json();
+                    if (data.success) {
+                        setMinerConfig(data);
+                    } else {
+                        setFetchError(data.error || 'Failed to fetch miner config');
+                    }
+                } catch (err) {
+                    setFetchError(err.message);
+                } finally {
+                    setIsFetching(false);
+                }
+            };
+
+            const applyMinerConfig = () => {
+                if (!minerConfig) return;
+                setIsDirty(true);
+                setLocalSettings(prev => {
+                    const newThresholds = { ...prev.thresholds };
+
+                    // Apply cooling settings
+                    if (minerConfig.cooling) {
+                        if (minerConfig.cooling.hotTemp != null) {
+                            newThresholds.maxBoardTemp = minerConfig.cooling.hotTemp;
+                        }
+                        if (minerConfig.cooling.dangerousTemp != null) {
+                            newThresholds.maxChipTemp = minerConfig.cooling.dangerousTemp;
+                        }
+                    }
+
+                    // Apply power settings
+                    if (minerConfig.power) {
+                        if (minerConfig.power.maxPower != null) {
+                            newThresholds.maxPower = minerConfig.power.maxPower;
+                        }
+                        if (minerConfig.power.minPower != null) {
+                            newThresholds.minPower = minerConfig.power.minPower;
+                        }
+                    }
+
+                    return { ...prev, thresholds: newThresholds };
+                });
+            };
+
             const thresholds = localSettings.thresholds || {};
             const behavior = localSettings.behavior || {};
 
@@ -1370,6 +1422,100 @@
                             border: '1px solid rgba(59, 130, 246, 0.4)',
                             borderTop: 'none'
                         }}>
+                            {/* Fetch from Miner Section */}
+                            <div style={{
+                                marginBottom: '1rem',
+                                padding: '0.75rem',
+                                backgroundColor: 'rgba(16, 185, 129, 0.1)',
+                                borderRadius: '0.375rem',
+                                border: '1px solid rgba(16, 185, 129, 0.3)'
+                            }}>
+                                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: minerConfig ? '0.75rem' : '0' }}>
+                                    <span style={{ color: '#10b981', fontSize: '0.75rem', fontWeight: '600' }}>
+                                        Miner Configuration
+                                    </span>
+                                    <button
+                                        onClick={fetchMinerConfig}
+                                        disabled={isFetching}
+                                        style={{
+                                            padding: '0.25rem 0.5rem',
+                                            backgroundColor: isFetching ? '#374151' : 'rgba(16, 185, 129, 0.3)',
+                                            border: '1px solid rgba(16, 185, 129, 0.5)',
+                                            borderRadius: '0.25rem',
+                                            color: '#10b981',
+                                            fontSize: '0.65rem',
+                                            cursor: isFetching ? 'not-allowed' : 'pointer'
+                                        }}
+                                    >
+                                        {isFetching ? 'Fetching...' : 'Fetch from Miner'}
+                                    </button>
+                                </div>
+
+                                {fetchError && (
+                                    <div style={{ color: '#ef4444', fontSize: '0.65rem', marginTop: '0.5rem' }}>
+                                        Error: {fetchError}
+                                    </div>
+                                )}
+
+                                {minerConfig && (
+                                    <div style={{ fontSize: '0.65rem' }}>
+                                        {/* Cooling Settings */}
+                                        {minerConfig.cooling && (
+                                            <div style={{ marginBottom: '0.5rem' }}>
+                                                <div style={{ color: '#9ca3af', marginBottom: '0.25rem' }}>Cooling ({minerConfig.cooling.mode || 'auto'}):</div>
+                                                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '0.25rem', color: '#d1d5db' }}>
+                                                    {minerConfig.cooling.targetTemp != null && (
+                                                        <span>Target: {minerConfig.cooling.targetTemp}°C</span>
+                                                    )}
+                                                    {minerConfig.cooling.hotTemp != null && (
+                                                        <span>Hot: {minerConfig.cooling.hotTemp}°C</span>
+                                                    )}
+                                                    {minerConfig.cooling.dangerousTemp != null && (
+                                                        <span>Dangerous: {minerConfig.cooling.dangerousTemp}°C</span>
+                                                    )}
+                                                </div>
+                                            </div>
+                                        )}
+
+                                        {/* Power Settings */}
+                                        {minerConfig.power && (
+                                            <div style={{ marginBottom: '0.5rem' }}>
+                                                <div style={{ color: '#9ca3af', marginBottom: '0.25rem' }}>Power:</div>
+                                                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '0.25rem', color: '#d1d5db' }}>
+                                                    {minerConfig.power.powerTarget != null && (
+                                                        <span>Target: {minerConfig.power.powerTarget}W</span>
+                                                    )}
+                                                    {minerConfig.power.minPower != null && (
+                                                        <span>Min: {minerConfig.power.minPower}W</span>
+                                                    )}
+                                                    {minerConfig.power.maxPower != null && (
+                                                        <span>Max: {minerConfig.power.maxPower}W</span>
+                                                    )}
+                                                </div>
+                                            </div>
+                                        )}
+
+                                        {/* Apply Button */}
+                                        <button
+                                            onClick={applyMinerConfig}
+                                            style={{
+                                                width: '100%',
+                                                marginTop: '0.5rem',
+                                                padding: '0.375rem',
+                                                backgroundColor: 'rgba(245, 158, 11, 0.3)',
+                                                border: '1px solid rgba(245, 158, 11, 0.5)',
+                                                borderRadius: '0.25rem',
+                                                color: '#f59e0b',
+                                                fontSize: '0.65rem',
+                                                cursor: 'pointer'
+                                            }}
+                                        >
+                                            Apply to Thresholds
+                                        </button>
+                                    </div>
+                                )}
+                            </div>
+
                             {/* Thresholds Section */}
                             <h5 style={{ margin: '0 0 0.75rem 0', color: '#f59e0b', fontSize: '0.75rem', fontWeight: '600' }}>
                                 Temperature Thresholds
@@ -1732,6 +1878,7 @@
                                         settings={settings}
                                         onSave={handleSaveSettings}
                                         isLoading={isSaving}
+                                        minerIp={miner.minerIp}
                                     />
                                 </>
                             )}
