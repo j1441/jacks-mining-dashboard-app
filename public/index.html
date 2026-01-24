@@ -1296,345 +1296,65 @@
             );
         }
 
-        // Auto control settings panel
-        function AutoControlSettingsPanel({ settings, onSave, isLoading, minerIp }) {
-            const [isOpen, setIsOpen] = useState(false);
-            const [localSettings, setLocalSettings] = useState(settings);
-            const [isDirty, setIsDirty] = useState(false);
-            const [isFetching, setIsFetching] = useState(false);
-            const [minerConfig, setMinerConfig] = useState(null);
-            const [fetchError, setFetchError] = useState(null);
+        // ============================================================================
+        // Unified Auto Control Panel (Replaces SCOP + Auto Mining Control)
+        // ============================================================================
 
-            // Only sync from props when panel is closed or user hasn't made changes
-            useEffect(() => {
-                if (!isOpen || !isDirty) {
-                    setLocalSettings(settings);
-                }
-            }, [settings, isOpen, isDirty]);
-
-            // Reset dirty flag when panel closes
-            useEffect(() => {
-                if (!isOpen) {
-                    setIsDirty(false);
-                }
-            }, [isOpen]);
-
-            const updateThreshold = (key, value) => {
-                setIsDirty(true);
-                setLocalSettings(prev => ({
-                    ...prev,
-                    thresholds: { ...prev.thresholds, [key]: value }
-                }));
-            };
-
-            const updateBehavior = (key, value) => {
-                setIsDirty(true);
-                setLocalSettings(prev => ({
-                    ...prev,
-                    behavior: { ...prev.behavior, [key]: value }
-                }));
-            };
-
-            const handleSave = () => {
-                onSave(localSettings);
-                setIsDirty(false);
-            };
-
-            const fetchMinerConfig = async () => {
-                if (!minerIp) return;
-                setIsFetching(true);
-                setFetchError(null);
-                try {
-                    const response = await fetch(`/api/miner/config/${encodeURIComponent(minerIp)}`);
-                    const data = await response.json();
-                    if (data.success) {
-                        setMinerConfig(data);
-                    } else {
-                        setFetchError(data.error || 'Failed to fetch miner config');
-                    }
-                } catch (err) {
-                    setFetchError(err.message);
-                } finally {
-                    setIsFetching(false);
-                }
-            };
-
-            const applyMinerConfig = () => {
-                if (!minerConfig) return;
-                setIsDirty(true);
-                setLocalSettings(prev => {
-                    const newThresholds = { ...prev.thresholds };
-
-                    // Apply cooling settings
-                    if (minerConfig.cooling) {
-                        if (minerConfig.cooling.hotTemp != null) {
-                            newThresholds.maxBoardTemp = minerConfig.cooling.hotTemp;
-                        }
-                        if (minerConfig.cooling.dangerousTemp != null) {
-                            newThresholds.maxChipTemp = minerConfig.cooling.dangerousTemp;
-                        }
-                    }
-
-                    // Apply power settings
-                    if (minerConfig.power) {
-                        if (minerConfig.power.maxPower != null) {
-                            newThresholds.maxPower = minerConfig.power.maxPower;
-                        }
-                        if (minerConfig.power.minPower != null) {
-                            newThresholds.minPower = minerConfig.power.minPower;
-                        }
-                    }
-
-                    return { ...prev, thresholds: newThresholds };
-                });
-            };
-
-            const thresholds = localSettings.thresholds || {};
-            const behavior = localSettings.behavior || {};
-
-            return (
-                <div style={{ marginTop: '0.75rem' }}>
-                    <button
-                        onClick={() => setIsOpen(!isOpen)}
-                        style={{
-                            width: '100%',
-                            padding: '0.5rem',
-                            backgroundColor: 'rgba(59, 130, 246, 0.2)',
-                            border: '1px solid rgba(59, 130, 246, 0.4)',
-                            borderRadius: isOpen ? '0.375rem 0.375rem 0 0' : '0.375rem',
-                            color: '#60a5fa',
-                            fontSize: '0.75rem',
-                            cursor: 'pointer',
-                            display: 'flex',
-                            justifyContent: 'space-between',
-                            alignItems: 'center'
-                        }}
-                    >
-                        <span>Settings</span>
-                        <span>{isOpen ? '▲' : '▼'}</span>
-                    </button>
-
-                    {isOpen && (
-                        <div style={{
-                            padding: '1rem',
-                            backgroundColor: 'rgba(0, 0, 0, 0.3)',
-                            borderRadius: '0 0 0.375rem 0.375rem',
-                            border: '1px solid rgba(59, 130, 246, 0.4)',
-                            borderTop: 'none'
-                        }}>
-                            {/* Fetch from Miner Section */}
-                            <div style={{
-                                marginBottom: '1rem',
-                                padding: '0.75rem',
-                                backgroundColor: 'rgba(16, 185, 129, 0.1)',
-                                borderRadius: '0.375rem',
-                                border: '1px solid rgba(16, 185, 129, 0.3)'
-                            }}>
-                                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: minerConfig ? '0.75rem' : '0' }}>
-                                    <span style={{ color: '#10b981', fontSize: '0.75rem', fontWeight: '600' }}>
-                                        Miner Configuration
-                                    </span>
-                                    <button
-                                        onClick={fetchMinerConfig}
-                                        disabled={isFetching}
-                                        style={{
-                                            padding: '0.25rem 0.5rem',
-                                            backgroundColor: isFetching ? '#374151' : 'rgba(16, 185, 129, 0.3)',
-                                            border: '1px solid rgba(16, 185, 129, 0.5)',
-                                            borderRadius: '0.25rem',
-                                            color: '#10b981',
-                                            fontSize: '0.65rem',
-                                            cursor: isFetching ? 'not-allowed' : 'pointer'
-                                        }}
-                                    >
-                                        {isFetching ? 'Fetching...' : 'Fetch from Miner'}
-                                    </button>
-                                </div>
-
-                                {fetchError && (
-                                    <div style={{ color: '#ef4444', fontSize: '0.65rem', marginTop: '0.5rem' }}>
-                                        Error: {fetchError}
-                                    </div>
-                                )}
-
-                                {minerConfig && (
-                                    <div style={{ fontSize: '0.65rem' }}>
-                                        {/* Cooling Settings */}
-                                        {minerConfig.cooling && (
-                                            <div style={{ marginBottom: '0.5rem' }}>
-                                                <div style={{ color: '#9ca3af', marginBottom: '0.25rem' }}>Cooling ({minerConfig.cooling.mode || 'auto'}):</div>
-                                                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '0.25rem', color: '#d1d5db' }}>
-                                                    {minerConfig.cooling.targetTemp != null && (
-                                                        <span>Target: {minerConfig.cooling.targetTemp}°C</span>
-                                                    )}
-                                                    {minerConfig.cooling.hotTemp != null && (
-                                                        <span>Hot: {minerConfig.cooling.hotTemp}°C</span>
-                                                    )}
-                                                    {minerConfig.cooling.dangerousTemp != null && (
-                                                        <span>Dangerous: {minerConfig.cooling.dangerousTemp}°C</span>
-                                                    )}
-                                                </div>
-                                            </div>
-                                        )}
-
-                                        {/* Power Settings */}
-                                        {minerConfig.power && (
-                                            <div style={{ marginBottom: '0.5rem' }}>
-                                                <div style={{ color: '#9ca3af', marginBottom: '0.25rem' }}>Power:</div>
-                                                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '0.25rem', color: '#d1d5db' }}>
-                                                    {minerConfig.power.powerTarget != null && (
-                                                        <span>Target: {minerConfig.power.powerTarget}W</span>
-                                                    )}
-                                                    {minerConfig.power.minPower != null && (
-                                                        <span>Min: {minerConfig.power.minPower}W</span>
-                                                    )}
-                                                    {minerConfig.power.maxPower != null && (
-                                                        <span>Max: {minerConfig.power.maxPower}W</span>
-                                                    )}
-                                                </div>
-                                            </div>
-                                        )}
-
-                                        {/* Apply Button */}
-                                        <button
-                                            onClick={applyMinerConfig}
-                                            style={{
-                                                width: '100%',
-                                                marginTop: '0.5rem',
-                                                padding: '0.375rem',
-                                                backgroundColor: 'rgba(245, 158, 11, 0.3)',
-                                                border: '1px solid rgba(245, 158, 11, 0.5)',
-                                                borderRadius: '0.25rem',
-                                                color: '#f59e0b',
-                                                fontSize: '0.65rem',
-                                                cursor: 'pointer'
-                                            }}
-                                        >
-                                            Apply to Thresholds
-                                        </button>
-                                    </div>
-                                )}
-                            </div>
-
-                            {/* Thresholds Section */}
-                            <h5 style={{ margin: '0 0 0.75rem 0', color: '#f59e0b', fontSize: '0.75rem', fontWeight: '600' }}>
-                                Temperature Thresholds
-                            </h5>
-                            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '0.5rem', marginBottom: '1rem' }}>
-                                <SettingInput
-                                    label="Max Chip Temp"
-                                    value={thresholds.maxChipTemp}
-                                    onChange={(v) => updateThreshold('maxChipTemp', v)}
-                                    unit="°C"
-                                />
-                                <SettingInput
-                                    label="Max Board Temp"
-                                    value={thresholds.maxBoardTemp}
-                                    onChange={(v) => updateThreshold('maxBoardTemp', v)}
-                                    unit="°C"
-                                />
-                                <SettingInput
-                                    label="Min Board Temp"
-                                    value={thresholds.minBoardTemp}
-                                    onChange={(v) => updateThreshold('minBoardTemp', v)}
-                                    unit="°C"
-                                />
-                            </div>
-
-                            <h5 style={{ margin: '0 0 0.75rem 0', color: '#a78bfa', fontSize: '0.75rem', fontWeight: '600' }}>
-                                Power & Fan Limits
-                            </h5>
-                            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '0.5rem', marginBottom: '1rem' }}>
-                                <SettingInput
-                                    label="Max Power"
-                                    value={thresholds.maxPower}
-                                    onChange={(v) => updateThreshold('maxPower', v)}
-                                    unit="W"
-                                />
-                                <SettingInput
-                                    label="Min Power"
-                                    value={thresholds.minPower}
-                                    onChange={(v) => updateThreshold('minPower', v)}
-                                    unit="W"
-                                />
-                                <SettingInput
-                                    label="Max Fan Speed"
-                                    value={thresholds.maxFanSpeed}
-                                    onChange={(v) => updateThreshold('maxFanSpeed', v)}
-                                    unit="RPM"
-                                />
-                            </div>
-
-                            <h5 style={{ margin: '0 0 0.75rem 0', color: '#10b981', fontSize: '0.75rem', fontWeight: '600' }}>
-                                Control Behavior
-                            </h5>
-                            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: '0.5rem', marginBottom: '1rem' }}>
-                                <SettingInput
-                                    label="Power Step Down"
-                                    value={behavior.powerStepDown}
-                                    onChange={(v) => updateBehavior('powerStepDown', v)}
-                                    unit="W"
-                                />
-                                <SettingInput
-                                    label="Power Step Up"
-                                    value={behavior.powerStepUp}
-                                    onChange={(v) => updateBehavior('powerStepUp', v)}
-                                    unit="W"
-                                />
-                                <SettingInput
-                                    label="Cooldown"
-                                    value={behavior.cooldownSeconds}
-                                    onChange={(v) => updateBehavior('cooldownSeconds', v)}
-                                    unit="sec"
-                                />
-                                <SettingInput
-                                    label="Recovery Delay"
-                                    value={behavior.recoveryDelaySeconds}
-                                    onChange={(v) => updateBehavior('recoveryDelaySeconds', v)}
-                                    unit="sec"
-                                />
-                            </div>
-
-                            <button
-                                onClick={handleSave}
-                                disabled={isLoading}
-                                style={{
-                                    width: '100%',
-                                    padding: '0.5rem',
-                                    backgroundColor: isLoading ? '#374151' : '#2563eb',
-                                    border: 'none',
-                                    borderRadius: '0.375rem',
-                                    color: 'white',
-                                    fontWeight: '600',
-                                    fontSize: '0.75rem',
-                                    cursor: isLoading ? 'not-allowed' : 'pointer'
-                                }}
-                            >
-                                {isLoading ? 'Saving...' : 'Save Settings'}
-                            </button>
-                        </div>
-                    )}
-                </div>
-            );
-        }
-
-        // Main Auto Control Terminal Component
-        function AutoControlTerminal({ miner, onUpdateSettings, onClearLogs }) {
+        function UnifiedAutoControlPanel({ miner, onUpdateSettings, onClearLogs }) {
             const [isExpanded, setIsExpanded] = useState(true);
+            const [activeTab, setActiveTab] = useState('status');
             const [isSaving, setIsSaving] = useState(false);
+            const [localSettings, setLocalSettings] = useState(null);
+            const [isDirty, setIsDirty] = useState(false);
             const logsRef = useRef(null);
 
-            const settings = miner.autoMiningControl || { enabled: false, thresholds: {}, behavior: {} };
-            const state = miner.autoMiningControlState || {};
+            // Get settings - handle both unified and legacy formats
+            const rawSettings = miner.autoControl || {};
+            const isUnifiedFormat = rawSettings.safety || rawSettings.thermal || rawSettings.power || rawSettings.economics;
+
+            // Build settings object (converting legacy if needed)
+            const settings = isUnifiedFormat ? rawSettings : {
+                enabled: rawSettings.enabled || false,
+                safety: { maxChipTemp: 95 },
+                thermal: {
+                    maxBoardTemp: 75,
+                    maxFanSpeed: 6000,
+                    minBoardTemp: rawSettings.minTemperature || 20,
+                    cooldownSeconds: 60,
+                    recoveryDelaySeconds: 300
+                },
+                power: {
+                    maxPower: 3500,
+                    minPower: 1500,
+                    powerStepDown: 250,
+                    powerStepUp: 100
+                },
+                economics: {
+                    scopThreshold: rawSettings.scopThreshold || 2.0,
+                    minSCOPForMaxPower: 3.0,
+                    efficiencyOverride: rawSettings.efficiencyOverride || null,
+                    economicPowerStep: 100,
+                    economicPauseEnabled: false
+                },
+                alerts: { minHashrate: 100, minActiveBoards: 3 }
+            };
+
+            const state = miner.autoMiningControlState || miner.autoControlState || {};
             const logs = miner.autoControlLogs || [];
             const readings = state.readings || {};
             const violations = state.violations || {};
-            const thresholds = settings.thresholds || {};
+
+            // Initialize local settings for editing
+            useEffect(() => {
+                if (!isDirty) {
+                    setLocalSettings(JSON.parse(JSON.stringify(settings)));
+                }
+            }, [settings, isDirty]);
 
             // Auto-scroll logs
             useEffect(() => {
                 if (logsRef.current) {
-                    logsRef.current.scrollTop = 0; // Newest at top
+                    logsRef.current.scrollTop = 0;
                 }
             }, [logs]);
 
@@ -1647,29 +1367,64 @@
             const getLogTypeIcon = (type) => ({
                 CHECK: '🔍',
                 ADJUSTMENT: '⚡',
+                ACTION: '⚡',
+                ACTION_COMPLETE: '✅',
                 VIOLATION: '⚠️',
-                RECOVERY: '✅',
+                RECOVERY: '📈',
                 ERROR: '❌'
             }[type] || '📋');
 
-            const handleSaveSettings = async (newSettings) => {
-                setIsSaving(true);
-                await onUpdateSettings(miner.minerIp, newSettings);
-                setIsSaving(false);
-            };
-
-            const handleClearLogs = () => {
-                onClearLogs(miner.minerIp);
-            };
+            const getPriorityInfo = (priority) => ({
+                1: { name: 'Safety', color: '#ef4444', icon: '🚨' },
+                2: { name: 'Thermal', color: '#f59e0b', icon: '🌡️' },
+                3: { name: 'Heating', color: '#3b82f6', icon: '🔥' },
+                4: { name: 'Economic', color: '#10b981', icon: '💰' },
+                5: { name: 'Recovery', color: '#8b5cf6', icon: '📈' }
+            }[priority] || { name: 'Stable', color: '#6b7280', icon: '✓' });
 
             const handleToggleEnabled = async () => {
                 setIsSaving(true);
-                await onUpdateSettings(miner.minerIp, {
-                    ...settings,
-                    enabled: !settings.enabled
-                });
-                setIsSaving(false);
+                try {
+                    await onUpdateSettings(miner.minerIp, { enabled: !settings.enabled });
+                } finally {
+                    setIsSaving(false);
+                }
             };
+
+            const handleSaveSettings = async () => {
+                if (!localSettings) return;
+                setIsSaving(true);
+                try {
+                    await onUpdateSettings(miner.minerIp, localSettings);
+                    setIsDirty(false);
+                } finally {
+                    setIsSaving(false);
+                }
+            };
+
+            const updateLocalSetting = (path, value) => {
+                setIsDirty(true);
+                setLocalSettings(prev => {
+                    const newSettings = JSON.parse(JSON.stringify(prev));
+                    const keys = path.split('.');
+                    let obj = newSettings;
+                    for (let i = 0; i < keys.length - 1; i++) {
+                        obj = obj[keys[i]];
+                    }
+                    obj[keys[keys.length - 1]] = value;
+                    return newSettings;
+                });
+            };
+
+            const projectedSCOP = state.projectedSCOP || miner.autoControlState?.projectedSCOP;
+            const currentPriority = state.lastActionPriority;
+
+            const tabs = [
+                { id: 'status', label: 'Status', icon: '📊' },
+                { id: 'thermal', label: 'Thermal', icon: '🌡️' },
+                { id: 'economic', label: 'Economic', icon: '💰' },
+                { id: 'logs', label: 'Logs', icon: '📋' }
+            ];
 
             return (
                 <div style={{
@@ -1694,7 +1449,7 @@
                         <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
                             <span style={{ fontSize: '1rem' }}>🤖</span>
                             <span style={{ fontWeight: '600', fontSize: '0.875rem', color: '#10b981' }}>
-                                Auto Mining Control
+                                Auto Control
                             </span>
                             {settings.enabled && (
                                 <span style={{
@@ -1708,178 +1463,476 @@
                                     ACTIVE
                                 </span>
                             )}
+                            {currentPriority && settings.enabled && (
+                                <span style={{
+                                    fontSize: '0.625rem',
+                                    padding: '0.125rem 0.5rem',
+                                    backgroundColor: `${getPriorityInfo(currentPriority).color}33`,
+                                    color: getPriorityInfo(currentPriority).color,
+                                    borderRadius: '0.25rem'
+                                }}>
+                                    {getPriorityInfo(currentPriority).icon} {getPriorityInfo(currentPriority).name}
+                                </span>
+                            )}
                         </div>
                         <span style={{ color: '#9ca3af' }}>{isExpanded ? '▼' : '▶'}</span>
                     </div>
 
                     {isExpanded && (
                         <div style={{ padding: '1rem' }}>
-                            {/* Enable Toggle */}
-                            <div style={{ marginBottom: '1rem' }}>
-                                <label style={{
-                                    display: 'flex',
-                                    alignItems: 'center',
-                                    gap: '0.75rem',
-                                    cursor: 'pointer'
-                                }}>
-                                    <div
-                                        onClick={handleToggleEnabled}
-                                        style={{
-                                            width: '44px',
-                                            height: '24px',
-                                            backgroundColor: settings.enabled ? '#10b981' : '#374151',
-                                            borderRadius: '12px',
-                                            position: 'relative',
-                                            transition: 'background-color 0.2s',
-                                            cursor: isSaving ? 'not-allowed' : 'pointer',
-                                            opacity: isSaving ? 0.5 : 1
-                                        }}
-                                    >
-                                        <div style={{
-                                            width: '20px',
-                                            height: '20px',
-                                            backgroundColor: 'white',
-                                            borderRadius: '50%',
-                                            position: 'absolute',
-                                            top: '2px',
-                                            left: settings.enabled ? '22px' : '2px',
-                                            transition: 'left 0.2s'
-                                        }} />
-                                    </div>
-                                    <span style={{ fontSize: '0.875rem', fontWeight: '500' }}>
-                                        Enable Auto Mining Control
-                                    </span>
-                                </label>
-                                <p style={{ fontSize: '0.7rem', color: '#9ca3af', marginTop: '0.5rem', marginLeft: '3.25rem' }}>
-                                    Automatically adjusts power based on temperature and fan speed thresholds
-                                </p>
+                            {/* Master Enable Toggle */}
+                            <div style={{ marginBottom: '1rem', display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
+                                <div
+                                    onClick={handleToggleEnabled}
+                                    style={{
+                                        width: '44px',
+                                        height: '24px',
+                                        backgroundColor: settings.enabled ? '#10b981' : '#374151',
+                                        borderRadius: '12px',
+                                        position: 'relative',
+                                        transition: 'background-color 0.2s',
+                                        cursor: isSaving ? 'not-allowed' : 'pointer',
+                                        opacity: isSaving ? 0.5 : 1
+                                    }}
+                                >
+                                    <div style={{
+                                        width: '20px',
+                                        height: '20px',
+                                        backgroundColor: 'white',
+                                        borderRadius: '50%',
+                                        position: 'absolute',
+                                        top: '2px',
+                                        left: settings.enabled ? '22px' : '2px',
+                                        transition: 'left 0.2s'
+                                    }} />
+                                </div>
+                                <span style={{ fontSize: '0.875rem' }}>
+                                    {settings.enabled ? 'Auto control enabled' : 'Auto control disabled'}
+                                </span>
                             </div>
 
                             {settings.enabled && (
                                 <>
-                                    {/* Current Readings Grid */}
-                                    {readings.chipTemp !== undefined && (
-                                        <div style={{
-                                            display: 'grid',
-                                            gridTemplateColumns: 'repeat(3, 1fr)',
-                                            gap: '0.5rem',
-                                            marginBottom: '1rem'
-                                        }}>
-                                            <ReadingDisplay
-                                                label="Chip Temp"
-                                                value={readings.chipTemp || 0}
-                                                unit="°C"
-                                                threshold={`<${thresholds.maxChipTemp || 95}°C`}
-                                                isViolation={violations.chipTempCritical}
-                                            />
-                                            <ReadingDisplay
-                                                label="Board Temp"
-                                                value={readings.avgBoardTemp?.toFixed(1) || 'N/A'}
-                                                unit={readings.avgBoardTemp ? '°C' : ''}
-                                                threshold={`${thresholds.minBoardTemp || 20}-${thresholds.maxBoardTemp || 75}°C`}
-                                                isViolation={violations.boardTempHigh || violations.boardTempLow}
-                                            />
-                                            <ReadingDisplay
-                                                label="Fan Speed"
-                                                value={readings.avgFanSpeed || 'N/A'}
-                                                unit={readings.avgFanSpeed ? ' RPM' : ''}
-                                                threshold={`<${thresholds.maxFanSpeed || 6000}`}
-                                                isViolation={violations.fanSpeedHigh}
-                                            />
-                                            <ReadingDisplay
-                                                label="Power"
-                                                value={readings.power || 0}
-                                                unit="W"
-                                                threshold={`${thresholds.minPower || 1500}-${thresholds.maxPower || 3500}W`}
-                                                isViolation={violations.powerHigh}
-                                            />
-                                            <ReadingDisplay
-                                                label="Hashrate"
-                                                value={(readings.hashrate || 0).toFixed(1)}
-                                                unit=" TH/s"
-                                                threshold={`>${thresholds.minHashrate || 100}`}
-                                                isViolation={violations.hashrateLow}
-                                            />
-                                            <ReadingDisplay
-                                                label="Hashboards"
-                                                value={`${readings.activeBoards || 0}/${readings.totalBoards || 0}`}
-                                                unit=""
-                                                threshold={`>=${thresholds.minActiveBoards || 3}`}
-                                                isViolation={violations.boardsLow}
-                                            />
+                                    {/* Tab Navigation */}
+                                    <div style={{
+                                        display: 'flex',
+                                        gap: '0.25rem',
+                                        marginBottom: '1rem',
+                                        backgroundColor: 'rgba(0, 0, 0, 0.2)',
+                                        padding: '0.25rem',
+                                        borderRadius: '0.375rem'
+                                    }}>
+                                        {tabs.map(tab => (
+                                            <button
+                                                key={tab.id}
+                                                onClick={() => setActiveTab(tab.id)}
+                                                style={{
+                                                    flex: 1,
+                                                    padding: '0.5rem',
+                                                    border: 'none',
+                                                    borderRadius: '0.25rem',
+                                                    backgroundColor: activeTab === tab.id ? 'rgba(59, 130, 246, 0.3)' : 'transparent',
+                                                    color: activeTab === tab.id ? '#60a5fa' : '#9ca3af',
+                                                    cursor: 'pointer',
+                                                    fontSize: '0.75rem',
+                                                    fontWeight: activeTab === tab.id ? '600' : '400'
+                                                }}
+                                            >
+                                                {tab.icon} {tab.label}
+                                            </button>
+                                        ))}
+                                    </div>
+
+                                    {/* Status Tab */}
+                                    {activeTab === 'status' && (
+                                        <div>
+                                            {/* Readings Grid */}
+                                            <div style={{
+                                                display: 'grid',
+                                                gridTemplateColumns: 'repeat(3, 1fr)',
+                                                gap: '0.5rem',
+                                                marginBottom: '1rem'
+                                            }}>
+                                                <ReadingDisplay
+                                                    label="Chip Temp"
+                                                    value={readings.chipTemp?.toFixed(0) || 'N/A'}
+                                                    threshold={`<${settings.safety?.maxChipTemp || 95}`}
+                                                    isViolation={violations.chipTempCritical}
+                                                    unit="°C"
+                                                />
+                                                <ReadingDisplay
+                                                    label="Board Temp"
+                                                    value={readings.avgBoardTemp?.toFixed(1) || 'N/A'}
+                                                    threshold={`${settings.thermal?.minBoardTemp || 20}-${settings.thermal?.maxBoardTemp || 75}`}
+                                                    isViolation={violations.boardTempHigh || violations.boardTempLow}
+                                                    unit="°C"
+                                                />
+                                                <ReadingDisplay
+                                                    label="Fan Speed"
+                                                    value={readings.avgFanSpeed || 'N/A'}
+                                                    threshold={`<${settings.thermal?.maxFanSpeed || 6000}`}
+                                                    isViolation={violations.fanSpeedHigh}
+                                                    unit=" RPM"
+                                                />
+                                                <ReadingDisplay
+                                                    label="Power"
+                                                    value={readings.power?.toFixed(0) || 'N/A'}
+                                                    threshold={`${settings.power?.minPower || 1500}-${settings.power?.maxPower || 3500}`}
+                                                    isViolation={false}
+                                                    unit="W"
+                                                />
+                                                <ReadingDisplay
+                                                    label="SCOP"
+                                                    value={projectedSCOP?.toFixed(2) || 'N/A'}
+                                                    threshold={`>${settings.economics?.scopThreshold || 2.0}`}
+                                                    isViolation={projectedSCOP && projectedSCOP < (settings.economics?.scopThreshold || 2.0)}
+                                                    unit=""
+                                                />
+                                                <ReadingDisplay
+                                                    label="Hashrate"
+                                                    value={readings.hashrate?.toFixed(1) || 'N/A'}
+                                                    threshold={`>${settings.alerts?.minHashrate || 100}`}
+                                                    isViolation={readings.hashrate && readings.hashrate < (settings.alerts?.minHashrate || 100)}
+                                                    unit=" TH/s"
+                                                />
+                                            </div>
+
+                                            {/* State Summary */}
+                                            <div style={{
+                                                padding: '0.75rem',
+                                                backgroundColor: 'rgba(0, 0, 0, 0.2)',
+                                                borderRadius: '0.375rem',
+                                                fontSize: '0.75rem'
+                                            }}>
+                                                <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '0.5rem' }}>
+                                                    <span style={{ color: '#9ca3af' }}>State:</span>
+                                                    <span style={{
+                                                        fontWeight: '600',
+                                                        color: readings.isPaused ? '#f59e0b' : '#4ade80'
+                                                    }}>
+                                                        {readings.isPaused ? '⏸️ PAUSED' : '⛏️ MINING'}
+                                                    </span>
+                                                </div>
+                                                {state.adjustmentReason && (
+                                                    <div style={{ color: '#9ca3af', fontStyle: 'italic', fontSize: '0.625rem' }}>
+                                                        {state.adjustmentReason}
+                                                    </div>
+                                                )}
+                                                {(miner.autoControlState?.stateReason || state.stateReason) && (
+                                                    <div style={{ color: '#9ca3af', fontStyle: 'italic', fontSize: '0.625rem', marginTop: '0.25rem' }}>
+                                                        {miner.autoControlState?.stateReason || state.stateReason}
+                                                    </div>
+                                                )}
+                                            </div>
                                         </div>
                                     )}
 
-                                    {/* Terminal Log Display */}
-                                    <div style={{ marginBottom: '0.75rem' }}>
-                                        <div style={{
-                                            display: 'flex',
-                                            justifyContent: 'space-between',
-                                            alignItems: 'center',
-                                            marginBottom: '0.5rem'
-                                        }}>
-                                            <span style={{ fontSize: '0.75rem', fontWeight: '600', color: '#9ca3af' }}>
-                                                Control Log
-                                            </span>
-                                            <button
-                                                onClick={handleClearLogs}
-                                                style={{
-                                                    padding: '0.25rem 0.5rem',
-                                                    backgroundColor: 'rgba(107, 114, 128, 0.3)',
-                                                    border: '1px solid rgba(107, 114, 128, 0.5)',
-                                                    borderRadius: '0.25rem',
-                                                    color: '#9ca3af',
-                                                    fontSize: '0.625rem',
-                                                    cursor: 'pointer'
-                                                }}
-                                            >
-                                                Clear
-                                            </button>
-                                        </div>
-                                        <div
-                                            ref={logsRef}
-                                            style={{
-                                                backgroundColor: '#0d0d0d',
-                                                borderRadius: '0.375rem',
-                                                padding: '0.75rem',
-                                                height: '200px',
-                                                overflowY: 'auto',
-                                                fontFamily: 'Monaco, "Cascadia Code", "Fira Code", Consolas, monospace',
-                                                fontSize: '0.65rem',
-                                                lineHeight: '1.5'
-                                            }}
-                                        >
-                                            {logs.length === 0 ? (
-                                                <div style={{ color: '#6b7280', textAlign: 'center', paddingTop: '4rem' }}>
-                                                    Waiting for control events...
+                                    {/* Thermal Tab */}
+                                    {activeTab === 'thermal' && localSettings && (
+                                        <div style={{ fontSize: '0.75rem' }}>
+                                            <div style={{ marginBottom: '1rem' }}>
+                                                <div style={{ color: '#f59e0b', fontWeight: '600', marginBottom: '0.5rem' }}>🌡️ Temperature Thresholds</div>
+                                                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.5rem' }}>
+                                                    <SettingInput
+                                                        label="Max Chip Temp (Critical)"
+                                                        value={localSettings.safety?.maxChipTemp}
+                                                        onChange={(v) => updateLocalSetting('safety.maxChipTemp', v)}
+                                                        unit="°C"
+                                                        min={70}
+                                                        max={105}
+                                                    />
+                                                    <SettingInput
+                                                        label="Max Board Temp"
+                                                        value={localSettings.thermal?.maxBoardTemp}
+                                                        onChange={(v) => updateLocalSetting('thermal.maxBoardTemp', v)}
+                                                        unit="°C"
+                                                        min={50}
+                                                        max={90}
+                                                    />
+                                                    <SettingInput
+                                                        label="Min Board Temp (Heating)"
+                                                        value={localSettings.thermal?.minBoardTemp}
+                                                        onChange={(v) => updateLocalSetting('thermal.minBoardTemp', v)}
+                                                        unit="°C"
+                                                        min={0}
+                                                        max={40}
+                                                    />
+                                                    <SettingInput
+                                                        label="Max Fan Speed"
+                                                        value={localSettings.thermal?.maxFanSpeed}
+                                                        onChange={(v) => updateLocalSetting('thermal.maxFanSpeed', v)}
+                                                        unit="RPM"
+                                                        min={3000}
+                                                        max={8000}
+                                                        step={100}
+                                                    />
                                                 </div>
-                                            ) : (
-                                                logs.map((log, idx) => (
-                                                    <div key={idx} style={{
-                                                        marginBottom: '0.375rem',
-                                                        paddingLeft: '0.5rem',
-                                                        borderLeft: `2px solid ${getSeverityColor(log.severity)}`
-                                                    }}>
-                                                        <span style={{ color: '#6b7280' }}>
-                                                            [{new Date(log.timestamp).toLocaleTimeString()}]
-                                                        </span>
-                                                        <span style={{ marginLeft: '0.375rem' }}>{getLogTypeIcon(log.type)}</span>
-                                                        <span style={{ color: getSeverityColor(log.severity), marginLeft: '0.375rem' }}>
-                                                            {log.message}
-                                                        </span>
-                                                    </div>
-                                                ))
+                                            </div>
+
+                                            <div style={{ marginBottom: '1rem' }}>
+                                                <div style={{ color: '#a855f7', fontWeight: '600', marginBottom: '0.5rem' }}>⚡ Power Limits</div>
+                                                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.5rem' }}>
+                                                    <SettingInput
+                                                        label="Max Power"
+                                                        value={localSettings.power?.maxPower}
+                                                        onChange={(v) => updateLocalSetting('power.maxPower', v)}
+                                                        unit="W"
+                                                        min={1000}
+                                                        max={5000}
+                                                        step={50}
+                                                    />
+                                                    <SettingInput
+                                                        label="Min Power"
+                                                        value={localSettings.power?.minPower}
+                                                        onChange={(v) => updateLocalSetting('power.minPower', v)}
+                                                        unit="W"
+                                                        min={500}
+                                                        max={3000}
+                                                        step={50}
+                                                    />
+                                                    <SettingInput
+                                                        label="Power Step Down"
+                                                        value={localSettings.power?.powerStepDown}
+                                                        onChange={(v) => updateLocalSetting('power.powerStepDown', v)}
+                                                        unit="W"
+                                                        min={50}
+                                                        max={500}
+                                                        step={50}
+                                                    />
+                                                    <SettingInput
+                                                        label="Power Step Up"
+                                                        value={localSettings.power?.powerStepUp}
+                                                        onChange={(v) => updateLocalSetting('power.powerStepUp', v)}
+                                                        unit="W"
+                                                        min={25}
+                                                        max={250}
+                                                        step={25}
+                                                    />
+                                                </div>
+                                            </div>
+
+                                            <div style={{ marginBottom: '1rem' }}>
+                                                <div style={{ color: '#3b82f6', fontWeight: '600', marginBottom: '0.5rem' }}>⏱️ Timing</div>
+                                                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.5rem' }}>
+                                                    <SettingInput
+                                                        label="Cooldown"
+                                                        value={localSettings.thermal?.cooldownSeconds}
+                                                        onChange={(v) => updateLocalSetting('thermal.cooldownSeconds', v)}
+                                                        unit="sec"
+                                                        min={10}
+                                                        max={300}
+                                                    />
+                                                    <SettingInput
+                                                        label="Recovery Delay"
+                                                        value={localSettings.thermal?.recoveryDelaySeconds}
+                                                        onChange={(v) => updateLocalSetting('thermal.recoveryDelaySeconds', v)}
+                                                        unit="sec"
+                                                        min={60}
+                                                        max={900}
+                                                    />
+                                                </div>
+                                            </div>
+
+                                            {isDirty && (
+                                                <button
+                                                    onClick={handleSaveSettings}
+                                                    disabled={isSaving}
+                                                    style={{
+                                                        width: '100%',
+                                                        padding: '0.5rem',
+                                                        backgroundColor: isSaving ? '#374151' : '#2563eb',
+                                                        border: 'none',
+                                                        borderRadius: '0.375rem',
+                                                        color: 'white',
+                                                        fontWeight: '600',
+                                                        cursor: isSaving ? 'not-allowed' : 'pointer'
+                                                    }}
+                                                >
+                                                    {isSaving ? 'Saving...' : 'Save Thermal Settings'}
+                                                </button>
                                             )}
                                         </div>
-                                    </div>
+                                    )}
 
-                                    {/* Settings Panel */}
-                                    <AutoControlSettingsPanel
-                                        settings={settings}
-                                        onSave={handleSaveSettings}
-                                        isLoading={isSaving}
-                                        minerIp={miner.minerIp}
-                                    />
+                                    {/* Economic Tab */}
+                                    {activeTab === 'economic' && localSettings && (
+                                        <div style={{ fontSize: '0.75rem' }}>
+                                            <div style={{ marginBottom: '1rem' }}>
+                                                <div style={{ color: '#10b981', fontWeight: '600', marginBottom: '0.5rem' }}>💰 SCOP Thresholds</div>
+                                                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.5rem' }}>
+                                                    <SettingInput
+                                                        label="Min SCOP (reduce power)"
+                                                        value={localSettings.economics?.scopThreshold}
+                                                        onChange={(v) => updateLocalSetting('economics.scopThreshold', v)}
+                                                        min={1}
+                                                        max={5}
+                                                        step={0.1}
+                                                    />
+                                                    <SettingInput
+                                                        label="Min SCOP for Max Power"
+                                                        value={localSettings.economics?.minSCOPForMaxPower}
+                                                        onChange={(v) => updateLocalSetting('economics.minSCOPForMaxPower', v)}
+                                                        min={1}
+                                                        max={6}
+                                                        step={0.1}
+                                                    />
+                                                    <SettingInput
+                                                        label="Economic Power Step"
+                                                        value={localSettings.economics?.economicPowerStep}
+                                                        onChange={(v) => updateLocalSetting('economics.economicPowerStep', v)}
+                                                        unit="W"
+                                                        min={25}
+                                                        max={250}
+                                                        step={25}
+                                                    />
+                                                </div>
+
+                                                <div style={{ marginTop: '0.75rem' }}>
+                                                    <label style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', cursor: 'pointer' }}>
+                                                        <input
+                                                            type="checkbox"
+                                                            checked={localSettings.economics?.economicPauseEnabled || false}
+                                                            onChange={(e) => updateLocalSetting('economics.economicPauseEnabled', e.target.checked)}
+                                                            style={{ width: '1rem', height: '1rem' }}
+                                                        />
+                                                        <span>Allow complete pause for economics</span>
+                                                    </label>
+                                                    <div style={{ color: '#6b7280', fontSize: '0.625rem', marginLeft: '1.5rem' }}>
+                                                        If enabled, will pause mining when at min power and still unprofitable
+                                                    </div>
+                                                </div>
+                                            </div>
+
+                                            <div style={{ marginBottom: '1rem' }}>
+                                                <div style={{ color: '#a855f7', fontWeight: '600', marginBottom: '0.5rem' }}>📊 Efficiency Override</div>
+                                                <div style={{ color: '#6b7280', fontSize: '0.625rem', marginBottom: '0.5rem' }}>
+                                                    Set expected efficiency for SCOP calculation (required for economic control)
+                                                </div>
+                                                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.5rem' }}>
+                                                    <SettingInput
+                                                        label="Expected Power"
+                                                        value={localSettings.economics?.efficiencyOverride?.power || ''}
+                                                        onChange={(v) => {
+                                                            const current = localSettings.economics?.efficiencyOverride || {};
+                                                            updateLocalSetting('economics.efficiencyOverride', { ...current, power: v || null });
+                                                        }}
+                                                        unit="W"
+                                                        min={1000}
+                                                        max={5000}
+                                                        step={50}
+                                                    />
+                                                    <SettingInput
+                                                        label="Expected Hashrate"
+                                                        value={localSettings.economics?.efficiencyOverride?.hashrate || ''}
+                                                        onChange={(v) => {
+                                                            const current = localSettings.economics?.efficiencyOverride || {};
+                                                            updateLocalSetting('economics.efficiencyOverride', { ...current, hashrate: v || null });
+                                                        }}
+                                                        unit="TH/s"
+                                                        min={50}
+                                                        max={200}
+                                                        step={1}
+                                                    />
+                                                </div>
+                                                {projectedSCOP && (
+                                                    <div style={{
+                                                        marginTop: '0.5rem',
+                                                        padding: '0.5rem',
+                                                        backgroundColor: 'rgba(16, 185, 129, 0.1)',
+                                                        borderRadius: '0.25rem',
+                                                        textAlign: 'center'
+                                                    }}>
+                                                        Projected SCOP: <strong style={{ color: projectedSCOP >= (settings.economics?.scopThreshold || 2.0) ? '#4ade80' : '#f87171' }}>
+                                                            {projectedSCOP.toFixed(2)}
+                                                        </strong>
+                                                    </div>
+                                                )}
+                                            </div>
+
+                                            {isDirty && (
+                                                <button
+                                                    onClick={handleSaveSettings}
+                                                    disabled={isSaving}
+                                                    style={{
+                                                        width: '100%',
+                                                        padding: '0.5rem',
+                                                        backgroundColor: isSaving ? '#374151' : '#2563eb',
+                                                        border: 'none',
+                                                        borderRadius: '0.375rem',
+                                                        color: 'white',
+                                                        fontWeight: '600',
+                                                        cursor: isSaving ? 'not-allowed' : 'pointer'
+                                                    }}
+                                                >
+                                                    {isSaving ? 'Saving...' : 'Save Economic Settings'}
+                                                </button>
+                                            )}
+                                        </div>
+                                    )}
+
+                                    {/* Logs Tab */}
+                                    {activeTab === 'logs' && (
+                                        <div>
+                                            <div style={{
+                                                display: 'flex',
+                                                justifyContent: 'space-between',
+                                                alignItems: 'center',
+                                                marginBottom: '0.5rem'
+                                            }}>
+                                                <span style={{ fontSize: '0.75rem', color: '#9ca3af' }}>
+                                                    Control Events ({logs.length})
+                                                </span>
+                                                <button
+                                                    onClick={() => onClearLogs(miner.minerIp)}
+                                                    style={{
+                                                        padding: '0.25rem 0.5rem',
+                                                        fontSize: '0.625rem',
+                                                        backgroundColor: 'rgba(239, 68, 68, 0.2)',
+                                                        border: '1px solid rgba(239, 68, 68, 0.3)',
+                                                        borderRadius: '0.25rem',
+                                                        color: '#f87171',
+                                                        cursor: 'pointer'
+                                                    }}
+                                                >
+                                                    Clear
+                                                </button>
+                                            </div>
+                                            <div
+                                                ref={logsRef}
+                                                style={{
+                                                    height: '200px',
+                                                    overflowY: 'auto',
+                                                    backgroundColor: '#0a0a0a',
+                                                    borderRadius: '0.375rem',
+                                                    padding: '0.5rem',
+                                                    fontFamily: 'monospace',
+                                                    fontSize: '0.625rem'
+                                                }}
+                                            >
+                                                {logs.length === 0 ? (
+                                                    <div style={{ color: '#6b7280', textAlign: 'center', paddingTop: '4rem' }}>
+                                                        Waiting for control events...
+                                                    </div>
+                                                ) : (
+                                                    logs.map((log, idx) => (
+                                                        <div key={idx} style={{
+                                                            marginBottom: '0.375rem',
+                                                            paddingLeft: '0.5rem',
+                                                            borderLeft: `2px solid ${getSeverityColor(log.severity)}`
+                                                        }}>
+                                                            <span style={{ color: '#6b7280' }}>
+                                                                [{new Date(log.timestamp).toLocaleTimeString()}]
+                                                            </span>
+                                                            <span style={{ marginLeft: '0.375rem' }}>{getLogTypeIcon(log.type)}</span>
+                                                            <span style={{ color: getSeverityColor(log.severity), marginLeft: '0.375rem' }}>
+                                                                {log.message}
+                                                            </span>
+                                                        </div>
+                                                    ))
+                                                )}
+                                            </div>
+                                        </div>
+                                    )}
                                 </>
                             )}
                         </div>
@@ -2204,14 +2257,8 @@
             );
         }
 
-        function MinerCard({ miner, globalData, currency, onRemove, onSetPowerProfile, onPauseMining, onResumeMining, onUpdateAutoControl, onUpdateAutoMiningControl, onClearAutoControlLogs }) {
+        function MinerCard({ miner, globalData, currency, onRemove, onSetPowerProfile, onPauseMining, onResumeMining, onUpdateAutoControl, onClearAutoControlLogs }) {
             const [isControlling, setIsControlling] = useState(false);
-            const [showAutoControl, setShowAutoControl] = useState(false);
-            const [scopThreshold, setScopThreshold] = useState(miner.autoControl?.scopThreshold || 2.0);
-            const [minTemperature, setMinTemperature] = useState(miner.autoControl?.minTemperature || '');
-            const [autoEnabled, setAutoEnabled] = useState(miner.autoControl?.enabled || false);
-            const [overridePower, setOverridePower] = useState(miner.autoControl?.efficiencyOverride?.power || '');
-            const [overrideHashrate, setOverrideHashrate] = useState(miner.autoControl?.efficiencyOverride?.hashrate || '');
             const formatHashrate = (ths) => ths != null ? `${ths.toFixed(2)} TH/s` : 'N/A';
             const formatUptime = (seconds) => {
                 if (!seconds) return 'N/A';
@@ -2534,349 +2581,6 @@
                             </button>
                         </div>
 
-                        {/* Auto Control Toggle */}
-                        <div style={{ marginBottom: '0.5rem' }}>
-                            <button
-                                onClick={() => setShowAutoControl(!showAutoControl)}
-                                style={{
-                                    width: '100%',
-                                    padding: '0.5rem',
-                                    borderRadius: '0.375rem',
-                                    backgroundColor: autoEnabled ? 'rgba(59, 130, 246, 0.3)' : 'rgba(255, 255, 255, 0.05)',
-                                    border: autoEnabled ? '1px solid #3b82f6' : '1px solid rgba(255, 255, 255, 0.1)',
-                                    color: 'white',
-                                    cursor: 'pointer',
-                                    fontSize: '0.75rem',
-                                    display: 'flex',
-                                    justifyContent: 'space-between',
-                                    alignItems: 'center'
-                                }}
-                            >
-                                <span>SCOP Auto-Control {autoEnabled ? '(ON)' : '(OFF)'}</span>
-                                <span>{showAutoControl ? '▲' : '▼'}</span>
-                            </button>
-                        </div>
-
-                        {/* Auto Control Settings Panel */}
-                        {showAutoControl && (
-                            <div style={{ padding: '0.75rem', backgroundColor: 'rgba(255, 255, 255, 0.05)', borderRadius: '0.375rem', fontSize: '0.75rem' }}>
-                                <div style={{ marginBottom: '0.75rem' }}>
-                                    <label style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', cursor: 'pointer' }}>
-                                        <input
-                                            type="checkbox"
-                                            checked={autoEnabled}
-                                            onChange={(e) => setAutoEnabled(e.target.checked)}
-                                            style={{ width: '1rem', height: '1rem' }}
-                                        />
-                                        <span>Enable automatic SCOP control</span>
-                                    </label>
-                                </div>
-
-                                <div style={{ marginBottom: '0.75rem' }}>
-                                    <label style={{ display: 'block', color: '#9ca3af', marginBottom: '0.25rem' }}>
-                                        SCOP Threshold (pause if below)
-                                    </label>
-                                    <input
-                                        type="number"
-                                        step="0.1"
-                                        min="1"
-                                        max="10"
-                                        value={scopThreshold}
-                                        onChange={(e) => setScopThreshold(parseFloat(e.target.value) || 2.0)}
-                                        style={{
-                                            width: '100%',
-                                            padding: '0.5rem',
-                                            borderRadius: '0.25rem',
-                                            backgroundColor: 'rgba(0, 0, 0, 0.3)',
-                                            border: '1px solid rgba(255, 255, 255, 0.2)',
-                                            color: 'white',
-                                            fontSize: '0.875rem'
-                                        }}
-                                    />
-                                    <div style={{ color: '#6b7280', fontSize: '0.625rem', marginTop: '0.25rem' }}>
-                                        Current SCOP: {miner.efficiency?.effectiveSCOP?.toFixed(2) || 'N/A'}
-                                    </div>
-                                </div>
-
-                                <div style={{ marginBottom: '0.75rem' }}>
-                                    <label style={{ display: 'block', color: '#9ca3af', marginBottom: '0.25rem' }}>
-                                        Min Board Temp °C (override SCOP)
-                                    </label>
-                                    <input
-                                        type="number"
-                                        step="1"
-                                        min="0"
-                                        max="50"
-                                        value={minTemperature}
-                                        onChange={(e) => setMinTemperature(e.target.value === '' ? '' : parseInt(e.target.value))}
-                                        placeholder="Not set"
-                                        style={{
-                                            width: '100%',
-                                            padding: '0.5rem',
-                                            borderRadius: '0.25rem',
-                                            backgroundColor: 'rgba(0, 0, 0, 0.3)',
-                                            border: '1px solid rgba(255, 255, 255, 0.2)',
-                                            color: 'white',
-                                            fontSize: '0.875rem'
-                                        }}
-                                    />
-                                    <div style={{ color: '#6b7280', fontSize: '0.625rem', marginTop: '0.25rem' }}>
-                                        Keep miner ON if board temp drops below this (better room temp estimate)
-                                    </div>
-                                </div>
-
-                                {/* Efficiency Override Section */}
-                                <div style={{
-                                    marginBottom: '0.75rem',
-                                    padding: '0.5rem',
-                                    backgroundColor: 'rgba(139, 92, 246, 0.1)',
-                                    borderRadius: '0.375rem',
-                                    border: '1px solid rgba(139, 92, 246, 0.3)'
-                                }}>
-                                    <div style={{ fontSize: '0.625rem', color: '#a78bfa', marginBottom: '0.5rem', fontWeight: '600' }}>
-                                        Manual Efficiency Override (Always Used for Control)
-                                    </div>
-
-                                    {/* Show measured efficiency tracking */}
-                                    {miner.autoControlState?.measuredAvgPower && (
-                                        <div style={{
-                                            fontSize: '0.625rem',
-                                            color: '#9ca3af',
-                                            marginBottom: '0.5rem',
-                                            padding: '0.375rem',
-                                            backgroundColor: 'rgba(0, 0, 0, 0.2)',
-                                            borderRadius: '0.25rem'
-                                        }}>
-                                            <div style={{ marginBottom: '0.25rem' }}>
-                                                📊 <strong>Current Avg:</strong> {miner.autoControlState.measuredAvgHashrate?.toFixed(1)} TH/s @ {Math.round(miner.autoControlState.measuredAvgPower)}W
-                                                {' '}({(miner.autoControlState.measuredAvgEfficiency)?.toFixed(1)} W/TH)
-                                            </div>
-                                            {miner.autoControlState.best1hEfficiency && (
-                                                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                                                    <span>
-                                                        🏆 <strong>Best 1h:</strong> {miner.autoControlState.best1hHashrate?.toFixed(1)} TH/s @ {Math.round(miner.autoControlState.best1hPower)}W
-                                                        {' '}({(miner.autoControlState.best1hEfficiency)?.toFixed(1)} W/TH)
-                                                    </span>
-                                                    <button
-                                                        onClick={async () => {
-                                                            if (confirm('Reset best efficiency tracking?')) {
-                                                                await fetch('/api/miner/reset-best-efficiency', {
-                                                                    method: 'POST',
-                                                                    headers: { 'Content-Type': 'application/json' },
-                                                                    body: JSON.stringify({ ip: miner.minerIp })
-                                                                });
-                                                            }
-                                                        }}
-                                                        style={{
-                                                            padding: '0.125rem 0.375rem',
-                                                            fontSize: '0.5rem',
-                                                            backgroundColor: 'rgba(239, 68, 68, 0.3)',
-                                                            border: '1px solid rgba(239, 68, 68, 0.5)',
-                                                            borderRadius: '0.25rem',
-                                                            color: 'white',
-                                                            cursor: 'pointer'
-                                                        }}
-                                                    >
-                                                        Reset
-                                                    </button>
-                                                </div>
-                                            )}
-                                        </div>
-                                    )}
-
-                                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.5rem' }}>
-                                        <div>
-                                            <label style={{ display: 'block', color: '#9ca3af', marginBottom: '0.25rem', fontSize: '0.625rem' }}>
-                                                Power (W)
-                                            </label>
-                                            <input
-                                                type="number"
-                                                step="100"
-                                                min="0"
-                                                value={overridePower}
-                                                onChange={(e) => setOverridePower(e.target.value === '' ? '' : parseInt(e.target.value))}
-                                                placeholder={miner.autoControlState?.measuredPower || 'Auto'}
-                                                style={{
-                                                    width: '100%',
-                                                    padding: '0.375rem',
-                                                    borderRadius: '0.25rem',
-                                                    backgroundColor: 'rgba(0, 0, 0, 0.3)',
-                                                    border: '1px solid rgba(255, 255, 255, 0.2)',
-                                                    color: 'white',
-                                                    fontSize: '0.75rem'
-                                                }}
-                                            />
-                                        </div>
-                                        <div>
-                                            <label style={{ display: 'block', color: '#9ca3af', marginBottom: '0.25rem', fontSize: '0.625rem' }}>
-                                                Hashrate (TH/s)
-                                            </label>
-                                            <input
-                                                type="number"
-                                                step="1"
-                                                min="0"
-                                                value={overrideHashrate}
-                                                onChange={(e) => setOverrideHashrate(e.target.value === '' ? '' : parseFloat(e.target.value))}
-                                                placeholder={miner.autoControlState?.measuredHashrate?.toFixed(0) || 'Auto'}
-                                                style={{
-                                                    width: '100%',
-                                                    padding: '0.375rem',
-                                                    borderRadius: '0.25rem',
-                                                    backgroundColor: 'rgba(0, 0, 0, 0.3)',
-                                                    border: '1px solid rgba(255, 255, 255, 0.2)',
-                                                    color: 'white',
-                                                    fontSize: '0.75rem'
-                                                }}
-                                            />
-                                        </div>
-                                    </div>
-                                    <div style={{ color: '#6b7280', fontSize: '0.5rem', marginTop: '0.25rem' }}>
-                                        ⚠️ Required for auto-control. Set your expected efficiency. Use measured averages above as reference.
-                                    </div>
-                                </div>
-
-                                <button
-                                    onClick={async () => {
-                                        const effOverride = (overridePower && overrideHashrate)
-                                            ? { power: overridePower, hashrate: overrideHashrate }
-                                            : null;
-                                        await onUpdateAutoControl(miner.minerIp, {
-                                            enabled: autoEnabled,
-                                            scopThreshold: scopThreshold,
-                                            minTemperature: minTemperature === '' ? undefined : minTemperature,
-                                            efficiencyOverride: effOverride
-                                        });
-                                    }}
-                                    style={{
-                                        width: '100%',
-                                        padding: '0.5rem',
-                                        borderRadius: '0.25rem',
-                                        backgroundColor: 'rgba(59, 130, 246, 0.5)',
-                                        border: '1px solid #3b82f6',
-                                        color: 'white',
-                                        cursor: 'pointer',
-                                        fontSize: '0.75rem'
-                                    }}
-                                >
-                                    Save Settings
-                                </button>
-
-                                {/* Auto Control Status Display */}
-                                {miner.autoControl?.enabled && miner.autoControlState && (
-                                    <div style={{
-                                        marginTop: '0.75rem',
-                                        padding: '0.75rem',
-                                        backgroundColor: miner.autoControlState.stateMatches === false
-                                            ? 'rgba(245, 158, 11, 0.2)'
-                                            : 'rgba(16, 185, 129, 0.1)',
-                                        borderRadius: '0.375rem',
-                                        border: miner.autoControlState.stateMatches === false
-                                            ? '1px solid rgba(245, 158, 11, 0.5)'
-                                            : '1px solid rgba(16, 185, 129, 0.3)'
-                                    }}>
-                                        <div style={{
-                                            fontSize: '0.625rem',
-                                            fontWeight: '600',
-                                            color: miner.autoControlState.stateMatches === false ? '#fbbf24' : '#10b981',
-                                            marginBottom: '0.5rem',
-                                            textTransform: 'uppercase',
-                                            letterSpacing: '0.05em'
-                                        }}>
-                                            {miner.autoControlState.stateMatches === false ? '⚡ Syncing State...' : '✓ State Synced'}
-                                        </div>
-                                        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.5rem' }}>
-                                            <div>
-                                                <div style={{ fontSize: '0.625rem', color: '#9ca3af' }}>Current</div>
-                                                <div style={{
-                                                    fontSize: '0.75rem',
-                                                    fontWeight: '600',
-                                                    color: miner.isPaused ? '#f87171' : '#4ade80'
-                                                }}>
-                                                    {miner.isPaused ? 'PAUSED' : 'MINING'}
-                                                </div>
-                                            </div>
-                                            <div>
-                                                <div style={{ fontSize: '0.625rem', color: '#9ca3af' }}>Intended</div>
-                                                <div style={{
-                                                    fontSize: '0.75rem',
-                                                    fontWeight: '600',
-                                                    color: miner.autoControlState.intendedState === 'paused' ? '#f87171' : '#4ade80'
-                                                }}>
-                                                    {miner.autoControlState.intendedState?.toUpperCase() || 'N/A'}
-                                                </div>
-                                            </div>
-                                        </div>
-
-                                        {/* SCOP Display - show both measured and override */}
-                                        <div style={{
-                                            marginTop: '0.5rem',
-                                            padding: '0.375rem',
-                                            backgroundColor: 'rgba(0, 0, 0, 0.2)',
-                                            borderRadius: '0.25rem',
-                                            display: 'grid',
-                                            gridTemplateColumns: '1fr 1fr',
-                                            gap: '0.5rem'
-                                        }}>
-                                            <div>
-                                                <div style={{ fontSize: '0.5rem', color: '#9ca3af' }}>Measured SCOP</div>
-                                                <div style={{ fontSize: '0.75rem', fontWeight: '600', color: '#d1d5db' }}>
-                                                    {miner.efficiency?.effectiveSCOP?.toFixed(2) || 'N/A'}
-                                                </div>
-                                                <div style={{ fontSize: '0.5rem', color: '#6b7280' }}>(for reference)</div>
-                                            </div>
-                                            <div>
-                                                <div style={{ fontSize: '0.5rem', color: '#a78bfa' }}>
-                                                    Override SCOP
-                                                    {miner.autoControlState.projectedSource === 'override' && ' ✓'}
-                                                </div>
-                                                <div style={{ fontSize: '0.75rem', fontWeight: '600', color: '#a78bfa' }}>
-                                                    {miner.autoControlState.projectedSCOP?.toFixed(2) || 'N/A'}
-                                                </div>
-                                                <div style={{ fontSize: '0.5rem', color: '#a78bfa' }}>(controls miner)</div>
-                                            </div>
-                                        </div>
-
-                                        {/* Show control decision */}
-                                        <div style={{
-                                            marginTop: '0.375rem',
-                                            fontSize: '0.5rem',
-                                            color: '#6b7280',
-                                            padding: '0.25rem',
-                                            backgroundColor: 'rgba(139, 92, 246, 0.1)',
-                                            borderRadius: '0.25rem'
-                                        }}>
-                                            <strong>Control:</strong> Override SCOP {miner.autoControlState.scopUsed?.toFixed(2) || 'N/A'}
-                                            {miner.autoControlState.scopUsed && miner.autoControl?.scopThreshold &&
-                                                ` ${miner.autoControlState.scopUsed >= miner.autoControl.scopThreshold ? '≥' : '<'} ${miner.autoControl.scopThreshold}`
-                                            }
-                                        </div>
-
-                                        {miner.autoControlState.stateReason && (
-                                            <div style={{
-                                                marginTop: '0.5rem',
-                                                fontSize: '0.625rem',
-                                                color: '#9ca3af',
-                                                fontStyle: 'italic'
-                                            }}>
-                                                {miner.autoControlState.stateReason}
-                                            </div>
-                                        )}
-                                        {miner.autoControlState.lastSyncError && (
-                                            <div style={{
-                                                marginTop: '0.5rem',
-                                                fontSize: '0.625rem',
-                                                color: '#f87171',
-                                                backgroundColor: 'rgba(239, 68, 68, 0.1)',
-                                                padding: '0.25rem 0.5rem',
-                                                borderRadius: '0.25rem'
-                                            }}>
-                                                Error: {miner.autoControlState.lastSyncError}
-                                            </div>
-                                        )}
-                                    </div>
-                                )}
-                            </div>
-                        )}
                     </div>
 
                     {/* Pool Stats */}
@@ -2891,10 +2595,10 @@
                         </div>
                     </div>
 
-                    {/* Auto Mining Control Terminal */}
-                    <AutoControlTerminal
+                    {/* Unified Auto Control Panel */}
+                    <UnifiedAutoControlPanel
                         miner={miner}
-                        onUpdateSettings={onUpdateAutoMiningControl}
+                        onUpdateSettings={onUpdateAutoControl}
                         onClearLogs={onClearAutoControlLogs}
                     />
                 </div>
@@ -4073,26 +3777,6 @@
                 }
             };
 
-            // Update auto mining control settings (comprehensive hardware monitoring)
-            const updateAutoMiningControl = async (minerIp, settings) => {
-                try {
-                    const response = await fetch('/api/miner/auto-mining-control', {
-                        method: 'POST',
-                        headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({ ip: minerIp, ...settings })
-                    });
-                    const data = await response.json();
-                    if (!response.ok) {
-                        throw new Error(data.error || 'Failed to update auto mining control settings');
-                    }
-                    console.log('Auto mining control settings updated:', data);
-                    // Reload config to get updated settings
-                    loadConfig();
-                } catch (err) {
-                    setError(err.message);
-                }
-            };
-
             // Clear auto control logs for a miner
             const clearAutoControlLogs = async (minerIp) => {
                 try {
@@ -4281,7 +3965,6 @@
                                                 onPauseMining={pauseMining}
                                                 onResumeMining={resumeMining}
                                                 onUpdateAutoControl={updateAutoControl}
-                                                onUpdateAutoMiningControl={updateAutoMiningControl}
                                                 onClearAutoControlLogs={clearAutoControlLogs}
                                             />
                                         ))}

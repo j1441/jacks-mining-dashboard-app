@@ -419,6 +419,190 @@ async function getMiningStatus(ip) {
   }
 }
 
+// ============================================================================
+// Unified Auto Control Configuration and Migration
+// ============================================================================
+
+/**
+ * Get default unified auto control settings
+ * Single configuration structure for all auto control features
+ */
+function getDefaultAutoControlSettings() {
+  return {
+    enabled: false,
+
+    // Priority 1: Safety (Critical - bypasses cooldown)
+    safety: {
+      maxChipTemp: 95                    // PAUSE immediately if exceeded
+    },
+
+    // Priority 2 & 3: Thermal management
+    thermal: {
+      maxBoardTemp: 75,                  // Power down if exceeded
+      maxFanSpeed: 6000,                 // Power down if exceeded
+      minBoardTemp: 20,                  // Heating mode - power up/resume
+      cooldownSeconds: 60,               // Between adjustments
+      recoveryDelaySeconds: 300          // Before power recovery
+    },
+
+    // Power control bounds
+    power: {
+      maxPower: 3500,                    // Upper limit (W)
+      minPower: 1500,                    // Floor (W)
+      powerStepDown: 250,                // W per thermal reduction
+      powerStepUp: 100                   // W per recovery/heating step
+    },
+
+    // Priority 4: Economic optimization
+    economics: {
+      scopThreshold: 2.0,                // Reduce power below this SCOP
+      minSCOPForMaxPower: 3.0,           // Only max power above this
+      efficiencyOverride: null,          // { power, hashrate } for projection
+      economicPowerStep: 100,            // W to reduce for economics
+      economicPauseEnabled: false        // Allow pause (not just power reduction)
+    },
+
+    // Monitoring alerts (non-control)
+    alerts: {
+      minHashrate: 100,
+      minActiveBoards: 3
+    }
+  };
+}
+
+/**
+ * Deep merge user settings with defaults
+ */
+function mergeAutoControlWithDefaults(userConfig) {
+  const defaults = getDefaultAutoControlSettings();
+  if (!userConfig) return defaults;
+
+  return {
+    enabled: userConfig.enabled ?? defaults.enabled,
+    safety: { ...defaults.safety, ...userConfig.safety },
+    thermal: { ...defaults.thermal, ...userConfig.thermal },
+    power: { ...defaults.power, ...userConfig.power },
+    economics: { ...defaults.economics, ...userConfig.economics },
+    alerts: { ...defaults.alerts, ...userConfig.alerts }
+  };
+}
+
+/**
+ * Detect config format for migration
+ * @returns {'unified'|'scop_legacy'|'thermal_legacy'|'both_legacy'|'none'}
+ */
+function detectAutoControlConfigFormat(minerConfig) {
+  // Check for unified format (has safety/thermal/power/economics structure)
+  const hasUnified = minerConfig.autoControl?.safety ||
+                     minerConfig.autoControl?.thermal ||
+                     minerConfig.autoControl?.power ||
+                     minerConfig.autoControl?.economics;
+
+  if (hasUnified) return 'unified';
+
+  // Check for legacy SCOP format (has scopThreshold at top level of autoControl)
+  const hasLegacySCOP = minerConfig.autoControl &&
+    ('scopThreshold' in minerConfig.autoControl || 'efficiencyOverride' in minerConfig.autoControl);
+
+  // Check for legacy thermal format (has autoMiningControl object)
+  const hasLegacyThermal = !!minerConfig.autoMiningControl;
+
+  if (hasLegacySCOP && hasLegacyThermal) return 'both_legacy';
+  if (hasLegacySCOP) return 'scop_legacy';
+  if (hasLegacyThermal) return 'thermal_legacy';
+
+  return 'none';
+}
+
+/**
+ * Migrate old config formats to unified structure
+ */
+function migrateToUnifiedAutoControl(minerConfig) {
+  const format = detectAutoControlConfigFormat(minerConfig);
+
+  if (format === 'unified') {
+    return minerConfig.autoControl;
+  }
+
+  if (format === 'none') {
+    return getDefaultAutoControlSettings();
+  }
+
+  const defaults = getDefaultAutoControlSettings();
+  const unified = JSON.parse(JSON.stringify(defaults)); // Deep clone
+
+  // Migrate legacy SCOP settings
+  if (minerConfig.autoControl) {
+    const old = minerConfig.autoControl;
+    unified.enabled = unified.enabled || old.enabled;
+
+    if (old.scopThreshold !== undefined) {
+      unified.economics.scopThreshold = old.scopThreshold;
+    }
+    if (old.minTemperature !== undefined) {
+      unified.thermal.minBoardTemp = old.minTemperature;
+    }
+    if (old.efficiencyOverride) {
+      unified.economics.efficiencyOverride = old.efficiencyOverride;
+    }
+  }
+
+  // Migrate legacy thermal settings
+  if (minerConfig.autoMiningControl) {
+    const old = minerConfig.autoMiningControl;
+    unified.enabled = unified.enabled || old.enabled;
+
+    if (old.thresholds) {
+      if (old.thresholds.maxChipTemp !== undefined) {
+        unified.safety.maxChipTemp = old.thresholds.maxChipTemp;
+      }
+      if (old.thresholds.maxBoardTemp !== undefined) {
+        unified.thermal.maxBoardTemp = old.thresholds.maxBoardTemp;
+      }
+      if (old.thresholds.minBoardTemp !== undefined) {
+        unified.thermal.minBoardTemp = old.thresholds.minBoardTemp;
+      }
+      if (old.thresholds.maxFanSpeed !== undefined) {
+        unified.thermal.maxFanSpeed = old.thresholds.maxFanSpeed;
+      }
+      if (old.thresholds.maxPower !== undefined) {
+        unified.power.maxPower = old.thresholds.maxPower;
+      }
+      if (old.thresholds.minPower !== undefined) {
+        unified.power.minPower = old.thresholds.minPower;
+      }
+      if (old.thresholds.minHashrate !== undefined) {
+        unified.alerts.minHashrate = old.thresholds.minHashrate;
+      }
+      if (old.thresholds.minActiveBoards !== undefined) {
+        unified.alerts.minActiveBoards = old.thresholds.minActiveBoards;
+      }
+    }
+
+    if (old.behavior) {
+      if (old.behavior.powerStepDown !== undefined) {
+        unified.power.powerStepDown = old.behavior.powerStepDown;
+      }
+      if (old.behavior.powerStepUp !== undefined) {
+        unified.power.powerStepUp = old.behavior.powerStepUp;
+      }
+      if (old.behavior.cooldownSeconds !== undefined) {
+        unified.thermal.cooldownSeconds = old.behavior.cooldownSeconds;
+      }
+      if (old.behavior.recoveryDelaySeconds !== undefined) {
+        unified.thermal.recoveryDelaySeconds = old.behavior.recoveryDelaySeconds;
+      }
+    }
+  }
+
+  console.log(`[Migration] Converted ${format} config to unified format`);
+  return unified;
+}
+
+// ============================================================================
+// Legacy SCOP Functions (to be replaced by unified control)
+// ============================================================================
+
 /**
  * Calculate projected SCOP based on expected efficiency when miner would be running
  * @param {number} powerWatts - Expected power consumption
@@ -448,276 +632,15 @@ function calculateProjectedSCOP(powerWatts, hashrateTHs, electricityPrice, btcPr
   return Math.min(effectiveSCOP, 10);
 }
 
-/**
- * Determine what state the miner should be in based on SCOP and temperature
- * Always uses projected SCOP from manual override for decisions
- * @returns {{ intendedState: 'mining'|'paused', reason: string, scopUsed: number, scopType: string }}
- */
-function determineIntendedState(projectedSCOP, boardTemp, threshold, minTemp) {
-  // Priority 1: Temperature override - if board temp is below minimum, must mine for heat
-  if (minTemp !== undefined && boardTemp !== undefined && boardTemp < minTemp) {
-    return {
-      intendedState: 'mining',
-      reason: `Board temp ${boardTemp.toFixed(1)}°C < min ${minTemp}°C (heating needed)`,
-      scopUsed: projectedSCOP,
-      scopType: 'override'
-    };
-  }
-
-  // Priority 2: SCOP-based decision
-  // ALWAYS use projected SCOP (from manual override) for control decisions
-  // The measured SCOP is only used for comparison/validation
-  const scopToUse = projectedSCOP;
-  const scopType = 'override';
-
-  if (scopToUse === undefined || scopToUse === null) {
-    return {
-      intendedState: 'mining',
-      reason: `Override SCOP not configured, defaulting to mining`,
-      scopUsed: null,
-      scopType: 'none'
-    };
-  }
-
-  if (scopToUse >= threshold) {
-    return {
-      intendedState: 'mining',
-      reason: `Override SCOP ${scopToUse.toFixed(2)} >= threshold ${threshold} (profitable)`,
-      scopUsed: scopToUse,
-      scopType
-    };
-  } else {
-    return {
-      intendedState: 'paused',
-      reason: `Override SCOP ${scopToUse.toFixed(2)} < threshold ${threshold} (unprofitable)`,
-      scopUsed: scopToUse,
-      scopType
-    };
-  }
-}
-
-/**
- * Check SCOP thresholds and actively control miners
- * This function ensures the miner is in the correct state when auto-control is enabled
- * Called periodically during miner polling
- */
-async function checkSCOPThresholds(minerIp, stats, minerConfig) {
-  // Determine actual miner state from hashrate (more reliable than stored state)
-  const hashrate = stats.hashrate || 0;
-  const actuallyMining = hashrate > 0.1; // More than 0.1 TH/s means mining
-  const actualState = actuallyMining ? 'mining' : 'paused';
-
-  if (!minerConfig.autoControl?.enabled) {
-    // For manual control, intended state matches actual state (user controls it)
-    minerControlState[minerIp] = {
-      ...minerControlState[minerIp],
-      intendedState: actualState,
-      stateReason: 'Manual control - state set by user'
-    };
-    return;
-  }
-
-  const scop = stats.efficiency?.effectiveSCOP;
-  const currentPrice = stats.efficiency?.hourlyElectricityCost ?
-    (stats.efficiency.hourlyElectricityCost / (stats.efficiency.dailyKWh / 24)) : null;
-
-  // Use board temperature (not chip temp) for room temp estimation
-  const boardTemps = stats.boards
-    ?.map(b => b.temp)
-    .filter(t => t !== null && t !== undefined && t > 0) || [];
-  const boardTemp = boardTemps.length > 0
-    ? boardTemps.reduce((a, b) => a + b, 0) / boardTemps.length
-    : stats.temperature;
-
-  const threshold = minerConfig.autoControl.scopThreshold || 2.0;
-  const minTemp = minerConfig.autoControl.minTemperature;
-
-  // Get efficiency override or use measured values
-  const efficiencyOverride = minerConfig.autoControl.efficiencyOverride; // { power: watts, hashrate: TH/s }
-
-  const state = minerControlState[minerIp] || {};
-  const power = stats.power || 0;
-  const isPaused = !actuallyMining;
-
-  // If miner is actively mining, update measured efficiency tracking
-  if (actuallyMining && hashrate > 0 && power > 0) {
-    const currentEfficiency = power / hashrate; // W/TH
-    const now = new Date();
-
-    // Initialize efficiency tracking if not exists
-    if (!state.efficiencyTracking) {
-      state.efficiencyTracking = {
-        samples: [],
-        best1hPower: null,
-        best1hHashrate: null,
-        best1hEfficiency: null,
-        best1hTimestamp: null
-      };
-    }
-
-    // Add current sample (keep last 12 samples = 1 hour at 5s intervals)
-    state.efficiencyTracking.samples.push({
-      power,
-      hashrate,
-      efficiency: currentEfficiency,
-      timestamp: now
-    });
-
-    // Keep only last 12 samples (1 minute at 5-second polling)
-    // For 1h we'd need 720 samples, but let's keep a rolling window
-    const maxSamples = 720; // 1 hour of data at 5-second intervals
-    if (state.efficiencyTracking.samples.length > maxSamples) {
-      state.efficiencyTracking.samples = state.efficiencyTracking.samples.slice(-maxSamples);
-    }
-
-    // Calculate average from all samples
-    const avgPower = state.efficiencyTracking.samples.reduce((sum, s) => sum + s.power, 0) / state.efficiencyTracking.samples.length;
-    const avgHashrate = state.efficiencyTracking.samples.reduce((sum, s) => sum + s.hashrate, 0) / state.efficiencyTracking.samples.length;
-    const avgEfficiency = avgPower / avgHashrate;
-
-    // Update best 1h efficiency if this is better (lower W/TH is better)
-    if (state.efficiencyTracking.best1hEfficiency === null || avgEfficiency < state.efficiencyTracking.best1hEfficiency) {
-      state.efficiencyTracking.best1hPower = avgPower;
-      state.efficiencyTracking.best1hHashrate = avgHashrate;
-      state.efficiencyTracking.best1hEfficiency = avgEfficiency;
-      state.efficiencyTracking.best1hTimestamp = now;
-    }
-
-    minerControlState[minerIp] = {
-      ...state,
-      measuredPower: power,
-      measuredHashrate: hashrate,
-      measuredEfficiency: currentEfficiency,
-      measuredAvgPower: avgPower,
-      measuredAvgHashrate: avgHashrate,
-      measuredAvgEfficiency: avgEfficiency,
-      lastEfficiencyUpdate: now
-    };
-  }
-
-  // Update actual state in our tracking
-  minerControlState[minerIp] = {
-    ...minerControlState[minerIp],
-    isPaused,
-    lastSCOPCheck: new Date()
-  };
-
-  // Calculate projected SCOP using ONLY the manual override
-  // Measured efficiency is tracked separately for comparison only
-  let projectedPower, projectedHashrate, projectedSource;
-
-  if (efficiencyOverride?.power && efficiencyOverride?.hashrate) {
-    projectedPower = efficiencyOverride.power;
-    projectedHashrate = efficiencyOverride.hashrate;
-    projectedSource = 'override';
-  } else {
-    // No override configured - auto-control cannot function
-    projectedPower = null;
-    projectedHashrate = null;
-    projectedSource = 'none';
-  }
-
-  // Get current electricity price and BTC price for projection
-  const btcPrice = stats.efficiency?.currentBTCPrice || networkStatsCache.btcPrice;
-  const electricityPrice = currentPrice || 0.5; // fallback
-
-  const projectedSCOP = projectedPower && projectedHashrate ?
-    calculateProjectedSCOP(projectedPower, projectedHashrate, electricityPrice, btcPrice) : null;
-
-  // Store projected values for frontend display
-  minerControlState[minerIp].projectedSCOP = projectedSCOP;
-  minerControlState[minerIp].projectedSource = projectedSource;
-  minerControlState[minerIp].projectedPower = projectedPower;
-  minerControlState[minerIp].projectedHashrate = projectedHashrate;
-
-  // Determine what state the miner SHOULD be in
-  const { intendedState, reason, scopUsed, scopType } = determineIntendedState(
-    projectedSCOP, boardTemp, threshold, minTemp
-  );
-
-  // Always update the intended state and reason
-  minerControlState[minerIp].intendedState = intendedState;
-  minerControlState[minerIp].stateReason = reason;
-  minerControlState[minerIp].scopUsed = scopUsed;
-  minerControlState[minerIp].scopType = scopType;
-
-  // Check if actual state matches intended state
-  const stateMatches = actualState === intendedState;
-
-  console.log(`[SCOP Auto-Control] ${minerIp}: measured SCOP=${scop?.toFixed(2) || 'N/A'}, projected SCOP=${projectedSCOP?.toFixed(2) || 'N/A'} (${projectedSource})`);
-  console.log(`  → boardTemp=${boardTemp?.toFixed(1) || 'N/A'}°C, hashrate=${hashrate.toFixed(2)} TH/s, power=${power}W`);
-  console.log(`  → Using ${scopType} SCOP: ${scopUsed?.toFixed(2) || 'N/A'}`);
-  console.log(`  → Actual: ${actualState.toUpperCase()}, Intended: ${intendedState.toUpperCase()}, Match: ${stateMatches ? 'YES' : 'NO'}`);
-  console.log(`  → Reason: ${reason}`);
-
-  // If states don't match, take corrective action
-  if (!stateMatches) {
-    // Rate limit control actions to prevent rapid toggling (at least 30 seconds between actions)
-    const lastAction = minerControlState[minerIp].lastControlAction;
-    const timeSinceLastAction = lastAction ? Date.now() - new Date(lastAction).getTime() : Infinity;
-
-    if (timeSinceLastAction < 30000) {
-      console.log(`  → Waiting for control cooldown (${Math.ceil((30000 - timeSinceLastAction) / 1000)}s remaining)`);
-      return;
-    }
-
-    try {
-      if (intendedState === 'paused') {
-        console.log(`  → ACTION: Pausing miner to match intended state`);
-        await pauseMining(minerIp, minerConfig);
-        minerControlState[minerIp].lastControlAction = new Date();
-        minerControlState[minerIp].controlAttempts = 0;
-        minerControlState[minerIp].lastSyncError = null;
-      } else if (intendedState === 'mining') {
-        console.log(`  → ACTION: Resuming miner to match intended state`);
-        await resumeMining(minerIp, minerConfig);
-        minerControlState[minerIp].lastControlAction = new Date();
-        minerControlState[minerIp].controlAttempts = 0;
-        minerControlState[minerIp].lastSyncError = null;
-      }
-    } catch (err) {
-      console.error(`  → ERROR: Failed to sync miner state: ${err.message}`);
-      minerControlState[minerIp].controlAttempts = (minerControlState[minerIp].controlAttempts || 0) + 1;
-      minerControlState[minerIp].lastSyncError = err.message;
-    }
-  } else {
-    // States match, clear any error state
-    minerControlState[minerIp].controlAttempts = 0;
-    minerControlState[minerIp].lastSyncError = null;
-  }
-}
+// NOTE: determineIntendedState and checkSCOPThresholds have been replaced by
+// the unified checkAutoControl function below
 
 // ============================================================================
 // Auto Mining Control Functions (Comprehensive Hardware Monitoring)
 // ============================================================================
 
-/**
- * Get default threshold values for auto mining control
- */
-function getDefaultAutoMiningThresholds() {
-  return {
-    maxChipTemp: 95,       // Pause if exceeded (critical)
-    maxBoardTemp: 75,      // Power down if exceeded
-    minBoardTemp: 20,      // Override SCOP for heating
-    maxFanSpeed: 6000,     // Power down if exceeded
-    maxPower: 3500,        // Max watts
-    minPower: 1500,        // Min watts floor
-    minHashrate: 100,      // Alert if below (TH/s)
-    minActiveBoards: 3     // Alert if below
-  };
-}
-
-/**
- * Get default behavior values for auto mining control
- */
-function getDefaultAutoMiningBehavior() {
-  return {
-    powerStepDown: 250,        // Watts to reduce per adjustment
-    powerStepUp: 100,          // Watts to increase per adjustment
-    cooldownSeconds: 60,       // Minimum seconds between adjustments
-    recoveryDelaySeconds: 300  // Delay before increasing power after reduction
-  };
-}
+// NOTE: getDefaultAutoMiningThresholds and getDefaultAutoMiningBehavior have been
+// replaced by getDefaultAutoControlSettings in the unified system
 
 /**
  * Log an auto control event to the buffer
@@ -796,110 +719,8 @@ function gatherMinerReadings(stats) {
   };
 }
 
-/**
- * Check for threshold violations
- */
-function checkMiningViolations(readings, thresholds) {
-  return {
-    chipTempCritical: readings.chipTemp > thresholds.maxChipTemp,
-    boardTempHigh: readings.maxBoardTemp !== null && readings.maxBoardTemp > thresholds.maxBoardTemp,
-    boardTempLow: readings.avgBoardTemp !== null && readings.avgBoardTemp < thresholds.minBoardTemp,
-    fanSpeedHigh: readings.maxFanSpeed !== null && readings.maxFanSpeed > thresholds.maxFanSpeed,
-    powerHigh: readings.power > thresholds.maxPower,
-    hashrateLow: readings.hashrate < thresholds.minHashrate && !readings.isPaused,
-    boardsLow: readings.activeBoards < thresholds.minActiveBoards,
-
-    // Severity flags
-    hasCritical: readings.chipTemp > thresholds.maxChipTemp,
-    hasWarning: (
-      (readings.maxBoardTemp !== null && readings.maxBoardTemp > thresholds.maxBoardTemp) ||
-      (readings.maxFanSpeed !== null && readings.maxFanSpeed > thresholds.maxFanSpeed)
-    )
-  };
-}
-
-/**
- * Determine what action to take based on readings and violations
- */
-function determineMiningAction(readings, violations, thresholds, behavior, state) {
-  const now = Date.now();
-  const lastAdjustment = state?.lastAdjustment ? new Date(state.lastAdjustment).getTime() : 0;
-  const timeSinceAdjustment = (now - lastAdjustment) / 1000;
-
-  // Cooldown check (except for critical situations)
-  if (timeSinceAdjustment < behavior.cooldownSeconds && !violations.hasCritical) {
-    return null;
-  }
-
-  // Priority 1: Critical chip temperature - PAUSE IMMEDIATELY
-  if (violations.chipTempCritical) {
-    return {
-      type: 'PAUSE',
-      reason: `CRITICAL: Chip temp ${readings.chipTemp}°C exceeds max ${thresholds.maxChipTemp}°C`,
-      severity: 'critical'
-    };
-  }
-
-  // Priority 2: Board temp low (heating needed) - RESUME if paused, increase power
-  if (violations.boardTempLow && readings.isPaused) {
-    return {
-      type: 'RESUME',
-      reason: `Heating needed: Board temp ${readings.avgBoardTemp?.toFixed(1)}°C below min ${thresholds.minBoardTemp}°C`,
-      severity: 'info'
-    };
-  }
-
-  if (violations.boardTempLow && !readings.isPaused && readings.powerLimit < thresholds.maxPower) {
-    return {
-      type: 'POWER_UP',
-      targetPower: Math.min(readings.powerLimit + behavior.powerStepUp, thresholds.maxPower),
-      reason: `Heating needed: Board temp ${readings.avgBoardTemp?.toFixed(1)}°C below min ${thresholds.minBoardTemp}°C`,
-      severity: 'info'
-    };
-  }
-
-  // Priority 3: High board temp or high fan speed - reduce power
-  if ((violations.boardTempHigh || violations.fanSpeedHigh) && !readings.isPaused) {
-    const newPower = Math.max(
-      readings.powerLimit - behavior.powerStepDown,
-      thresholds.minPower
-    );
-
-    if (newPower < readings.powerLimit) {
-      const reasons = [];
-      if (violations.boardTempHigh) {
-        reasons.push(`Board temp ${readings.maxBoardTemp}°C > max ${thresholds.maxBoardTemp}°C`);
-      }
-      if (violations.fanSpeedHigh) {
-        reasons.push(`Fan speed ${readings.maxFanSpeed} RPM > max ${thresholds.maxFanSpeed} RPM`);
-      }
-
-      return {
-        type: 'POWER_DOWN',
-        targetPower: newPower,
-        reason: `Thermal protection: ${reasons.join(', ')}`,
-        severity: 'warning'
-      };
-    }
-  }
-
-  // Priority 4: Recovery - increase power if stable for a while
-  if (timeSinceAdjustment > behavior.recoveryDelaySeconds &&
-      !violations.hasWarning &&
-      !violations.hasCritical &&
-      readings.powerLimit < thresholds.maxPower &&
-      state?.lastAdjustmentType === 'POWER_DOWN') {
-
-    return {
-      type: 'POWER_UP',
-      targetPower: Math.min(readings.powerLimit + behavior.powerStepUp, thresholds.maxPower),
-      reason: `Recovery: Stable temps for ${Math.round(timeSinceAdjustment)}s, increasing power`,
-      severity: 'info'
-    };
-  }
-
-  return null;
-}
+// NOTE: checkMiningViolations and determineMiningAction have been replaced by
+// determineUnifiedAction in the unified system
 
 /**
  * Execute a control action on the miner
@@ -972,15 +793,171 @@ async function executeMiningControlAction(minerIp, action, minerConfig, readings
   }
 }
 
-/**
- * Main auto mining control check - called during each poll cycle
- */
-async function checkAutoMiningControl(minerIp, stats, minerConfig) {
-  const config = minerConfig.autoMiningControl;
-  if (!config?.enabled) return;
+// NOTE: checkAutoMiningControl has been replaced by the unified checkAutoControl function below
 
-  const thresholds = { ...getDefaultAutoMiningThresholds(), ...config.thresholds };
-  const behavior = { ...getDefaultAutoMiningBehavior(), ...config.behavior };
+// ============================================================================
+// Unified Auto Control System (Replaces SCOP + Auto Mining Control)
+// ============================================================================
+
+/**
+ * Determine unified control action using strict priority hierarchy
+ * Priority order: Safety > Thermal > Heating > Economics > Recovery
+ * @returns {{ type: string, targetPower?: number, reason: string, severity: string, priority: number } | null}
+ */
+function determineUnifiedAction(readings, projectedSCOP, settings, state, stats) {
+  const now = Date.now();
+  const lastAdjustment = state?.lastAdjustment ? new Date(state.lastAdjustment).getTime() : 0;
+  const timeSinceAdjustment = (now - lastAdjustment) / 1000;
+
+  // PRIORITY 1: Safety - Critical chip temperature (bypasses cooldown)
+  if (readings.chipTemp > settings.safety.maxChipTemp) {
+    return {
+      type: 'PAUSE',
+      reason: `CRITICAL: Chip temp ${readings.chipTemp}°C > max ${settings.safety.maxChipTemp}°C`,
+      severity: 'critical',
+      priority: 1
+    };
+  }
+
+  // Cooldown check for non-critical actions
+  if (timeSinceAdjustment < settings.thermal.cooldownSeconds) {
+    return null;
+  }
+
+  // PRIORITY 2: Thermal Protection - High board temp or fan speed
+  const boardTempHigh = readings.maxBoardTemp !== null && readings.maxBoardTemp > settings.thermal.maxBoardTemp;
+  const fanSpeedHigh = readings.maxFanSpeed !== null && readings.maxFanSpeed > settings.thermal.maxFanSpeed;
+
+  if ((boardTempHigh || fanSpeedHigh) && !readings.isPaused) {
+    const targetPower = Math.max(
+      readings.powerLimit - settings.power.powerStepDown,
+      settings.power.minPower
+    );
+
+    if (targetPower < readings.powerLimit) {
+      const reasons = [];
+      if (boardTempHigh) {
+        reasons.push(`Board ${readings.maxBoardTemp}°C > ${settings.thermal.maxBoardTemp}°C`);
+      }
+      if (fanSpeedHigh) {
+        reasons.push(`Fan ${readings.maxFanSpeed} RPM > ${settings.thermal.maxFanSpeed} RPM`);
+      }
+
+      return {
+        type: 'POWER_DOWN',
+        targetPower,
+        reason: `Thermal: ${reasons.join(', ')}`,
+        severity: 'warning',
+        priority: 2
+      };
+    }
+  }
+
+  // PRIORITY 3: Heating Mode - Low board temperature
+  const boardTempLow = readings.avgBoardTemp !== null && readings.avgBoardTemp < settings.thermal.minBoardTemp;
+
+  if (boardTempLow) {
+    if (readings.isPaused) {
+      return {
+        type: 'RESUME',
+        reason: `Heating: Board temp ${readings.avgBoardTemp?.toFixed(1)}°C < min ${settings.thermal.minBoardTemp}°C`,
+        severity: 'info',
+        priority: 3
+      };
+    }
+
+    if (readings.powerLimit < settings.power.maxPower) {
+      return {
+        type: 'POWER_UP',
+        targetPower: Math.min(readings.powerLimit + settings.power.powerStepUp, settings.power.maxPower),
+        reason: `Heating: Board temp ${readings.avgBoardTemp?.toFixed(1)}°C needs more heat`,
+        severity: 'info',
+        priority: 3
+      };
+    }
+  }
+
+  // PRIORITY 4: Economic Optimization - Low SCOP
+  if (projectedSCOP !== null && projectedSCOP < settings.economics.scopThreshold && !readings.isPaused) {
+    // First try to reduce power
+    const targetPower = Math.max(
+      readings.powerLimit - settings.economics.economicPowerStep,
+      settings.power.minPower
+    );
+
+    if (targetPower < readings.powerLimit) {
+      return {
+        type: 'POWER_DOWN',
+        targetPower,
+        reason: `Economic: SCOP ${projectedSCOP.toFixed(2)} < threshold ${settings.economics.scopThreshold}`,
+        severity: 'info',
+        priority: 4
+      };
+    }
+
+    // If at min power and pause is enabled, pause completely
+    if (settings.economics.economicPauseEnabled && readings.powerLimit <= settings.power.minPower) {
+      return {
+        type: 'PAUSE',
+        reason: `Economic: At min power ${settings.power.minPower}W, SCOP ${projectedSCOP.toFixed(2)} still below threshold`,
+        severity: 'info',
+        priority: 4
+      };
+    }
+  }
+
+  // PRIORITY 5: Recovery - Increase power if stable
+  const noViolations = !boardTempHigh && !fanSpeedHigh && readings.chipTemp <= settings.safety.maxChipTemp;
+  const canRecover = timeSinceAdjustment > settings.thermal.recoveryDelaySeconds &&
+                     noViolations &&
+                     readings.powerLimit < settings.power.maxPower &&
+                     !readings.isPaused;
+
+  if (canRecover) {
+    // Check if SCOP allows recovery (if configured)
+    const scopAllows = projectedSCOP === null || projectedSCOP >= settings.economics.minSCOPForMaxPower;
+
+    // Only recover if last action was a power reduction
+    const wasReduction = state?.lastAdjustmentType === 'POWER_DOWN';
+
+    if (scopAllows && wasReduction) {
+      return {
+        type: 'POWER_UP',
+        targetPower: Math.min(readings.powerLimit + settings.power.powerStepUp, settings.power.maxPower),
+        reason: `Recovery: Stable for ${Math.round(timeSinceAdjustment)}s, SCOP ${projectedSCOP?.toFixed(2) || 'N/A'} allows increase`,
+        severity: 'info',
+        priority: 5
+      };
+    }
+  }
+
+  return null;
+}
+
+/**
+ * Unified auto control check - single control loop for all auto control features
+ * Replaces both checkSCOPThresholds and checkAutoMiningControl
+ * @param {string} minerIp - Miner IP address
+ * @param {object} stats - Current miner statistics
+ * @param {object} minerConfig - Miner configuration including autoControl
+ */
+async function checkAutoControl(minerIp, stats, minerConfig) {
+  // Check if unified config exists and is enabled
+  const rawConfig = minerConfig.autoControl;
+  if (!rawConfig?.enabled) {
+    // Update state to reflect manual control
+    if (!minerControlState[minerIp]) {
+      minerControlState[minerIp] = {};
+    }
+    const hashrate = stats.hashrate || 0;
+    const actualState = hashrate > 0.1 ? 'mining' : 'paused';
+    minerControlState[minerIp].intendedState = actualState;
+    minerControlState[minerIp].stateReason = 'Manual control - auto control disabled';
+    return;
+  }
+
+  // Merge with defaults
+  const settings = mergeAutoControlWithDefaults(rawConfig);
 
   // Initialize state if needed
   if (!minerControlState[minerIp]) {
@@ -991,26 +968,54 @@ async function checkAutoMiningControl(minerIp, stats, minerConfig) {
   // Step 1: Gather current readings
   const readings = gatherMinerReadings(stats);
 
-  // Step 2: Check violations
-  const violations = checkMiningViolations(readings, thresholds);
+  // Step 2: Calculate projected SCOP if efficiency override is configured
+  let projectedSCOP = null;
+  const effOverride = settings.economics.efficiencyOverride;
 
-  // Step 3: Log current state check
+  if (effOverride?.power && effOverride?.hashrate) {
+    const currentPrice = stats.efficiency?.hourlyElectricityCost
+      ? (stats.efficiency.hourlyElectricityCost / (stats.efficiency.dailyKWh / 24))
+      : 0.5; // fallback
+    const btcPrice = stats.efficiency?.currentBTCPrice || networkStatsCache.btcPrice;
+
+    projectedSCOP = calculateProjectedSCOP(
+      effOverride.power,
+      effOverride.hashrate,
+      currentPrice,
+      btcPrice
+    );
+  }
+
+  // Step 3: Determine action using priority chain
+  const action = determineUnifiedAction(readings, projectedSCOP, settings, state, stats);
+
+  // Step 4: Log state check
   const tempInfo = `Chip ${readings.chipTemp}°C`;
   const boardInfo = readings.avgBoardTemp !== null ? `, Board ${readings.avgBoardTemp.toFixed(1)}°C` : '';
   const fanInfo = readings.avgFanSpeed !== null ? `, Fan ${readings.avgFanSpeed} RPM` : '';
-  const powerInfo = `, Power ${readings.power}W`;
+  const powerInfo = `, Power ${readings.power}W/${readings.powerLimit}W`;
   const hashrateInfo = `, ${readings.hashrate.toFixed(1)} TH/s`;
+  const scopInfo = projectedSCOP !== null ? `, SCOP ${projectedSCOP.toFixed(2)}` : '';
+
+  const violations = {
+    chipTempCritical: readings.chipTemp > settings.safety.maxChipTemp,
+    boardTempHigh: readings.maxBoardTemp !== null && readings.maxBoardTemp > settings.thermal.maxBoardTemp,
+    boardTempLow: readings.avgBoardTemp !== null && readings.avgBoardTemp < settings.thermal.minBoardTemp,
+    fanSpeedHigh: readings.maxFanSpeed !== null && readings.maxFanSpeed > settings.thermal.maxFanSpeed,
+    scopLow: projectedSCOP !== null && projectedSCOP < settings.economics.scopThreshold,
+    hasCritical: readings.chipTemp > settings.safety.maxChipTemp,
+    hasWarning: (readings.maxBoardTemp !== null && readings.maxBoardTemp > settings.thermal.maxBoardTemp) ||
+                (readings.maxFanSpeed !== null && readings.maxFanSpeed > settings.thermal.maxFanSpeed)
+  };
 
   logAutoControlEvent(minerIp, {
     type: 'CHECK',
     severity: violations.hasCritical ? 'critical' : violations.hasWarning ? 'warning' : 'info',
-    message: `State check: ${tempInfo}${boardInfo}${fanInfo}${powerInfo}${hashrateInfo}`,
-    details: { readings, thresholds, violations }
+    message: `State check: ${tempInfo}${boardInfo}${fanInfo}${powerInfo}${hashrateInfo}${scopInfo}`,
+    details: { readings, settings, violations, projectedSCOP, action: action?.type || 'none' }
   });
 
-  // Step 4: Determine and execute action
-  const action = determineMiningAction(readings, violations, thresholds, behavior, state);
-
+  // Step 5: Execute action if any
   if (action) {
     await executeMiningControlAction(minerIp, action, minerConfig, readings);
 
@@ -1019,18 +1024,39 @@ async function checkAutoMiningControl(minerIp, stats, minerConfig) {
       ...state,
       lastAdjustment: new Date().toISOString(),
       lastAdjustmentType: action.type,
+      lastActionPriority: action.priority,
       currentTargetPower: action.targetPower || readings.powerLimit,
       adjustmentReason: action.reason
     };
   }
 
-  // Step 5: Update state with current readings
+  // Step 6: Update state with current readings and SCOP
+  const actualState = readings.isPaused ? 'paused' : 'mining';
+  const intendedState = action?.type === 'PAUSE' ? 'paused' :
+                        action?.type === 'RESUME' ? 'mining' : actualState;
+
   minerControlState[minerIp].autoMiningControlState = {
     ...minerControlState[minerIp].autoMiningControlState,
     lastCheck: new Date().toISOString(),
     readings,
     violations
   };
+
+  // Update top-level state for backward compatibility
+  minerControlState[minerIp].intendedState = intendedState;
+  minerControlState[minerIp].stateReason = action?.reason || 'No action needed - within thresholds';
+  minerControlState[minerIp].projectedSCOP = projectedSCOP;
+  minerControlState[minerIp].projectedSource = effOverride ? 'override' : 'none';
+  minerControlState[minerIp].scopUsed = projectedSCOP;
+  minerControlState[minerIp].scopType = effOverride ? 'override' : 'none';
+
+  // Track efficiency if mining
+  if (!readings.isPaused && readings.hashrate > 0 && readings.power > 0) {
+    minerControlState[minerIp].measuredPower = readings.power;
+    minerControlState[minerIp].measuredHashrate = readings.hashrate;
+    minerControlState[minerIp].measuredEfficiency = readings.power / readings.hashrate;
+    minerControlState[minerIp].lastEfficiencyUpdate = new Date().toISOString();
+  }
 }
 
 // ============================================================================
@@ -3831,6 +3857,25 @@ async function loadConfig() {
       await saveConfig(config);
     }
 
+    // Migrate legacy auto control configs to unified format
+    let autoControlMigrated = false;
+    for (const miner of config.miners || []) {
+      const format = detectAutoControlConfigFormat(miner);
+      if (format !== 'unified' && format !== 'none') {
+        console.log(`[Config Migration] Converting ${miner.ip} from ${format} to unified auto control format`);
+        miner.autoControl = migrateToUnifiedAutoControl(miner);
+        // Remove legacy autoMiningControl object
+        if (miner.autoMiningControl) {
+          delete miner.autoMiningControl;
+        }
+        autoControlMigrated = true;
+      }
+    }
+    if (autoControlMigrated) {
+      await saveConfig(config);
+      console.log('[Config Migration] Auto control migration complete');
+    }
+
     return config;
   } catch (err) {
     if (err.code === 'ENOENT') {
@@ -4251,10 +4296,11 @@ app.get('/api/miner/status', async (req, res) => {
   }
 });
 
-// Update auto-control settings for a miner
+// Update unified auto-control settings for a miner
+// Accepts both legacy format (scopThreshold, minTemperature) and unified format (safety, thermal, power, economics)
 app.post('/api/miner/auto-control', async (req, res) => {
   try {
-    const { ip, enabled, scopThreshold, minTemperature, efficiencyOverride } = req.body;
+    const { ip, enabled, ...settings } = req.body;
 
     if (!ip) {
       return res.status(400).json({ error: 'No miner IP provided' });
@@ -4267,19 +4313,50 @@ app.post('/api/miner/auto-control', async (req, res) => {
       return res.status(404).json({ error: 'Miner not found' });
     }
 
-    // Initialize or update autoControl settings
-    miner.autoControl = {
-      enabled: enabled !== undefined ? enabled : (miner.autoControl?.enabled || false),
-      scopThreshold: scopThreshold !== undefined ? scopThreshold : (miner.autoControl?.scopThreshold || 2.0),
-      minTemperature: minTemperature !== undefined ? minTemperature : miner.autoControl?.minTemperature,
-      // Efficiency override for projected SCOP calculation when paused
-      // { power: watts, hashrate: TH/s }
-      efficiencyOverride: efficiencyOverride !== undefined ? efficiencyOverride : miner.autoControl?.efficiencyOverride
-    };
+    // Detect if this is a legacy format request
+    const isLegacyFormat = 'scopThreshold' in settings ||
+                          'minTemperature' in settings ||
+                          ('efficiencyOverride' in settings && !('economics' in settings));
+
+    if (isLegacyFormat) {
+      // Handle legacy SCOP format - convert to unified
+      console.log(`[API] Converting legacy SCOP format for ${ip}`);
+      const { scopThreshold, minTemperature, efficiencyOverride } = settings;
+
+      // Ensure we have unified structure
+      if (!miner.autoControl?.safety) {
+        miner.autoControl = migrateToUnifiedAutoControl(miner);
+      }
+
+      // Apply legacy settings to unified structure
+      if (enabled !== undefined) miner.autoControl.enabled = enabled;
+      if (scopThreshold !== undefined) miner.autoControl.economics.scopThreshold = scopThreshold;
+      if (minTemperature !== undefined) miner.autoControl.thermal.minBoardTemp = minTemperature;
+      if (efficiencyOverride !== undefined) miner.autoControl.economics.efficiencyOverride = efficiencyOverride;
+
+    } else {
+      // Handle unified format - deep merge
+      const defaults = getDefaultAutoControlSettings();
+      const existing = miner.autoControl?.safety ? miner.autoControl : migrateToUnifiedAutoControl(miner);
+
+      miner.autoControl = {
+        enabled: enabled !== undefined ? enabled : existing.enabled,
+        safety: { ...defaults.safety, ...existing.safety, ...settings.safety },
+        thermal: { ...defaults.thermal, ...existing.thermal, ...settings.thermal },
+        power: { ...defaults.power, ...existing.power, ...settings.power },
+        economics: { ...defaults.economics, ...existing.economics, ...settings.economics },
+        alerts: { ...defaults.alerts, ...existing.alerts, ...settings.alerts }
+      };
+    }
+
+    // Remove legacy autoMiningControl if it exists (migrated to unified)
+    if (miner.autoMiningControl) {
+      delete miner.autoMiningControl;
+    }
 
     await saveConfig(config);
 
-    console.log(`Auto-control settings updated for ${ip}:`, miner.autoControl);
+    console.log(`Unified auto-control settings updated for ${ip}:`, miner.autoControl);
     res.json({ success: true, autoControl: miner.autoControl });
   } catch (err) {
     console.error('API auto-control error:', err);
@@ -4287,8 +4364,10 @@ app.post('/api/miner/auto-control', async (req, res) => {
   }
 });
 
-// Update auto mining control settings (comprehensive hardware monitoring)
+// DEPRECATED: Legacy endpoint for auto mining control - redirects to unified
 app.post('/api/miner/auto-mining-control', async (req, res) => {
+  console.warn('[DEPRECATED] /api/miner/auto-mining-control is deprecated. Use /api/miner/auto-control instead.');
+
   try {
     const { ip, enabled, thresholds, behavior } = req.body;
 
@@ -4303,23 +4382,41 @@ app.post('/api/miner/auto-mining-control', async (req, res) => {
       return res.status(404).json({ error: 'Miner not found' });
     }
 
-    // Initialize or update autoMiningControl settings
-    miner.autoMiningControl = {
-      enabled: enabled !== undefined ? enabled : (miner.autoMiningControl?.enabled || false),
-      thresholds: {
-        ...(miner.autoMiningControl?.thresholds || getDefaultAutoMiningThresholds()),
-        ...thresholds
-      },
-      behavior: {
-        ...(miner.autoMiningControl?.behavior || getDefaultAutoMiningBehavior()),
-        ...behavior
-      }
-    };
+    // Migrate to unified format if not already
+    if (!miner.autoControl?.safety) {
+      miner.autoControl = migrateToUnifiedAutoControl(miner);
+    }
+
+    // Apply legacy thermal settings to unified structure
+    if (enabled !== undefined) miner.autoControl.enabled = enabled;
+
+    if (thresholds) {
+      if (thresholds.maxChipTemp !== undefined) miner.autoControl.safety.maxChipTemp = thresholds.maxChipTemp;
+      if (thresholds.maxBoardTemp !== undefined) miner.autoControl.thermal.maxBoardTemp = thresholds.maxBoardTemp;
+      if (thresholds.minBoardTemp !== undefined) miner.autoControl.thermal.minBoardTemp = thresholds.minBoardTemp;
+      if (thresholds.maxFanSpeed !== undefined) miner.autoControl.thermal.maxFanSpeed = thresholds.maxFanSpeed;
+      if (thresholds.maxPower !== undefined) miner.autoControl.power.maxPower = thresholds.maxPower;
+      if (thresholds.minPower !== undefined) miner.autoControl.power.minPower = thresholds.minPower;
+      if (thresholds.minHashrate !== undefined) miner.autoControl.alerts.minHashrate = thresholds.minHashrate;
+      if (thresholds.minActiveBoards !== undefined) miner.autoControl.alerts.minActiveBoards = thresholds.minActiveBoards;
+    }
+
+    if (behavior) {
+      if (behavior.powerStepDown !== undefined) miner.autoControl.power.powerStepDown = behavior.powerStepDown;
+      if (behavior.powerStepUp !== undefined) miner.autoControl.power.powerStepUp = behavior.powerStepUp;
+      if (behavior.cooldownSeconds !== undefined) miner.autoControl.thermal.cooldownSeconds = behavior.cooldownSeconds;
+      if (behavior.recoveryDelaySeconds !== undefined) miner.autoControl.thermal.recoveryDelaySeconds = behavior.recoveryDelaySeconds;
+    }
+
+    // Remove legacy autoMiningControl
+    if (miner.autoMiningControl) {
+      delete miner.autoMiningControl;
+    }
 
     await saveConfig(config);
 
-    console.log(`Auto mining control settings updated for ${ip}:`, miner.autoMiningControl);
-    res.json({ success: true, autoMiningControl: miner.autoMiningControl });
+    console.log(`[DEPRECATED] Auto mining control migrated to unified for ${ip}`);
+    res.json({ success: true, autoControl: miner.autoControl });
   } catch (err) {
     console.error('API auto-mining-control error:', err);
     res.status(500).json({ error: err.message });
@@ -5182,14 +5279,10 @@ async function pollMiners() {
           miner.capabilities.consecutiveFailures = 0;
         }
 
-        // Check SCOP thresholds and auto-control if enabled
-        if (miner.autoControl?.enabled && stats.efficiency) {
-          await checkSCOPThresholds(miner.ip, stats, miner);
-        }
-
-        // Check auto mining control (comprehensive hardware monitoring) if enabled
-        if (miner.autoMiningControl?.enabled) {
-          await checkAutoMiningControl(miner.ip, stats, miner);
+        // Unified auto control - handles safety, thermal, heating, and economics
+        // Replaces both SCOP auto-control and auto mining control
+        if (miner.autoControl?.enabled) {
+          await checkAutoControl(miner.ip, stats, miner);
         }
 
         // Get current control state with enhanced details
