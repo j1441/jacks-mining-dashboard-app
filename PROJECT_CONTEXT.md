@@ -4,7 +4,7 @@
 
 A comprehensive web-based dashboard for monitoring and controlling Bitcoin Antminer miners running Braiins OS, specifically designed for home heating applications in Norway. The app tracks mining performance, electricity costs with Norwegian pricing (including state subsidies), and efficiency metrics comparing mining heat output vs traditional heat pumps.
 
-**Version:** 1.7.1
+**Version:** 1.8.0
 **Author:** j1441
 **License:** MIT
 **Repository:** https://github.com/j1441/jacks-mining-dashboard-app
@@ -72,7 +72,7 @@ A comprehensive web-based dashboard for monitoring and controlling Bitcoin Antmi
 3. **JSON File Storage**: Lightweight persistence without database dependencies
 4. **Background Polling**: Server polls miners every 5 seconds, pushes via WebSocket
 5. **Multi-Protocol Miner Support**: CGMiner API + GraphQL + REST API fallbacks
-6. **Miner Control**: Pause/resume mining via Braiins OS REST API with SCOP-based auto-control
+6. **Miner Control**: Pause/resume mining via Braiins OS gRPC API with unified auto-control (safety, thermal, heating, economics)
 
 ---
 
@@ -117,7 +117,7 @@ mining-dashboard-app/
 │                                # - WebSocket server
 │                                # - Background polling
 │                                # - Miner control (pause/resume)
-│                                # - SCOP-based auto-control
+│                                # - Unified auto-control (safety/thermal/economic)
 │
 ├── public/
 │   └── index.html               # Complete React frontend (2800+ lines)
@@ -180,8 +180,8 @@ The server maintains several in-memory caches to reduce API calls and improve re
 | `networkStatsCache` | Bitcoin difficulty, hashrate, block height | 10 minutes |
 | `minerStatsCache` | Current stats for all configured miners | 5 seconds |
 | `alertHistory` | Log of triggered alerts | Persistent |
-| `minerControlState` | Miner pause/resume state, auth tokens, SCOP check times, efficiency tracking, auto mining control state | Runtime |
-| `autoControlLogs` | Per-miner control event logs (100 entries per miner) | Runtime |
+| `minerControlState` | Miner pause/resume state, auth tokens, unified auto-control state, readings, projected SCOP | Runtime |
+| `autoControlLogs` | Per-miner unified control event logs (100 entries per miner) | Runtime |
 
 ### Key Backend Functions
 
@@ -206,15 +206,16 @@ The server maintains several in-memory caches to reduce API calls and improve re
 | `pauseMining(ip, minerConfig)` | Line ~175 | Pause mining via PUT /api/v1/actions/pause |
 | `resumeMining(ip, minerConfig)` | Line ~226 | Resume mining via PUT /api/v1/actions/resume |
 | `getMiningStatus(ip)` | Line ~310 | Check if miner is paused (via hashrate) |
-| `calculateProjectedSCOP(power, hashrate, price, btcPrice)` | Line ~355 | Calculate override SCOP from manual settings |
-| `determineIntendedState(projectedSCOP, boardTemp, threshold, minTemp)` | Line ~437 | Determine intended state using override SCOP only |
-| `checkSCOPThresholds(minerIp, stats, minerConfig)` | Line ~489 | Active auto-control with state sync and efficiency tracking |
-| `checkAutoMiningControl(minerIp, stats, minerConfig)` | Line ~978 | Comprehensive hardware-based auto-control loop |
-| `gatherMinerReadings(stats)` | Line ~760 | Extract temps, fans, power, hashrate from stats |
-| `checkMiningViolations(readings, thresholds)` | Line ~800 | Check readings against thresholds |
-| `determineMiningAction(readings, violations, thresholds, behavior, state)` | Line ~830 | Decide control action with priority logic |
-| `executeMiningControlAction(minerIp, action, minerConfig, readings)` | Line ~900 | Execute pause/resume/power adjustments |
-| `logAutoControlEvent(minerIp, event)` | Line ~740 | Log control events to buffer |
+| `calculateProjectedSCOP(power, hashrate, price, btcPrice)` | Line ~600 | Calculate projected SCOP from efficiency settings |
+| `getDefaultAutoControlSettings()` | Line ~420 | Get default unified auto-control config |
+| `mergeAutoControlWithDefaults(userConfig)` | Line ~450 | Deep merge user settings with defaults |
+| `detectAutoControlConfigFormat(minerConfig)` | Line ~470 | Detect config format (unified/legacy) |
+| `migrateToUnifiedAutoControl(minerConfig)` | Line ~490 | Migrate legacy config to unified format |
+| `gatherMinerReadings(stats)` | Line ~700 | Extract temps, fans, power, hashrate from stats |
+| `determineUnifiedAction(readings, projectedSCOP, settings, state, stats)` | Line ~950 | Priority-based control decision (safety>thermal>heating>economic>recovery) |
+| `checkAutoControl(minerIp, stats, minerConfig)` | Line ~1050 | Unified auto-control loop |
+| `executeMiningControlAction(minerIp, action, minerConfig, readings)` | Line ~730 | Execute pause/resume/power adjustments |
+| `logAutoControlEvent(minerIp, event)` | Line ~690 | Log control events to buffer |
 
 #### Data Extraction
 
@@ -291,42 +292,37 @@ Dashboard (Main App)
 │       ├── Fan Speeds
 │       ├── Miner Control Section
 │       │   ├── Status Badges (AUTO indicator, MINING/PAUSED state)
-│       │   ├── ON/OFF Buttons (manual pause/resume)
-│       │   └── SCOP Auto-Control Panel
-│       │       ├── Enable/Disable Toggle
-│       │       ├── SCOP Threshold Setting
-│       │       ├── Min Board Temp Setting
-│       │       ├── Efficiency Override Section
-│       │       │   ├── Last Measured Display
-│       │       │   ├── Power Override Input (W)
-│       │       │   └── Hashrate Override Input (TH/s)
-│       │       ├── Save Settings Button
-│       │       └── Auto Control Status Display
-│       │           ├── Current vs Intended State
-│       │           ├── Measured vs Projected SCOP
-│       │           ├── Decision Basis Indicator
-│       │           ├── State Reason
-│       │           └── Error Display (if any)
+│       │   └── ON/OFF Buttons (manual pause/resume)
 │       ├── Pool Stats
-│       ├── AutoControlTerminal (Hardware-based Auto-Control)
-│       │   ├── Enable/Disable Toggle
-│       │   ├── Current Readings Grid
-│       │   │   ├── Chip Temp (with threshold)
-│       │   │   ├── Board Temp (with threshold)
-│       │   │   ├── Fan Speed (with threshold)
-│       │   │   ├── Power (with threshold)
-│       │   │   ├── Hashrate (with threshold)
-│       │   │   └── Active Hashboards (with threshold)
-│       │   ├── Control Log Terminal
-│       │   │   ├── Real-time event log
-│       │   │   ├── Severity-colored entries
-│       │   │   └── Clear Logs button
-│       │   └── AutoControlSettingsPanel
-│       │       ├── Temperature Thresholds (max chip, max/min board)
-│       │       ├── Power & Fan Limits (max/min power, max fan)
-│       │       ├── Control Behavior (step sizes, cooldown, recovery)
-│       │       ├── Save Settings button
-│       │       └── (Form state protected from poll updates while editing)
+│       ├── UnifiedAutoControlPanel (Combined Safety/Thermal/Economic Control)
+│       │   ├── Header with Enable Toggle + Priority Indicator
+│       │   ├── Tab Navigation (Status | Thermal | Economic | Logs)
+│       │   ├── Status Tab
+│       │   │   ├── Readings Grid (6 cards)
+│       │   │   │   ├── Chip Temp (with safety threshold)
+│       │   │   │   ├── Board Temp (with thermal thresholds)
+│       │   │   │   ├── Fan Speed (with threshold)
+│       │   │   │   ├── Power (with min/max limits)
+│       │   │   │   ├── Hashrate
+│       │   │   │   └── SCOP (projected, with threshold)
+│       │   │   ├── Current Action Indicator (priority level + reason)
+│       │   │   └── State Summary
+│       │   ├── Thermal Tab
+│       │   │   ├── Safety Settings (max chip temp - critical)
+│       │   │   ├── Temperature Thresholds (max/min board temp)
+│       │   │   ├── Fan Limits (max fan speed)
+│       │   │   ├── Power Limits (min/max power, step sizes)
+│       │   │   └── Timing Settings (cooldown, recovery delay)
+│       │   ├── Economic Tab
+│       │   │   ├── SCOP Threshold Setting
+│       │   │   ├── Min SCOP for Max Power
+│       │   │   ├── Economic Power Step
+│       │   │   ├── Efficiency Override (power, hashrate)
+│       │   │   └── Economic Pause Toggle (reduce power vs pause)
+│       │   └── Logs Tab
+│       │       ├── Real-time event log (terminal display)
+│       │       ├── Severity-colored entries
+│       │       └── Clear Logs button
 │       └── Remove Button
 │
 ├── API Terminal (debugging/troubleshooting)
@@ -681,88 +677,73 @@ Every 5 seconds:
     rejectedShares, rejectRate, powerProfile, efficiency, error,
     // Miner control fields
     isPaused,           // boolean - is miner currently paused
-    autoControl: {      // Auto-control configuration
+    autoControl: {      // Unified auto-control configuration
       enabled,          // boolean - is auto-control active
-      scopThreshold,    // number - SCOP threshold for pausing
-      minTemperature,   // number - min board temp override (optional)
-      efficiencyOverride: {  // Custom efficiency for projections (optional)
-        power,          // number - expected power in watts
-        hashrate        // number - expected hashrate in TH/s
-      }
-    },
-    autoControlState: { // Real-time auto-control status
-      intendedState,    // 'mining' | 'paused' | null
-      stateReason,      // string - why this state was chosen
-      stateMatches,     // boolean - does actual match intended
-      lastControlAction,// Date - when last control command sent
-      controlAttempts,  // number - consecutive sync failures
-      lastSyncError,    // string - last error message
-      // Efficiency tracking (control)
-      scopUsed,         // number - SCOP value used for decision (from override)
-      scopType,         // 'override' | 'none'
-      projectedSCOP,    // number - calculated override SCOP (used for control)
-      projectedSource,  // 'override' | 'none'
-      projectedPower,   // number - power from override (W)
-      projectedHashrate,// number - hashrate from override (TH/s)
-      // Efficiency tracking (measurement - reference only)
-      measuredPower,    // number - instant measured power (W)
-      measuredHashrate, // number - instant measured hashrate (TH/s)
-      measuredEfficiency, // number - instant efficiency (W/TH)
-      measuredAvgPower,    // number - rolling avg power (W)
-      measuredAvgHashrate, // number - rolling avg hashrate (TH/s)
-      measuredAvgEfficiency, // number - rolling avg efficiency (W/TH)
-      best1hPower,      // number - best 1h avg power (W)
-      best1hHashrate,   // number - best 1h avg hashrate (TH/s)
-      best1hEfficiency, // number - best 1h avg efficiency (W/TH)
-      best1hTimestamp,  // Date - when best 1h was recorded
-      lastEfficiencyUpdate // Date - when efficiency was last measured
-    },
-    // Hardware auto-mining control
-    autoMiningControl: {   // Hardware auto-control configuration
-      enabled,             // boolean - is hardware auto-control active
-      thresholds: {        // Threshold settings
-        maxChipTemp,       // number - pause if exceeded (°C)
-        maxBoardTemp,      // number - power down if exceeded (°C)
-        minBoardTemp,      // number - power up for heating (°C)
-        maxFanSpeed,       // number - power down if exceeded (RPM)
-        maxPower,          // number - max power limit (W)
-        minPower           // number - min power floor (W)
+      // Priority 1: Safety (bypasses cooldown)
+      safety: {
+        maxChipTemp       // number - PAUSE immediately if exceeded (°C)
       },
-      behavior: {          // Control behavior settings
-        powerStepDown,     // number - watts to reduce
-        powerStepUp,       // number - watts to increase
-        cooldownSeconds,   // number - between adjustments
-        recoveryDelaySeconds // number - before power increase
-      }
-    },
-    autoMiningControlState: { // Real-time control state
-      lastCheck,           // Date - when last checked
-      lastAdjustment,      // Date - when last adjustment made
-      lastAdjustmentType,  // 'PAUSE' | 'RESUME' | 'POWER_UP' | 'POWER_DOWN'
-      adjustmentReason,    // string - why adjustment was made
-      readings: {          // Current readings snapshot
-        chipTemp,          // number - max chip temp (°C)
-        avgBoardTemp,      // number - avg board temp (°C)
-        avgFanSpeed,       // number - avg fan speed (RPM)
-        power,             // number - current power (W)
-        hashrate,          // number - current hashrate (TH/s)
-        activeBoards       // number - active hashboard count
+      // Priority 2 & 3: Thermal management
+      thermal: {
+        maxBoardTemp,     // number - power down if exceeded (°C)
+        maxFanSpeed,      // number - power down if exceeded (RPM)
+        minBoardTemp,     // number - heating mode - power up/resume (°C)
+        cooldownSeconds,  // number - between adjustments
+        recoveryDelaySeconds // number - before power recovery
       },
-      violations: {        // Current threshold violations
-        chipTempCritical,  // boolean
-        boardTempHigh,     // boolean
-        boardTempLow,      // boolean
-        fanSpeedHigh,      // boolean
-        powerHigh          // boolean
+      // Power control bounds
+      power: {
+        maxPower,         // number - upper limit (W)
+        minPower,         // number - floor (W)
+        powerStepDown,    // number - W per thermal reduction
+        powerStepUp       // number - W per recovery/heating step
+      },
+      // Priority 4: Economic optimization
+      economics: {
+        scopThreshold,    // number - reduce power below this SCOP
+        minSCOPForMaxPower, // number - only max power above this
+        efficiencyOverride: { // Manual efficiency for projection
+          power,          // number - expected power in watts
+          hashrate        // number - expected hashrate in TH/s
+        },
+        economicPowerStep, // number - W to reduce for economics
+        economicPauseEnabled // boolean - pause at minPower if unprofitable
+      },
+      // Monitoring alerts (non-control)
+      alerts: {
+        minHashrate,      // number - alert threshold (TH/s)
+        minActiveBoards   // number - alert threshold
       }
     },
-    autoControlLogs: [     // Last 20 control events
+    autoControlState: { // Real-time unified control status
+      lastCheck,         // Date - when last checked
+      lastAdjustment,    // Date - when last adjustment made
+      lastAction,        // object - last action taken { type, reason, priority }
+      currentPriority,   // string - current priority level active
+      readings: {        // Current readings snapshot
+        chipTemp,        // number - max chip temp (°C)
+        maxBoardTemp,    // number - max board temp (°C)
+        avgBoardTemp,    // number - avg board temp (°C)
+        maxFanSpeed,     // number - max fan speed (RPM)
+        avgFanSpeed,     // number - avg fan speed (RPM)
+        power,           // number - current power (W)
+        powerLimit,      // number - current power limit (W)
+        hashrate,        // number - current hashrate (TH/s)
+        activeBoards,    // number - active hashboard count
+        isPaused         // boolean - is miner paused
+      },
+      projectedSCOP,     // number - calculated SCOP from override
+      projectedSource,   // 'override' | 'none'
+      projectedPower,    // number - power from override (W)
+      projectedHashrate  // number - hashrate from override (TH/s)
+    },
+    autoControlLogs: [   // Last 100 control events
       {
-        timestamp,         // ISO date string
-        type,              // 'CHECK' | 'ADJUSTMENT' | 'VIOLATION' | 'ERROR'
-        severity,          // 'info' | 'warning' | 'critical'
-        message,           // string - event description
-        details            // object - additional data
+        timestamp,       // ISO date string
+        type,            // 'CHECK' | 'ADJUSTMENT' | 'VIOLATION' | 'RECOVERY' | 'ERROR'
+        severity,        // 'info' | 'warning' | 'critical'
+        message,         // string - event description
+        details          // object - additional data
       }
     ]
   }],
@@ -829,161 +810,104 @@ Implementation uses CGMiner `ascset` command.
 - Requires authentication (default: root/root)
 - State tracked in `minerControlState` cache
 
-### 5. SCOP-Based Auto-Control
+### 5. Unified Auto Mining Control
 
-Automatically pause/resume mining based on efficiency thresholds and heating needs. The system actively monitors and controls the miner to ensure it matches the intended state.
-
-**Configuration (per miner):**
-| Setting | Description | Default |
-|---------|-------------|---------|
-| `enabled` | Enable auto-control | false |
-| `scopThreshold` | Pause if SCOP drops below this | 2.0 |
-| `minTemperature` | Keep ON if board temp below this | (not set) |
-| `efficiencyOverride.power` | **Required**: Expected power consumption (W) | none |
-| `efficiencyOverride.hashrate` | **Required**: Expected hashrate (TH/s) | none |
-
-**⚠️ IMPORTANT**: The efficiency override is **required** for auto-control to function. It is **always used** for control decisions, never the measured efficiency.
-
-**Override-Only Control System:**
-- **Override SCOP**: Calculated from manual efficiency override (**ALWAYS used for control decisions**)
-- **Measured SCOP**: Calculated from actual live mining data (**for comparison/reference only**)
-
-This ensures predictable, deterministic behavior that works even when power stats are unavailable (e.g., at startup when power shows "N/A").
-
-**Efficiency Tracking (For Reference Only):**
-When miner is actively mining, the system tracks:
-- **Current measurements**: Instant power, hashrate, and efficiency (W/TH)
-- **Rolling average**: Average over last 720 samples (1 hour at 5s intervals)
-- **Best 1h efficiency**: Best rolling average ever achieved (can be reset)
-
-These measurements are displayed in the UI to help you:
-1. Verify your override matches reality
-2. Calibrate your override settings
-3. Monitor performance over time
-
-**Control Logic:**
-```
-Every poll cycle (when auto-control enabled):
-├── Track actual miner state from hashrate (>0.1 TH/s = mining)
-│
-├── If miner is actively mining:
-│   ├── Record instant measurements (power, hashrate, efficiency)
-│   ├── Update rolling average (last 720 samples)
-│   └── Update best 1h efficiency if new record
-│
-├── Calculate override SCOP using manual efficiency settings
-│   └── If no override configured → cannot control (defaults to mining)
-│
-├── Determine intended state:
-│   ├── Priority 1: If boardTemp < minTemp → MINING (heating needed)
-│   ├── Priority 2: If override SCOP >= threshold → MINING
-│   └── Otherwise → PAUSED
-│
-└── Sync actual state to intended state:
-    ├── If states don't match AND cooldown expired (30s):
-    │   └── Issue pause/resume command via gRPC
-    └── Track sync errors and retry attempts
-```
-
-**State Display:**
-- Shows current state vs intended state
-- Displays measured SCOP (for reference) vs override SCOP (controls miner)
-- Shows current average efficiency and best 1h efficiency
-- Indicates control decision basis and state reason
-- Shows any sync errors
-
-**Board Temperature:**
-- Uses average of all available board temps (not chip temp)
-- Board temp better reflects room temperature
-- Falls back to chip temp if no board temps available
-
-**Rate Limiting:**
-- Control actions rate-limited to 30 seconds between commands
-- Prevents rapid toggling when near threshold
-
-**Best Efficiency Tracking:**
-- Automatically tracks best 1h rolling average efficiency
-- Displayed in UI with reset button
-- Useful for understanding peak performance capabilities
-- API: `POST /api/miner/reset-best-efficiency` with `{ip: "X.X.X.X"}`
-
-### 6. Auto Mining Control (Hardware-Based)
-
-Comprehensive hardware monitoring system that automatically adjusts miner power based on temperature and fan speed thresholds. Includes a real-time terminal display showing state checks and live adjustments.
+A comprehensive unified control system that merges safety, thermal, heating, and economic optimization into a single priority-based control loop. Replaces the previous separate SCOP and Hardware auto-control systems.
 
 **Key Features:**
-- **Real-time monitoring**: Chip temp, board temp, fan speed, power, hashrate, active hashboards
-- **Automatic power adjustment**: Reduces/increases power based on thermal conditions
-- **Emergency protection**: Immediately pauses mining if critical chip temp exceeded
-- **Heating mode**: Maintains mining and increases power when board temps are low
+- **5-tier priority hierarchy**: Safety > Thermal > Heating > Economics > Recovery
+- **Single control loop**: One unified system instead of two separate ones
+- **Smart power management**: Automatic power adjustment based on conditions
+- **Emergency protection**: Immediate pause for critical temperatures (bypasses cooldown)
+- **Heating mode**: Maintains mining when room heating is needed
+- **Economic optimization**: Power reduction when mining is unprofitable
+- **User-configurable behavior**: Choose between power reduction or complete pause for economics
+- **Real-time monitoring**: Live readings with threshold indicators
 - **In-app terminal**: Live log showing control events with severity levels
-- **Configurable thresholds**: All limits adjustable per-miner
 
-**Configuration (per miner):**
-| Setting | Description | Default |
-|---------|-------------|---------|
-| `autoMiningControl.enabled` | Enable hardware-based auto-control | false |
-| `thresholds.maxChipTemp` | Pause immediately if exceeded (°C) | 95 |
-| `thresholds.maxBoardTemp` | Reduce power if exceeded (°C) | 75 |
-| `thresholds.minBoardTemp` | Increase power/resume for heating (°C) | 20 |
-| `thresholds.maxFanSpeed` | Reduce power if exceeded (RPM) | 6000 |
-| `thresholds.maxPower` | Maximum allowed power (W) | 3500 |
-| `thresholds.minPower` | Minimum power floor (W) | 1500 |
-| `thresholds.minHashrate` | Alert if below (TH/s) | 100 |
-| `thresholds.minActiveBoards` | Alert if below | 3 |
-| `behavior.powerStepDown` | Watts to reduce per adjustment | 250 |
-| `behavior.powerStepUp` | Watts to increase per adjustment | 100 |
-| `behavior.cooldownSeconds` | Minimum time between adjustments | 60 |
-| `behavior.recoveryDelaySeconds` | Delay before increasing power after reduction | 300 |
+**Configuration Schema (per miner):**
+
+| Category | Setting | Description | Default |
+|----------|---------|-------------|---------|
+| **General** | `enabled` | Master enable toggle | false |
+| **Safety** | `safety.maxChipTemp` | PAUSE immediately if exceeded (°C) | 95 |
+| **Thermal** | `thermal.maxBoardTemp` | Power down if exceeded (°C) | 75 |
+| | `thermal.maxFanSpeed` | Power down if exceeded (RPM) | 6000 |
+| | `thermal.minBoardTemp` | Resume/power up for heating (°C) | 20 |
+| | `thermal.cooldownSeconds` | Between adjustments | 60 |
+| | `thermal.recoveryDelaySeconds` | Before power recovery | 300 |
+| **Power** | `power.maxPower` | Upper power limit (W) | 3500 |
+| | `power.minPower` | Power floor (W) | 1500 |
+| | `power.powerStepDown` | W per thermal reduction | 250 |
+| | `power.powerStepUp` | W per recovery step | 100 |
+| **Economics** | `economics.scopThreshold` | Reduce power below this SCOP | 2.0 |
+| | `economics.minSCOPForMaxPower` | Only max power above this SCOP | 3.0 |
+| | `economics.economicPowerStep` | W to reduce for economics | 100 |
+| | `economics.economicPauseEnabled` | Pause at minPower if unprofitable | false |
+| | `economics.efficiencyOverride.power` | Expected power for SCOP calc (W) | null |
+| | `economics.efficiencyOverride.hashrate` | Expected hashrate for SCOP calc (TH/s) | null |
+| **Alerts** | `alerts.minHashrate` | Alert threshold (TH/s) | 100 |
+| | `alerts.minActiveBoards` | Alert threshold | 3 |
 
 **Control Logic (Priority Order):**
 ```
-Every poll cycle (5 seconds) when auto-mining-control enabled:
+Every poll cycle (5 seconds) when auto-control enabled:
 │
-├── Priority 1: CRITICAL CHIP TEMP (>maxChipTemp)
-│   └── PAUSE IMMEDIATELY - Emergency thermal protection
+├── Priority 1: SAFETY - Critical Chip Temperature
+│   └── If chipTemp > maxChipTemp → PAUSE IMMEDIATELY
+│       (Bypasses cooldown - emergency protection)
 │
-├── Priority 2: LOW BOARD TEMP (<minBoardTemp)
-│   ├── If paused → RESUME (heating needed)
-│   └── If mining & power < max → INCREASE POWER
+├── [Cooldown check - skip remaining if within cooldown period]
 │
-├── Priority 3: HIGH TEMP OR HIGH FANS
-│   ├── If boardTemp > maxBoardTemp → REDUCE POWER
-│   └── If fanSpeed > maxFanSpeed → REDUCE POWER
+├── Priority 2: THERMAL PROTECTION - High Temps/Fans
+│   ├── If boardTemp > maxBoardTemp → POWER_DOWN
+│   └── If fanSpeed > maxFanSpeed → POWER_DOWN
 │
-└── Priority 4: RECOVERY (after recoveryDelaySeconds)
-    └── If stable & power < max → INCREASE POWER (gradual)
+├── Priority 3: HEATING MODE - Low Board Temperature
+│   ├── If boardTemp < minBoardTemp AND paused → RESUME
+│   └── If boardTemp < minBoardTemp AND power < max → POWER_UP
+│
+├── Priority 4: ECONOMIC OPTIMIZATION - Low SCOP
+│   ├── If projectedSCOP < scopThreshold AND power > minPower → POWER_DOWN
+│   └── If economicPauseEnabled AND at minPower AND still unprofitable → PAUSE
+│
+└── Priority 5: RECOVERY - Stable Conditions
+    └── If stable for recoveryDelaySeconds AND power < maxPower → POWER_UP
 ```
 
-**Terminal Display:**
-- Shows current readings vs thresholds with violation highlighting
-- Real-time log with timestamps and severity-colored entries
-- Log types: CHECK (🔍), ADJUSTMENT (⚡), VIOLATION (⚠️), RECOVERY (✅), ERROR (❌)
-- Clear logs button
-- Collapsible settings panel
+**Economic Control Behavior:**
+- **Power reduction mode** (default): When SCOP drops below threshold, reduce power incrementally. Mining continues at lower power, which may improve efficiency.
+- **Pause mode** (optional): When `economicPauseEnabled=true` and miner is at minimum power but still unprofitable, pause completely until conditions improve.
+
+**SCOP Calculation:**
+- Uses efficiency override values (power/hashrate) if configured
+- Falls back to measured values if no override
+- Projected SCOP calculated using: electricity price, BTC price, network stats
 
 **Control Actions:**
 | Action | Trigger | Command |
 |--------|---------|---------|
-| PAUSE | Chip temp critical | gRPC `PauseMining()` |
-| RESUME | Board temp low (heating) | gRPC `ResumeMining()` |
-| POWER_DOWN | High temps or fans | CGMiner `ascset 0,power,X` |
-| POWER_UP | Recovery or heating | CGMiner `ascset 0,power,X` |
+| PAUSE | Critical chip temp OR economic pause | gRPC `PauseMining()` |
+| RESUME | Heating mode (low board temp) | gRPC `ResumeMining()` |
+| POWER_DOWN | Thermal protection OR economics | CGMiner `ascset 0,power,X` |
+| POWER_UP | Recovery OR heating mode | CGMiner `ascset 0,power,X` |
+
+**UI Components:**
+- **Status Tab**: Current readings grid, priority indicator, action display
+- **Thermal Tab**: Safety settings, temperature thresholds, power limits, timing
+- **Economic Tab**: SCOP thresholds, efficiency override, pause behavior toggle
+- **Logs Tab**: Real-time terminal with severity-colored entries
 
 **API Endpoints:**
-- `POST /api/miner/auto-mining-control` - Update settings
+- `POST /api/miner/auto-control` - Update unified settings
 - `GET /api/miner/auto-control/logs/:ip` - Get control logs
 - `POST /api/miner/auto-control/clear-logs` - Clear logs
 
-**Difference from SCOP Auto-Control:**
-| Aspect | SCOP Auto-Control | Auto Mining Control |
-|--------|-------------------|---------------------|
-| **Purpose** | Profitability optimization | Hardware protection & thermal management |
-| **Trigger** | SCOP threshold | Temperature, fan speed, power thresholds |
-| **Actions** | Pause/Resume only | Pause/Resume + Power adjustment |
-| **Use Case** | Pause when unprofitable | Adjust power to maintain safe temps |
-
-Both systems can be enabled simultaneously - Auto Mining Control takes precedence for safety.
+**Migration from Legacy Config:**
+The system automatically detects and migrates old config formats:
+- `autoControl` (SCOP-only) → unified `autoControl`
+- `autoMiningControl` (hardware-only) → unified `autoControl`
+- Both present → merged into unified `autoControl`
 
 ### 7. Efficiency Metrics
 
@@ -1175,12 +1099,28 @@ A built-in terminal interface for testing and debugging miner API commands witho
       "powerProfile": "medium",
       "autoControl": {
         "enabled": false,
-        "scopThreshold": 2.0,
-        "minTemperature": 35,
-        "efficiencyOverride": {
-          "power": 3200,
-          "hashrate": 120
-        }
+        "safety": { "maxChipTemp": 95 },
+        "thermal": {
+          "maxBoardTemp": 75,
+          "maxFanSpeed": 6000,
+          "minBoardTemp": 20,
+          "cooldownSeconds": 60,
+          "recoveryDelaySeconds": 300
+        },
+        "power": {
+          "maxPower": 3500,
+          "minPower": 1500,
+          "powerStepDown": 250,
+          "powerStepUp": 100
+        },
+        "economics": {
+          "scopThreshold": 2.0,
+          "minSCOPForMaxPower": 3.0,
+          "economicPowerStep": 100,
+          "economicPauseEnabled": false,
+          "efficiencyOverride": { "power": 3200, "hashrate": 120 }
+        },
+        "alerts": { "minHashrate": 100, "minActiveBoards": 3 }
       }
     }
   ],
@@ -1201,33 +1141,34 @@ A built-in terminal interface for testing and debugging miner API commands witho
 }
 ```
 
-### Per-Miner SCOP Auto-Control Settings
+### Per-Miner Unified Auto-Control Settings
 
 | Field | Type | Description |
 |-------|------|-------------|
-| `autoControl.enabled` | boolean | Enable SCOP-based auto-control |
-| `autoControl.scopThreshold` | number | Pause mining if SCOP drops below this value |
-| `autoControl.minTemperature` | number | Keep mining if board temp drops below this (°C) |
-| `autoControl.efficiencyOverride.power` | number | Expected power consumption in watts (for projected SCOP) |
-| `autoControl.efficiencyOverride.hashrate` | number | Expected hashrate in TH/s (for projected SCOP) |
-
-### Per-Miner Hardware Auto-Mining-Control Settings
-
-| Field | Type | Description |
-|-------|------|-------------|
-| `autoMiningControl.enabled` | boolean | Enable hardware-based auto-control |
-| `autoMiningControl.thresholds.maxChipTemp` | number | Pause immediately if exceeded (°C) |
-| `autoMiningControl.thresholds.maxBoardTemp` | number | Reduce power if exceeded (°C) |
-| `autoMiningControl.thresholds.minBoardTemp` | number | Increase power for heating (°C) |
-| `autoMiningControl.thresholds.maxFanSpeed` | number | Reduce power if exceeded (RPM) |
-| `autoMiningControl.thresholds.maxPower` | number | Maximum power limit (W) |
-| `autoMiningControl.thresholds.minPower` | number | Minimum power floor (W) |
-| `autoMiningControl.thresholds.minHashrate` | number | Alert threshold (TH/s) |
-| `autoMiningControl.thresholds.minActiveBoards` | number | Alert threshold |
-| `autoMiningControl.behavior.powerStepDown` | number | Watts to reduce per adjustment |
-| `autoMiningControl.behavior.powerStepUp` | number | Watts to increase per adjustment |
-| `autoMiningControl.behavior.cooldownSeconds` | number | Minimum seconds between adjustments |
-| `autoMiningControl.behavior.recoveryDelaySeconds` | number | Delay before power recovery |
+| `autoControl.enabled` | boolean | Master enable for unified auto-control |
+| **Safety** | | |
+| `autoControl.safety.maxChipTemp` | number | PAUSE immediately if exceeded (°C) |
+| **Thermal** | | |
+| `autoControl.thermal.maxBoardTemp` | number | Reduce power if exceeded (°C) |
+| `autoControl.thermal.maxFanSpeed` | number | Reduce power if exceeded (RPM) |
+| `autoControl.thermal.minBoardTemp` | number | Increase power/resume for heating (°C) |
+| `autoControl.thermal.cooldownSeconds` | number | Minimum seconds between adjustments |
+| `autoControl.thermal.recoveryDelaySeconds` | number | Delay before power recovery |
+| **Power** | | |
+| `autoControl.power.maxPower` | number | Maximum power limit (W) |
+| `autoControl.power.minPower` | number | Minimum power floor (W) |
+| `autoControl.power.powerStepDown` | number | Watts to reduce per thermal adjustment |
+| `autoControl.power.powerStepUp` | number | Watts to increase per recovery step |
+| **Economics** | | |
+| `autoControl.economics.scopThreshold` | number | Reduce power below this SCOP |
+| `autoControl.economics.minSCOPForMaxPower` | number | Only allow max power above this SCOP |
+| `autoControl.economics.economicPowerStep` | number | Watts to reduce for economic optimization |
+| `autoControl.economics.economicPauseEnabled` | boolean | Pause completely at minPower if unprofitable |
+| `autoControl.economics.efficiencyOverride.power` | number | Expected power for SCOP calculation (W) |
+| `autoControl.economics.efficiencyOverride.hashrate` | number | Expected hashrate for SCOP calculation (TH/s) |
+| **Alerts** | | |
+| `autoControl.alerts.minHashrate` | number | Alert threshold (TH/s) |
+| `autoControl.alerts.minActiveBoards` | number | Alert threshold |
 
 ### Available Electricity Zones
 
@@ -1287,45 +1228,45 @@ A built-in terminal interface for testing and debugging miner API commands witho
 | POST | `/api/miner/pause` | `{ip}` | Pause mining on miner |
 | POST | `/api/miner/resume` | `{ip}` | Resume mining on miner |
 | GET | `/api/miner/status?ip=X.X.X.X` | - | Get mining status (paused/running) |
-| POST | `/api/miner/auto-control` | `{ip, enabled, scopThreshold, minTemperature, efficiencyOverride}` | Update SCOP auto-control settings |
-| POST | `/api/miner/auto-mining-control` | `{ip, enabled, thresholds, behavior}` | Update hardware auto-control settings |
+| POST | `/api/miner/auto-control` | `{ip, ...settings}` | Update unified auto-control settings |
 | GET | `/api/miner/auto-control/logs/:ip` | - | Get auto-control logs for miner |
 | POST | `/api/miner/auto-control/clear-logs` | `{ip}` | Clear auto-control logs |
-| POST | `/api/miner/reset-best-efficiency` | `{ip}` | Reset best 1h efficiency tracking |
 
-**SCOP auto-control body example:**
+**Unified auto-control body example:**
 ```json
 {
   "ip": "192.168.1.100",
   "enabled": true,
-  "scopThreshold": 2.5,
-  "minTemperature": 30,
-  "efficiencyOverride": {
-    "power": 3200,
-    "hashrate": 120
-  }
+  "safety": { "maxChipTemp": 95 },
+  "thermal": {
+    "maxBoardTemp": 75,
+    "maxFanSpeed": 6000,
+    "minBoardTemp": 20,
+    "cooldownSeconds": 60,
+    "recoveryDelaySeconds": 300
+  },
+  "power": {
+    "maxPower": 3500,
+    "minPower": 1500,
+    "powerStepDown": 250,
+    "powerStepUp": 100
+  },
+  "economics": {
+    "scopThreshold": 2.0,
+    "minSCOPForMaxPower": 3.0,
+    "economicPowerStep": 100,
+    "economicPauseEnabled": false,
+    "efficiencyOverride": { "power": 3200, "hashrate": 120 }
+  },
+  "alerts": { "minHashrate": 100, "minActiveBoards": 3 }
 }
 ```
 
-**Hardware auto-mining-control body example:**
+**Partial update example (only change SCOP threshold):**
 ```json
 {
   "ip": "192.168.1.100",
-  "enabled": true,
-  "thresholds": {
-    "maxChipTemp": 95,
-    "maxBoardTemp": 75,
-    "minBoardTemp": 20,
-    "maxFanSpeed": 6000,
-    "maxPower": 3500,
-    "minPower": 1500
-  },
-  "behavior": {
-    "powerStepDown": 250,
-    "powerStepUp": 100,
-    "cooldownSeconds": 60,
-    "recoveryDelaySeconds": 300
-  }
+  "economics": { "scopThreshold": 2.5 }
 }
 ```
 
@@ -1614,7 +1555,29 @@ Changes pushed to GitHub trigger automatic deployment to Umbrel server. Testing 
 
 ## Version History
 
-### v1.7.1 (Current)
+### v1.8.0 (Current)
+- **🔄 Unified Auto Mining Control**: Merged two separate control systems (SCOP + Hardware) into single comprehensive system
+  - **5-tier priority hierarchy**: Safety > Thermal > Heating > Economics > Recovery
+  - **Single control loop**: One unified `checkAutoControl()` function replaces separate `checkSCOPThresholds()` and `checkAutoMiningControl()`
+  - **Unified configuration schema**: All settings under single `autoControl` object with logical groupings (safety, thermal, power, economics, alerts)
+  - **Automatic migration**: Legacy configs (SCOP-only, hardware-only, or both) automatically migrated to unified format on load
+  - **User-configurable economic behavior**: Choose between power reduction (default) or complete pause when unprofitable
+- **🎛️ New Unified UI Panel**: `UnifiedAutoControlPanel` replaces separate SCOP panel and AutoControlTerminal
+  - **Tab-based interface**: Status, Thermal, Economic, and Logs tabs
+  - **Readings grid**: 6-card display showing all monitored values with thresholds
+  - **Priority indicator**: Shows current active priority level and reason
+  - **Consolidated settings**: All control settings in organized tabs
+- **📡 Simplified API**: Single endpoint handles all auto-control configuration
+  - `POST /api/miner/auto-control` accepts unified schema with partial updates
+  - Legacy endpoint (`/api/miner/auto-mining-control`) deprecated but still functional
+  - Deep merge for partial config updates
+- **🧹 Code Cleanup**: Removed obsolete functions and components
+  - Removed: `checkSCOPThresholds()`, `checkAutoMiningControl()`, `determineIntendedState()`, `checkMiningViolations()`, `determineMiningAction()`
+  - Removed: `getDefaultAutoMiningThresholds()`, `getDefaultAutoMiningBehavior()`
+  - Removed: `AutoControlSettingsPanel`, `AutoControlTerminal` components
+  - Added: `getDefaultAutoControlSettings()`, `mergeAutoControlWithDefaults()`, `detectAutoControlConfigFormat()`, `migrateToUnifiedAutoControl()`, `determineUnifiedAction()`, `checkAutoControl()`
+
+### v1.7.1
 - **🛡️ Settings Form State Protection**: Fixed issue where editing settings values would reset on poll updates
   - Settings panel now tracks "dirty" state when user modifies values
   - Polling updates no longer overwrite unsaved user edits
