@@ -69,6 +69,14 @@ jobs:
             echo "version=1.0.0" >> $GITHUB_OUTPUT
           fi
 
+      - name: Set up Node for tests
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Run test suite
+        run: npm test
+
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
 

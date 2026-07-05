@@ -1,43 +1,24 @@
-FROM node:18-alpine
-
-# Set working directory
+FROM node:22-alpine
 
 WORKDIR /app
 
-# Copy package files
-
-COPY package*.json ./
-
 # Install production dependencies only
-
+COPY package*.json ./
 RUN npm ci --only=production
 
-# Copy application files
-
+# Application files
 COPY server.js .
+COPY lib ./lib
 COPY public ./public
 COPY proto ./proto
 
-# Create data directory with proper permissions
-# COPY entrypoint.sh /entrypoint.sh
-# RUN chmod +x /entrypoint.sh
-# RUN mkdir -p /app/data && chown -R 1000:1000 /app/data
-
-# Expose port
-
 EXPOSE 3456
 
-# Add health check
+# /health returns 503 if any controller loop has stalled (see DESIGN.md §3.5);
+# real recovery is the in-process watchdog + restart:on-failure, this is visibility.
+HEALTHCHECK --interval=30s --timeout=10s --start-period=10s --retries=3 \
+  CMD node -e "require('http').get('http://localhost:3456/health', (r) => { process.exit(r.statusCode === 200 ? 0 : 1) }).on('error', () => process.exit(1))"
 
-HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 CMD node -e "require('http').get('http://localhost:3456/health', (r) => { process.exit(r.statusCode === 200 ? 0 : 1) })"
-
-
-# Run as non-root user for security
-
-# USER root
-# ENTRYPOINT ["/entrypoint.sh"]
 USER 1000
-
-# Start the application
 
 CMD ["node", "server.js"]
