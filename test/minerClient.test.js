@@ -324,23 +324,40 @@ test('setPowerTarget: OUT_OF_RANGE → parse bounds, clamp, retry once, verify',
 
   const res = await client.setPowerTarget(500);
   assert.deepEqual(setCalls, [500, 944]); // clamped up to the miner-reported min
-  assert.deepEqual(res, { targetW: 944, clamped: true });
+  assert.deepEqual(res, { targetW: 944, clamped: true, readBackW: 944 });
 });
 
-test('setPowerTarget: read-back mismatch throws verifyFailed', async () => {
+test('setPowerTarget: slow read-back converges via settle polling', async () => {
   const client = newClient();
+  client._sleep = async () => {}; // no real waiting in tests
+  let reads = 0;
   client._call = async (svc, method) => {
-    if (method === 'SetPowerTarget') return {};
+    if (method === 'SetPowerTarget') return { power_target: { watt: '3100' } };
+    if (method === 'GetTunerState') {
+      reads += 1; // SAVE_AND_APPLY reloads async: first read serves the OLD target
+      const watt = reads >= 2 ? '3100' : '944';
+      return { overall_tuner_state: 'TUNER_STATE_STABLE', power_target_mode_state: { current_target: { watt } } };
+    }
+    throw new Error(`unexpected call: ${method}`);
+  };
+  const res = await client.setPowerTarget(3100);
+  assert.deepEqual(res, { targetW: 3100, clamped: false, readBackW: 3100 });
+  assert.equal(reads, 2);
+});
+
+test('setPowerTarget: persistent read-back lag warns but does not throw (DPS may rescale)', async () => {
+  const client = newClient();
+  client._sleep = async () => {};
+  client._call = async (svc, method) => {
+    if (method === 'SetPowerTarget') return { power_target: { watt: '3100' } };
     if (method === 'GetTunerState') {
       return { overall_tuner_state: 'TUNER_STATE_STABLE', power_target_mode_state: { current_target: { watt: '944' } } };
     }
     throw new Error(`unexpected call: ${method}`);
   };
-  await assert.rejects(client.setPowerTarget(3100), (err) => {
-    assert.equal(err.verifyFailed, true);
-    assert.match(err.message, /verify failed/);
-    return true;
-  });
+  const res = await client.setPowerTarget(3100);
+  assert.equal(res.targetW, 3100);
+  assert.equal(res.readBackW, 944); // surfaced to the caller, not fatal
 });
 
 test('setPowerTarget: non-range errors propagate without retry', async () => {
@@ -359,32 +376,34 @@ test('setPowerTarget: non-range errors propagate without retry', async () => {
   assert.equal(attempts, 1);
 });
 
-test('setBoards: enable + disable, verified via GetHashboards read-back', async () => {
+test('setBoards: verified via the RPC responses; runtime lag tolerated', async () => {
   const client = newClient();
-  const readBack = structuredClone(fx.hashboards);
-  readBack.hashboards[0].enabled = true;  // board 1 now enabled
-  readBack.hashboards[1].enabled = false; // board 2 now disabled
+  client._sleep = async () => {};
   const writes = [];
   client._call = async (svc, method, req) => {
     if (method === 'EnableHashboards' || method === 'DisableHashboards') {
       writes.push([method, req.hashboard_ids]);
       assert.equal(req.save_action, 'SAVE_ACTION_SAVE_AND_APPLY');
-      return {};
+      const want = method === 'EnableHashboards';
+      return { hashboards: req.hashboard_ids.map((id) => ({ id, is_enabled: want })) };
     }
-    if (method === 'GetHashboards') return readBack;
+    // Runtime state never converges within the poll window (hashchain restarting —
+    // observed live): still a success, config was verified via the responses.
+    if (method === 'GetHashboards') return fx.hashboards;
     throw new Error(`unexpected call: ${method}`);
   };
 
   const res = await client.setBoards(['1'], ['2']);
   assert.deepEqual(writes, [['EnableHashboards', ['1']], ['DisableHashboards', ['2']]]);
-  assert.equal(res.boards.find((b) => b.id === '1').enabled, true);
+  assert.equal(res.converged, false);
 });
 
-test('setBoards: read-back mismatch throws verifyFailed', async () => {
+test('setBoards: RPC response contradicting the request throws verifyFailed', async () => {
   const client = newClient();
-  client._call = async (svc, method) => {
-    if (method === 'EnableHashboards') return {};
-    if (method === 'GetHashboards') return fx.hashboards; // board 1 still disabled
+  client._call = async (svc, method, req) => {
+    if (method === 'EnableHashboards') {
+      return { hashboards: req.hashboard_ids.map((id) => ({ id, is_enabled: false })) }; // refused
+    }
     throw new Error(`unexpected call: ${method}`);
   };
   await assert.rejects(client.setBoards(['1'], []), (err) => err.verifyFailed === true);
