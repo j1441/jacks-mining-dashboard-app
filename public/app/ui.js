@@ -234,7 +234,7 @@
   // ---- client-side envelope prediction (interpolates /api/miners/:id/envelope data) ----
   const envelopePoints = (env) => {
     if (!env) return [];
-    const raw = Array.isArray(env) ? env : (env.points || env.learned || env.curve || null);
+    const raw = Array.isArray(env) ? env : (env.points || env.learned || env.curve || env.candidates || null);
     const out = [];
     if (Array.isArray(raw)) {
       for (const p of raw) {
