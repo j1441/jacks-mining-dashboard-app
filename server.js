@@ -120,8 +120,10 @@ const MAX_AUTO_CONTROL_LOGS = 100;
 // ============================================================================
 
 // Load proto files for Braiins OS gRPC API
-const PROTO_PATH_AUTH = path.join(__dirname, 'proto', 'bos', 'v1', 'authentication.proto');
-const PROTO_PATH_ACTIONS = path.join(__dirname, 'proto', 'bos', 'v1', 'actions.proto');
+const PROTO_DIR = path.join(__dirname, 'proto');
+const PROTO_PATH_AUTH = path.join(PROTO_DIR, 'bos', 'v1', 'authentication.proto');
+const PROTO_PATH_ACTIONS = path.join(PROTO_DIR, 'bos', 'v1', 'actions.proto');
+const PROTO_PATH_PERFORMANCE = path.join(PROTO_DIR, 'bos', 'v1', 'performance.proto');
 
 const protoOptions = {
   keepCase: true,
@@ -134,6 +136,7 @@ const protoOptions = {
 // Load proto definitions
 let authProto = null;
 let actionsProto = null;
+let performanceProto = null;
 
 function loadProtos() {
   try {
@@ -157,9 +160,21 @@ function loadProtos() {
       return;
     }
 
+    console.log('Loading Braiins OS proto files from:', PROTO_PATH_PERFORMANCE);
+    // performance.proto imports bos/v1/common.proto etc., so it needs includeDirs
+    const perfPackageDef = protoLoader.loadSync(PROTO_PATH_PERFORMANCE, { ...protoOptions, includeDirs: [PROTO_DIR] });
+    const perfDef = grpc.loadPackageDefinition(perfPackageDef);
+    performanceProto = perfDef.braiins?.bos?.v1;
+
+    if (!performanceProto || !performanceProto.PerformanceService) {
+      console.error('Failed to load PerformanceService from proto. Package structure:', JSON.stringify(Object.keys(perfDef), null, 2));
+      return;
+    }
+
     console.log('Braiins OS gRPC proto files loaded successfully');
     console.log('Available auth services:', Object.keys(authProto));
     console.log('Available action services:', Object.keys(actionsProto));
+    console.log('Available performance services:', Object.keys(performanceProto));
   } catch (err) {
     console.error('Failed to load Braiins OS proto files:', err.message);
     console.error(err.stack);
@@ -200,6 +215,14 @@ function getGrpcClient(ip, serviceName) {
       throw new Error('gRPC ActionsService not loaded. Check proto files and server startup logs.');
     }
     grpcClientCache[cacheKey] = new actionsProto.ActionsService(
+      address,
+      grpc.credentials.createInsecure()
+    );
+  } else if (serviceName === 'performance') {
+    if (!performanceProto || !performanceProto.PerformanceService) {
+      throw new Error('gRPC PerformanceService not loaded. Check proto files and server startup logs.');
+    }
+    grpcClientCache[cacheKey] = new performanceProto.PerformanceService(
       address,
       grpc.credentials.createInsecure()
     );
@@ -288,13 +311,8 @@ function invalidateAuthToken(ip) {
     console.log(`Invalidated auth token for ${ip}`);
   }
   // Also clear the gRPC client cache for this IP to force fresh connections
-  const authKey = `${ip}:auth`;
-  const actionsKey = `${ip}:actions`;
-  if (grpcClientCache[authKey]) {
-    delete grpcClientCache[authKey];
-  }
-  if (grpcClientCache[actionsKey]) {
-    delete grpcClientCache[actionsKey];
+  for (const service of ['auth', 'actions', 'performance']) {
+    delete grpcClientCache[`${ip}:${service}`];
   }
 }
 
@@ -397,6 +415,72 @@ async function resumeMining(ip, minerConfig = {}, isRetry = false) {
 }
 
 /**
+ * Set absolute power target on a Braiins OS miner via gRPC PerformanceService.
+ * BOSer does not support the legacy `ascset 0,power,N` cgminer command, so this
+ * is the only working way to change the power target.
+ * If the miner rejects the value as out-of-range, retries once clamped to the
+ * range reported in the error (e.g. one active hashboard raises the minimum).
+ * @param {string} ip - Miner IP address
+ * @param {number} watts - Desired power target in watts
+ * @param {object} minerConfig - Optional miner config (username/password)
+ * @param {boolean} isRetry - Internal: retry after re-auth or clamping
+ * @returns {Promise<{success: boolean, powerTarget: number, clamped?: boolean}>}
+ */
+async function setPowerTarget(ip, watts, minerConfig = {}, isRetry = false) {
+  const token = await getMinerAuthToken(ip, minerConfig);
+  const metadata = createAuthMetadata(token);
+
+  return new Promise((resolve, reject) => {
+    const client = getGrpcClient(ip, 'performance');
+
+    const deadline = new Date();
+    deadline.setSeconds(deadline.getSeconds() + 10);
+
+    const request = {
+      save_action: 'SAVE_ACTION_SAVE_AND_APPLY',
+      power_target: { watt: Math.round(watts) }
+    };
+
+    client.SetPowerTarget(request, metadata, { deadline }, async (err, response) => {
+      if (err) {
+        if (isAuthError(err) && !isRetry) {
+          console.log(`Auth error on SetPowerTarget for ${ip}, invalidating token and retrying...`);
+          invalidateAuthToken(ip);
+          try {
+            resolve(await setPowerTarget(ip, watts, minerConfig, true));
+          } catch (retryErr) {
+            reject(retryErr);
+          }
+          return;
+        }
+
+        // Miner reports its allowed range in the error, e.g.
+        // "new power target '943' is out-of-range (min: Some(944), max: Some(6435))"
+        const rangeMatch = !isRetry && /min: Some\((\d+)\), max: Some\((\d+)\)/.exec(err.message || '');
+        if (rangeMatch) {
+          const clamped = Math.min(Math.max(Math.round(watts), parseInt(rangeMatch[1])), parseInt(rangeMatch[2]));
+          console.log(`Power target ${watts}W out of range for ${ip}, clamping to ${clamped}W`);
+          try {
+            const result = await setPowerTarget(ip, clamped, minerConfig, true);
+            resolve({ ...result, clamped: true });
+          } catch (retryErr) {
+            reject(retryErr);
+          }
+          return;
+        }
+
+        reject(new Error(`gRPC SetPowerTarget failed: ${err.code} ${err.message}`));
+      } else {
+        const newTarget = Number(response?.power_target?.watt) || Math.round(watts);
+        minerControlState[ip] = { ...minerControlState[ip], lastSetPowerTarget: newTarget };
+        console.log(`Power target set to ${newTarget}W on ${ip} via gRPC`);
+        resolve({ success: true, powerTarget: newTarget });
+      }
+    });
+  });
+}
+
+/**
  * Get current mining status from Braiins OS
  * @param {string} ip - Miner IP address
  * @returns {Promise<{isPaused: boolean, status: string}>}
@@ -453,7 +537,17 @@ function getDefaultAutoControlSettings() {
       powerStepUp: 100                   // W per recovery/heating step
     },
 
-    // Priority 4: Economic optimization
+    // Priority 4: Price-based power control (uses effective price incl. grid fee & strømstøtte)
+    price: {
+      enabled: false,
+      cheapPrice: 0.60,                  // At/below this (NOK/kWh effective): run at power.maxPower
+      expensivePrice: 1.20,              // At/above this: run at power.minPower (or pause)
+      pauseWhenExpensive: false,         // Pause instead of minPower when price >= expensivePrice
+      minDwellMinutes: 15,               // Min minutes between price-driven changes (anti-flapping)
+      deadbandWatts: 100                 // Ignore corrections smaller than this
+    },
+
+    // Priority 5: Economic optimization
     economics: {
       scopThreshold: 2.0,                // Reduce power below this SCOP
       minSCOPForMaxPower: 3.0,           // Only max power above this
@@ -482,6 +576,7 @@ function mergeAutoControlWithDefaults(userConfig) {
     safety: { ...defaults.safety, ...userConfig.safety },
     thermal: { ...defaults.thermal, ...userConfig.thermal },
     power: { ...defaults.power, ...userConfig.power },
+    price: { ...defaults.price, ...userConfig.price },
     economics: { ...defaults.economics, ...userConfig.economics },
     alerts: { ...defaults.alerts, ...userConfig.alerts }
   };
@@ -765,10 +860,7 @@ async function executeMiningControlAction(minerIp, action, minerConfig, readings
             readings
           }
         });
-        await sendCGMinerCommand(minerIp, {
-          command: 'ascset',
-          parameter: `0,power,${action.targetPower}`
-        });
+        await setPowerTarget(minerIp, action.targetPower, minerConfig);
         break;
     }
 
@@ -877,7 +969,70 @@ function determineUnifiedAction(readings, projectedSCOP, settings, state, stats)
     }
   }
 
-  // PRIORITY 4: Economic Optimization - Low SCOP
+  // PRIORITY 4: Price-based power control
+  // Maps effective electricity price (spot incl. VAT + strømstøtte + grid fee) to a
+  // power target: cheapPrice -> maxPower, expensivePrice -> minPower (or pause),
+  // linear in between. Dwell time + deadband provide hysteresis so hourly price
+  // wobble doesn't cause flapping.
+  const effectivePrice = stats?.electricity?.effectivePrice ?? null;
+
+  if (settings.price.enabled && effectivePrice !== null) {
+    const p = settings.price;
+    const lastPriceChange = state?.lastPriceAdjustment ? new Date(state.lastPriceAdjustment).getTime() : 0;
+    const dwellOk = (now - lastPriceChange) / 1000 >= p.minDwellMinutes * 60;
+
+    let desiredPower;
+    if (effectivePrice <= p.cheapPrice) {
+      desiredPower = settings.power.maxPower;
+    } else if (effectivePrice >= p.expensivePrice) {
+      desiredPower = p.pauseWhenExpensive ? 0 : settings.power.minPower;
+    } else {
+      const fraction = (effectivePrice - p.cheapPrice) / (p.expensivePrice - p.cheapPrice);
+      const span = settings.power.maxPower - settings.power.minPower;
+      desiredPower = Math.round((settings.power.maxPower - fraction * span) / 10) * 10;
+    }
+
+    if (dwellOk) {
+      const priceInfo = `effective ${effectivePrice.toFixed(2)}/kWh (cheap<=${p.cheapPrice}, expensive>=${p.expensivePrice})`;
+
+      // Pause only if heating doesn't currently need the miner as a heat source
+      if (desiredPower === 0 && !readings.isPaused && !boardTempLow) {
+        return {
+          type: 'PAUSE',
+          reason: `Price: ${priceInfo} -> pause`,
+          severity: 'info',
+          priority: 4,
+          priceDriven: true
+        };
+      }
+
+      if (desiredPower > 0 && readings.isPaused && state?.pausedByPrice) {
+        return {
+          type: 'RESUME',
+          reason: `Price: ${priceInfo} -> resume at ~${desiredPower}W`,
+          severity: 'info',
+          priority: 4,
+          priceDriven: true
+        };
+      }
+
+      if (desiredPower > 0 && !readings.isPaused) {
+        const diff = desiredPower - readings.powerLimit;
+        if (Math.abs(diff) >= p.deadbandWatts) {
+          return {
+            type: diff < 0 ? 'POWER_DOWN' : 'POWER_UP',
+            targetPower: desiredPower,
+            reason: `Price: ${priceInfo} -> target ${desiredPower}W`,
+            severity: 'info',
+            priority: 4,
+            priceDriven: true
+          };
+        }
+      }
+    }
+  }
+
+  // PRIORITY 5: Economic Optimization - Low SCOP
   if (projectedSCOP !== null && projectedSCOP < settings.economics.scopThreshold && !readings.isPaused) {
     // First try to reduce power
     const targetPower = Math.max(
@@ -891,7 +1046,7 @@ function determineUnifiedAction(readings, projectedSCOP, settings, state, stats)
         targetPower,
         reason: `Economic: SCOP ${projectedSCOP.toFixed(2)} < threshold ${settings.economics.scopThreshold}`,
         severity: 'info',
-        priority: 4
+        priority: 5
       };
     }
 
@@ -901,14 +1056,17 @@ function determineUnifiedAction(readings, projectedSCOP, settings, state, stats)
         type: 'PAUSE',
         reason: `Economic: At min power ${settings.power.minPower}W, SCOP ${projectedSCOP.toFixed(2)} still below threshold`,
         severity: 'info',
-        priority: 4
+        priority: 5
       };
     }
   }
 
-  // PRIORITY 5: Recovery - Increase power if stable
+  // PRIORITY 6: Recovery - Increase power if stable
+  // Skipped when price control is enabled: the price loop is symmetric and
+  // raises power itself when the price drops, so recovery would fight it.
   const noViolations = !boardTempHigh && !fanSpeedHigh && readings.chipTemp <= settings.safety.maxChipTemp;
-  const canRecover = timeSinceAdjustment > settings.thermal.recoveryDelaySeconds &&
+  const canRecover = !settings.price.enabled &&
+                     timeSinceAdjustment > settings.thermal.recoveryDelaySeconds &&
                      noViolations &&
                      readings.powerLimit < settings.power.maxPower &&
                      !readings.isPaused;
@@ -926,7 +1084,7 @@ function determineUnifiedAction(readings, projectedSCOP, settings, state, stats)
         targetPower: Math.min(readings.powerLimit + settings.power.powerStepUp, settings.power.maxPower),
         reason: `Recovery: Stable for ${Math.round(timeSinceAdjustment)}s, SCOP ${projectedSCOP?.toFixed(2) || 'N/A'} allows increase`,
         severity: 'info',
-        priority: 5
+        priority: 6
       };
     }
   }
@@ -1017,7 +1175,7 @@ async function checkAutoControl(minerIp, stats, minerConfig) {
 
   // Step 5: Execute action if any
   if (action) {
-    await executeMiningControlAction(minerIp, action, minerConfig, readings);
+    const result = await executeMiningControlAction(minerIp, action, minerConfig, readings);
 
     // Update state after action
     minerControlState[minerIp].autoMiningControlState = {
@@ -1028,6 +1186,19 @@ async function checkAutoControl(minerIp, stats, minerConfig) {
       currentTargetPower: action.targetPower || readings.powerLimit,
       adjustmentReason: action.reason
     };
+
+    // Track price-control state for dwell timing and price-pause/resume logic
+    if (result?.success) {
+      const acState = minerControlState[minerIp].autoMiningControlState;
+      if (action.priceDriven) {
+        acState.lastPriceAdjustment = new Date().toISOString();
+      }
+      if (action.type === 'PAUSE') {
+        acState.pausedByPrice = !!action.priceDriven;
+      } else if (action.type === 'RESUME') {
+        acState.pausedByPrice = false;
+      }
+    }
   }
 
   // Step 6: Update state with current readings and SCOP
@@ -2615,6 +2786,37 @@ async function fetchBraiinsRestApiStats(ip, minerConfig = {}) {
 // External API Functions
 // ============================================================================
 
+/**
+ * Fetch tomorrow's day-ahead prices. Nord Pool publishes them ~13:00 local time,
+ * so before that (or if the fetch fails) this returns null and is simply retried
+ * on the next scheduled price refresh.
+ */
+async function fetchTomorrowPrices(countryConfig, zone, vatMultiplier) {
+  try {
+    const osloHour = parseInt(new Intl.DateTimeFormat('en-GB', {
+      timeZone: 'Europe/Oslo', hour: '2-digit', hour12: false
+    }).format(new Date()), 10);
+    if (osloHour < 13) return null;
+
+    const tomorrow = new Date(Date.now() + 24 * 60 * 60 * 1000);
+    const [y, m, d] = tomorrow.toLocaleDateString('sv-SE', { timeZone: 'Europe/Oslo' }).split('-');
+    const url = `${countryConfig.apiBaseUrl}/${y}/${m}-${d}_${zone}.json`;
+
+    const prices = await httpsGet(url);
+    if (!Array.isArray(prices) || prices.length === 0) return null;
+
+    console.log(`Tomorrow's electricity prices fetched for ${zone} (${prices.length} hours)`);
+    return prices.map(p => ({
+      time: p.time_start,
+      priceExVat: p.NOK_per_kWh,
+      priceIncVat: p.NOK_per_kWh * vatMultiplier,
+      eur: p.EUR_per_kWh
+    }));
+  } catch (err) {
+    return null; // Not published yet — normal before ~13:00
+  }
+}
+
 async function fetchElectricityPrices(country = 'norway', zone = 'NO5') {
   try {
     const countryConfig = ELECTRICITY_ZONES[country];
@@ -2671,9 +2873,10 @@ async function fetchElectricityPrices(country = 'norway', zone = 'NO5') {
       country,
       zoneName: zoneConfig.name,
       currency: countryConfig.currency,
-      vatRate
+      vatRate,
+      tomorrowPrices: await fetchTomorrowPrices(countryConfig, zone, vatMultiplier)
     };
-    
+
     console.log(`Electricity prices updated for ${zone}: ${electricityPriceCache.currentPrice.toFixed(2)} ${countryConfig.currency}/kWh`);
     return electricityPriceCache;
   } catch (err) {
@@ -3781,7 +3984,7 @@ async function getMinerStats(ip, config = {}) {
   }
 }
 
-async function setPowerProfile(ip, profile) {
+async function setPowerProfile(ip, profile, minerConfig = {}) {
   const profiles = {
     low: 2000,
     medium: 3250,
@@ -3789,24 +3992,13 @@ async function setPowerProfile(ip, profile) {
   };
 
   const targetPower = profiles[profile];
-  
-  try {
-    await sendCGMinerCommand(ip, {
-      command: 'ascset',
-      parameter: `0,power,${targetPower}`
-    });
-    
-    console.log(`Power profile set to ${profile} (${targetPower}W)`);
-    return { success: true, profile, power: targetPower };
-  } catch (err) {
-    console.error('setPowerProfile error:', err);
-    return { 
-      success: true, 
-      profile, 
-      power: targetPower, 
-      note: 'Command sent but response uncertain'
-    };
-  }
+
+  // Uses gRPC PerformanceService — BOSer rejects the old `ascset 0,power,N`
+  // cgminer command, which made this silently fail in earlier versions.
+  const result = await setPowerTarget(ip, targetPower, minerConfig);
+
+  console.log(`Power profile set to ${profile} (requested ${targetPower}W, applied ${result.powerTarget}W)`);
+  return { success: true, profile, power: result.powerTarget, clamped: result.clamped || false };
 }
 
 // ============================================================================
@@ -4223,10 +4415,10 @@ app.post('/api/miner/power', async (req, res) => {
       return res.status(400).json({ error: 'Invalid power profile' });
     }
 
-    const result = await setPowerProfile(ip, profile);
+    const miner = config.miners.find(m => m.ip === ip);
+    const result = await setPowerProfile(ip, profile, miner || {});
 
     // Update the miner's power profile in config
-    const miner = config.miners.find(m => m.ip === ip);
     if (miner) {
       miner.powerProfile = profile;
       await saveConfig(config);
@@ -4344,6 +4536,7 @@ app.post('/api/miner/auto-control', async (req, res) => {
         safety: { ...defaults.safety, ...existing.safety, ...settings.safety },
         thermal: { ...defaults.thermal, ...existing.thermal, ...settings.thermal },
         power: { ...defaults.power, ...existing.power, ...settings.power },
+        price: { ...defaults.price, ...existing.price, ...settings.price },
         economics: { ...defaults.economics, ...existing.economics, ...settings.economics },
         alerts: { ...defaults.alerts, ...existing.alerts, ...settings.alerts }
       };

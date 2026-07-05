@@ -1329,6 +1329,14 @@
                     powerStepDown: 250,
                     powerStepUp: 100
                 },
+                price: {
+                    enabled: false,
+                    cheapPrice: 0.60,
+                    expensivePrice: 1.20,
+                    pauseWhenExpensive: false,
+                    minDwellMinutes: 15,
+                    deadbandWatts: 100
+                },
                 economics: {
                     scopThreshold: rawSettings.scopThreshold || 2.0,
                     minSCOPForMaxPower: 3.0,
@@ -1378,8 +1386,9 @@
                 1: { name: 'Safety', color: '#ef4444', icon: '🚨' },
                 2: { name: 'Thermal', color: '#f59e0b', icon: '🌡️' },
                 3: { name: 'Heating', color: '#3b82f6', icon: '🔥' },
-                4: { name: 'Economic', color: '#10b981', icon: '💰' },
-                5: { name: 'Recovery', color: '#8b5cf6', icon: '📈' }
+                4: { name: 'Price', color: '#eab308', icon: '💸' },
+                5: { name: 'Economic', color: '#10b981', icon: '💰' },
+                6: { name: 'Recovery', color: '#8b5cf6', icon: '📈' }
             }[priority] || { name: 'Stable', color: '#6b7280', icon: '✓' });
 
             const handleToggleEnabled = async () => {
@@ -1422,6 +1431,7 @@
             const tabs = [
                 { id: 'status', label: 'Status', icon: '📊' },
                 { id: 'thermal', label: 'Thermal', icon: '🌡️' },
+                { id: 'price', label: 'Price', icon: '💸' },
                 { id: 'economic', label: 'Economic', icon: '💰' },
                 { id: 'logs', label: 'Logs', icon: '📋' }
             ];
@@ -1749,6 +1759,120 @@
                                                     }}
                                                 >
                                                     {isSaving ? 'Saving...' : 'Save Thermal Settings'}
+                                                </button>
+                                            )}
+                                        </div>
+                                    )}
+
+                                    {/* Price Tab */}
+                                    {activeTab === 'price' && localSettings && (
+                                        <div style={{ fontSize: '0.75rem' }}>
+                                            <div style={{ marginBottom: '1rem' }}>
+                                                <div style={{ color: '#eab308', fontWeight: '600', marginBottom: '0.5rem' }}>💸 Price-Based Power Control</div>
+                                                <div style={{ color: '#6b7280', fontSize: '0.625rem', marginBottom: '0.5rem' }}>
+                                                    Automatically scales power between Max and Min Power (from the Thermal tab) based on
+                                                    the effective electricity price (spot incl. VAT, strømstøtte and grid fee).
+                                                    Cheap price → max power, expensive → min power. Linear in between.
+                                                </div>
+
+                                                <label style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', cursor: 'pointer', marginBottom: '0.75rem' }}>
+                                                    <input
+                                                        type="checkbox"
+                                                        checked={localSettings.price?.enabled || false}
+                                                        onChange={(e) => updateLocalSetting('price.enabled', e.target.checked)}
+                                                        style={{ width: '1rem', height: '1rem' }}
+                                                    />
+                                                    <span style={{ fontWeight: '600' }}>Enable price-based control</span>
+                                                </label>
+
+                                                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.5rem' }}>
+                                                    <SettingInput
+                                                        label="Cheap price (full power at/below)"
+                                                        value={localSettings.price?.cheapPrice}
+                                                        onChange={(v) => updateLocalSetting('price.cheapPrice', v)}
+                                                        unit="kr/kWh"
+                                                        min={0}
+                                                        max={5}
+                                                        step={0.05}
+                                                    />
+                                                    <SettingInput
+                                                        label="Expensive price (min power at/above)"
+                                                        value={localSettings.price?.expensivePrice}
+                                                        onChange={(v) => updateLocalSetting('price.expensivePrice', v)}
+                                                        unit="kr/kWh"
+                                                        min={0}
+                                                        max={5}
+                                                        step={0.05}
+                                                    />
+                                                    <SettingInput
+                                                        label="Min time between changes"
+                                                        value={localSettings.price?.minDwellMinutes}
+                                                        onChange={(v) => updateLocalSetting('price.minDwellMinutes', v)}
+                                                        unit="min"
+                                                        min={1}
+                                                        max={120}
+                                                    />
+                                                    <SettingInput
+                                                        label="Deadband (ignore smaller changes)"
+                                                        value={localSettings.price?.deadbandWatts}
+                                                        onChange={(v) => updateLocalSetting('price.deadbandWatts', v)}
+                                                        unit="W"
+                                                        min={25}
+                                                        max={500}
+                                                        step={25}
+                                                    />
+                                                </div>
+
+                                                <div style={{ marginTop: '0.75rem' }}>
+                                                    <label style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', cursor: 'pointer' }}>
+                                                        <input
+                                                            type="checkbox"
+                                                            checked={localSettings.price?.pauseWhenExpensive || false}
+                                                            onChange={(e) => updateLocalSetting('price.pauseWhenExpensive', e.target.checked)}
+                                                            style={{ width: '1rem', height: '1rem' }}
+                                                        />
+                                                        <span>Pause completely when price is expensive</span>
+                                                    </label>
+                                                    <div style={{ color: '#6b7280', fontSize: '0.625rem', marginLeft: '1.5rem' }}>
+                                                        Skipped while heating demand is active (board temp below heating minimum)
+                                                    </div>
+                                                </div>
+
+                                                {miner.electricity?.effectivePrice != null && (
+                                                    <div style={{
+                                                        marginTop: '0.75rem',
+                                                        padding: '0.5rem',
+                                                        backgroundColor: 'rgba(234, 179, 8, 0.1)',
+                                                        borderRadius: '0.25rem',
+                                                        textAlign: 'center'
+                                                    }}>
+                                                        Current effective price: <strong style={{
+                                                            color: miner.electricity.effectivePrice <= (localSettings.price?.cheapPrice ?? 0.6) ? '#4ade80'
+                                                                : miner.electricity.effectivePrice >= (localSettings.price?.expensivePrice ?? 1.2) ? '#f87171'
+                                                                : '#eab308'
+                                                        }}>
+                                                            {miner.electricity.effectivePrice.toFixed(2)} kr/kWh
+                                                        </strong>
+                                                    </div>
+                                                )}
+                                            </div>
+
+                                            {isDirty && (
+                                                <button
+                                                    onClick={handleSaveSettings}
+                                                    disabled={isSaving}
+                                                    style={{
+                                                        width: '100%',
+                                                        padding: '0.5rem',
+                                                        backgroundColor: isSaving ? '#374151' : '#2563eb',
+                                                        border: 'none',
+                                                        borderRadius: '0.375rem',
+                                                        color: 'white',
+                                                        fontWeight: '600',
+                                                        cursor: isSaving ? 'not-allowed' : 'pointer'
+                                                    }}
+                                                >
+                                                    {isSaving ? 'Saving...' : 'Save Price Settings'}
                                                 </button>
                                             )}
                                         </div>
