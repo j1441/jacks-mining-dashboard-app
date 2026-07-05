@@ -183,7 +183,7 @@
                 ]} {...bind(['miners', i, 'cooling', 'mode'])} />
                 <NumberField label="Cooling target" unit="°C" defaultHint={DEF.miner.cooling.targetC} {...bind(['miners', i, 'cooling', 'targetC'])} />
                 <Select label="DPS policy" defaultHint={DEF.miner.dpsManage} options={[
-                  { value: 'leave', label: 'Leave as-is' }, { value: 'enable', label: 'Keep enabled' }, { value: 'disable', label: 'Keep disabled' },
+                  { value: 'leave', label: 'Leave as-is' }, { value: 'on', label: 'Keep enabled' }, { value: 'off', label: 'Keep disabled' },
                 ]} {...bind(['miners', i, 'dpsManage'])} />
               </div>
               <div className="btn-row mb">

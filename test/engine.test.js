@@ -440,7 +440,8 @@ test('horizon exhausted: heat-driven operation continues (alt none)', () => {
 test('mode off: pauses a running miner once, then rests', () => {
   const d = decide(mkInputs({ settings: { mode: 'off' }, market: { marginalPrice: 1 } }));
   assert.equal(d.action.type, 'PAUSE');
-  assert.equal(d.stateUpdates.pausedBy, 'user');
+  // 'engine', not 'user': Off→Auto must let the optimizer resume on its own.
+  assert.equal(d.stateUpdates.pausedBy, 'engine');
   const idle = decide(mkInputs({ settings: { mode: 'off' }, snap: { paused: true } }));
   assert.equal(idle.action, null);
   assert.match(idle.statusLine, /Off mode/);
@@ -617,4 +618,45 @@ test('plan/live consistency: first plan hour matches decide() for the same input
 
 test('buildPlan: empty horizon -> empty plan', () => {
   assert.deepEqual(buildPlan(mkInputs({ priceHours: [] })), []);
+});
+
+// --- regression tests for the adversarial-review fixes (2026-07-05) ---------
+
+test('no usable price at all: engine holds, never treats electricity as free', () => {
+  const d = decide(mkInputs({
+    market: { marginalPrice: null, horizonCoversNow: false, fallbackPrice: null },
+    snap: { paused: true },
+  }));
+  assert.equal(d.action, null);
+  assert.ok(d.trace.blockedBy.includes('no price data'));
+});
+
+test('paused + hot chip: economics never restarts until below resume threshold', () => {
+  const snapshot = mkSnapshot({ paused: true });
+  snapshot.boards[0].chipTempC = 78; // paused but still >= derate(80) - 5
+  const d = decide(mkInputs({
+    market: { marginalPrice: 0.01 }, // wildly profitable
+    snapshot,
+  }));
+  assert.equal(d.action, null);
+  assert.ok(d.trace.blockedBy.some((b) => b.includes('too hot to start')));
+});
+
+test('hot with unreadable tuner target: derate deferred, ceiling not slammed', () => {
+  const d = decide(mkInputs({
+    snap: { chipT: 85, targetW: 0 },
+  }));
+  assert.equal(d.action, null);
+  assert.notEqual(d.stateUpdates.thermalCeilingW, 944);
+});
+
+test('off mode then auto: engine resumes by itself when profitable', () => {
+  const off = decide(mkInputs({ settings: { mode: 'off' } }));
+  assert.equal(off.stateUpdates.pausedBy, 'engine');
+  const resumed = decide(mkInputs({
+    market: { marginalPrice: 0.01 },
+    snap: { paused: true },
+    state: { pausedBy: 'engine' },
+  }));
+  assert.ok(resumed.action && resumed.action.type === 'RESUME');
 });

@@ -29,7 +29,9 @@ const DATA_DIR = process.env.DATA_DIR || '/data';
 const VERSION = require('./package.json').version;
 
 const WATCHDOG_INTERVAL_MS = 60 * 1000;
-const STALL_MS = 5 * 60 * 1000;
+// Stall threshold scales with the configured poll cadence (validator allows up
+// to 3600 s polls; a fixed 5 min would then restart-loop the whole app).
+const stallMsFor = (cfg) => Math.max(5 * 60 * 1000, ((cfg && cfg.pollSeconds) || 10) * 5 * 1000);
 const ALERT_DISPATCH_TIMEOUT_MS = 5 * 1000;
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -102,7 +104,7 @@ async function main() {
       if (!c.running) continue;
       const t = c.lastTickAt ? Date.parse(c.lastTickAt) : NaN;
       const ageMs = Number.isFinite(t) ? Date.now() - t : Infinity;
-      if (ageMs <= STALL_MS) continue;
+      if (ageMs <= stallMsFor(cfg)) continue;
       const message = `controller ${c.id} stalled: last completed tick ${c.lastTickAt || 'never'}`;
       try {
         await history.appendEvent({

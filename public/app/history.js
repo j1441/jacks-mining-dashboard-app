@@ -55,8 +55,12 @@
     const app = useContext(window.AppContext);
     const [range, setRange] = useState(RANGES[0]);
     const minerId = app.snapshot && app.snapshot.miners && app.snapshot.miners[0] ? app.snapshot.miners[0].id : '';
-    const from = new Date(Date.now() - range.ms).toISOString();
-    const to = new Date().toISOString();
+    // Memoized so the URL is stable per selection — Date.now() in the path would
+    // otherwise re-trigger useApi on every render (infinite fetch loop).
+    const { from, to } = React.useMemo(() => ({
+      from: new Date(Date.now() - range.ms).toISOString(),
+      to: new Date().toISOString(),
+    }), [range.key, minerId]);
     const q = useApi(`/api/history?from=${encodeURIComponent(from)}&to=${encodeURIComponent(to)}&res=${range.res}${minerId ? `&id=${encodeURIComponent(minerId)}` : ''}`, [range.key, minerId]);
     const rows = Array.isArray(q.data) ? q.data : (q.data && (q.data.samples || q.data.rows)) || [];
 

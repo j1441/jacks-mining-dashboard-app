@@ -166,12 +166,12 @@ test('norgespris: flat 0.50 under the cap, raw spot(+VAT) over it', () => {
   approx(over.marginalPrice, 2.5 + 0.50); // no flat rate over the cap
 });
 
-test('NO4 is VAT exempt; threshold applies to the (unchanged) spot', () => {
+test('NO4 is VAT exempt; the 0.75 ex-VAT threshold applies without VAT uplift', () => {
   const el = baseEl({ zone: 'NO4' });
   const r = computeMarginalPrice({ dateIso: SAT_EOM, spotExVatNok: 2.0, electricity: el, monthMinerKWh: 0 });
   approx(r.components.vat, 0);
-  // subsidy 0.9*(2.0-0.9375)=0.95625; base 1.04375
-  approx(r.marginalPrice, 1.04375 + 0.30);
+  // threshold 0.75 (no VAT in NO4); subsidy 0.9*(2.0-0.75)=1.125; base 0.875
+  approx(r.marginalPrice, 0.875 + 0.30);
   const over = computeMarginalPrice({ dateIso: SAT_EOM, spotExVatNok: 2.0, electricity: el, monthMinerKWh: 9000 });
   approx(over.marginalPrice, 2.0 + 0.30);
 });
