@@ -1,0 +1,1009 @@
+{
+ "hashboards": {
+  "hashboards": [
+   {
+    "id": "1",
+    "enabled": false,
+    "chips_count": {
+     "value": 126
+    },
+    "current_voltage": {
+     "volt": 0
+    },
+    "current_frequency": {
+     "hertz": 0
+    },
+    "highest_chip_temp": null,
+    "board_temp": null,
+    "stats": {
+     "real_hashrate": {
+      "last_5s": {
+       "gigahash_per_second": 0
+      },
+      "last_15s": {
+       "gigahash_per_second": 0
+      },
+      "last_30s": {
+       "gigahash_per_second": 0
+      },
+      "last_1m": {
+       "gigahash_per_second": 0
+      },
+      "last_5m": {
+       "gigahash_per_second": 0
+      },
+      "last_15m": {
+       "gigahash_per_second": 0
+      },
+      "last_30m": {
+       "gigahash_per_second": 0
+      },
+      "last_1h": {
+       "gigahash_per_second": 0
+      },
+      "last_24h": {
+       "gigahash_per_second": 0
+      },
+      "since_restart": {
+       "gigahash_per_second": 0
+      }
+     },
+     "nominal_hashrate": {
+      "gigahash_per_second": 0
+     },
+     "error_hashrate": {
+      "megahash_per_second": 0
+     },
+     "found_blocks": 0,
+     "best_share": "0",
+     "best_share_str": ""
+    },
+    "lowest_inlet_temp": null,
+    "highest_outlet_temp": null,
+    "model": "BHB42601",
+    "_model": "model",
+    "serial_number": "HQDZYN3BAJGJF0Y2E",
+    "_serial_number": "serial_number",
+    "board_name": "BHB42601",
+    "_board_name": "board_name",
+    "chip_type": "BM1362",
+    "_chip_type": "chip_type"
+   },
+   {
+    "id": "2",
+    "enabled": true,
+    "chips_count": {
+     "value": 126
+    },
+    "current_voltage": {
+     "volt": 11.375919999999999
+    },
+    "current_frequency": {
+     "hertz": 203777648
+    },
+    "highest_chip_temp": {
+     "location": "SENSOR_LOCATION_CHIP",
+     "temperature": {
+      "degree_c": 65
+     },
+     "id": 2,
+     "_id": "id"
+    },
+    "board_temp": {
+     "degree_c": 50
+    },
+    "stats": {
+     "real_hashrate": {
+      "last_5s": {
+       "gigahash_per_second": 11515.984336060503
+      },
+      "last_15s": {
+       "gigahash_per_second": 12610.973910698076
+      },
+      "last_30s": {
+       "gigahash_per_second": 12436.891097663154
+      },
+      "last_1m": {
+       "gigahash_per_second": 12676.90119710455
+      },
+      "last_5m": {
+       "gigahash_per_second": 13073.995651076357
+      },
+      "last_15m": {
+       "gigahash_per_second": 13220.46513805965
+      },
+      "last_30m": {
+       "gigahash_per_second": 13167.819387827523
+      },
+      "last_1h": {
+       "gigahash_per_second": 12992.901879836629
+      },
+      "last_24h": {
+       "gigahash_per_second": 13180.95980177782
+      },
+      "since_restart": {
+       "gigahash_per_second": 13167.138008062511
+      }
+     },
+     "nominal_hashrate": {
+      "gigahash_per_second": 13197.45560381
+     },
+     "error_hashrate": {
+      "megahash_per_second": 0
+     },
+     "found_blocks": 0,
+     "best_share": "4222763533",
+     "best_share_str": ""
+    },
+    "lowest_inlet_temp": {
+     "degree_c": 36
+    },
+    "highest_outlet_temp": {
+     "degree_c": 50
+    },
+    "model": "BHB42601",
+    "_model": "model",
+    "serial_number": "HQDZYN3BAJGJF0Y3A",
+    "_serial_number": "serial_number",
+    "board_name": "BHB42601",
+    "_board_name": "board_name",
+    "chip_type": "BM1362",
+    "_chip_type": "chip_type"
+   },
+   {
+    "id": "3",
+    "enabled": false,
+    "chips_count": {
+     "value": 126
+    },
+    "current_voltage": {
+     "volt": 0
+    },
+    "current_frequency": {
+     "hertz": 0
+    },
+    "highest_chip_temp": null,
+    "board_temp": null,
+    "stats": {
+     "real_hashrate": {
+      "last_5s": {
+       "gigahash_per_second": 0
+      },
+      "last_15s": {
+       "gigahash_per_second": 0
+      },
+      "last_30s": {
+       "gigahash_per_second": 0
+      },
+      "last_1m": {
+       "gigahash_per_second": 0
+      },
+      "last_5m": {
+       "gigahash_per_second": 0
+      },
+      "last_15m": {
+       "gigahash_per_second": 0
+      },
+      "last_30m": {
+       "gigahash_per_second": 0
+      },
+      "last_1h": {
+       "gigahash_per_second": 0
+      },
+      "last_24h": {
+       "gigahash_per_second": 0
+      },
+      "since_restart": {
+       "gigahash_per_second": 0
+      }
+     },
+     "nominal_hashrate": {
+      "gigahash_per_second": 0
+     },
+     "error_hashrate": {
+      "megahash_per_second": 0
+     },
+     "found_blocks": 0,
+     "best_share": "0",
+     "best_share_str": ""
+    },
+    "lowest_inlet_temp": null,
+    "highest_outlet_temp": null,
+    "model": "BHB42601",
+    "_model": "model",
+    "serial_number": "HQDZYN3BAJGJF0Y5D",
+    "_serial_number": "serial_number",
+    "board_name": "BHB42601",
+    "_board_name": "board_name",
+    "chip_type": "BM1362",
+    "_chip_type": "chip_type"
+   }
+  ]
+ },
+ "details": {
+  "uid": "sbzxS6ZbgQAac3MR",
+  "miner_identity": {
+   "brand": "MINER_BRAND_ANTMINER",
+   "model": "MINER_MODEL_ANTMINER_S19J_PRO",
+   "name": "Antminer S19J Pro",
+   "miner_model": "Antminer S19j Pro"
+  },
+  "platform": "PLATFORM_AM3_BBB",
+  "bos_mode": "BOS_MODE_NAND",
+  "bos_version": {
+   "current": "2025-11-21-0-eb658dcd-25.11-plus",
+   "major": "2022-09-13-0-11012d53-22.08-plus",
+   "bos_plus": true
+  },
+  "hostname": "Antminer",
+  "mac_address": "94:e3:6d:dd:a4:5d",
+  "system_uptime": "536266",
+  "sticker_hashrate": {
+   "gigahash_per_second": 104000
+  },
+  "bosminer_uptime_s": "536231",
+  "system_uptime_s": "536266",
+  "status": "MINER_STATUS_NORMAL",
+  "kernel_version": "3.8.13+",
+  "control_board_soc_family": "CONTROL_BOARD_SOC_FAMILY_BBB",
+  "psu_info": {
+   "version": {
+    "value": 113
+   },
+   "_version": "version",
+   "model_name": "APW121215a",
+   "_model_name": "model_name",
+   "min_voltage": {
+    "volt": 11.96
+   },
+   "_min_voltage": "min_voltage",
+   "max_voltage": {
+    "volt": 15.2
+   },
+   "_max_voltage": "max_voltage"
+  },
+  "_psu_info": "psu_info"
+ },
+ "stats": {
+  "pool_stats": {
+   "accepted_shares": "12206",
+   "rejected_shares": "26",
+   "stale_shares": "0",
+   "last_difficulty": "131072",
+   "best_share": "4222763533",
+   "generated_work": "45683310592",
+   "best_share_str": "",
+   "last_share_time": {
+    "seconds": "1783277846",
+    "nanos": 173554759
+   },
+   "_last_share_time": "last_share_time"
+  },
+  "miner_stats": {
+   "real_hashrate": {
+    "last_5s": {
+     "gigahash_per_second": 11352.338656580998
+    },
+    "last_15s": {
+     "gigahash_per_second": 12562.268715718039
+    },
+    "last_30s": {
+     "gigahash_per_second": 12413.306480719568
+    },
+    "last_1m": {
+     "gigahash_per_second": 12664.179294406807
+    },
+    "last_5m": {
+     "gigahash_per_second": 13071.339461964693
+    },
+    "last_15m": {
+     "gigahash_per_second": 13219.597795823418
+    },
+    "last_30m": {
+     "gigahash_per_second": 13167.399706811126
+    },
+    "last_1h": {
+     "gigahash_per_second": 12992.685584039413
+    },
+    "last_24h": {
+     "gigahash_per_second": 13180.950784567483
+    },
+    "since_restart": {
+     "gigahash_per_second": 13167.01923136629
+    }
+   },
+   "nominal_hashrate": {
+    "gigahash_per_second": 13197.45560381
+   },
+   "error_hashrate": {
+    "megahash_per_second": 0
+   },
+   "found_blocks": 0,
+   "best_share": "4222763533",
+   "best_share_str": ""
+  },
+  "power_stats": {
+   "approximated_consumption": {
+    "watt": "475"
+   },
+   "efficiency": {
+    "joule_per_terahash": 37.50582969063196
+   }
+  }
+ },
+ "tunerState": {
+  "overall_tuner_state": "TUNER_STATE_STABLE",
+  "power_target_mode_state": {
+   "profile": {
+    "created": null,
+    "target": {
+     "watt": "944"
+    },
+    "measured_hashrate": {
+     "gigahash_per_second": 13197.45560381
+    },
+    "estimated_power_consumption": {
+     "watt": "475"
+    }
+   },
+   "current_target": {
+    "watt": "944"
+   }
+  },
+  "mode_state": "power_target_mode_state"
+ },
+ "profiles": {
+  "power_target_profiles": [
+   {
+    "created": {
+     "seconds": "1782742706",
+     "nanos": 596122640
+    },
+    "target": {
+     "watt": "943"
+    },
+    "measured_hashrate": {
+     "gigahash_per_second": 13172.255116251
+    },
+    "estimated_power_consumption": {
+     "watt": "397"
+    }
+   },
+   {
+    "created": {
+     "seconds": "1783165226",
+     "nanos": 542629693
+    },
+    "target": {
+     "watt": "944"
+    },
+    "measured_hashrate": {
+     "gigahash_per_second": 13146.973659153
+    },
+    "estimated_power_consumption": {
+     "watt": "397"
+    }
+   }
+  ],
+  "hashrate_target_profiles": []
+ },
+ "cooling": {
+  "fans": [
+   {
+    "rpm": 3059,
+    "position": 0,
+    "_position": "position",
+    "target_speed_ratio": 1,
+    "_target_speed_ratio": "target_speed_ratio"
+   },
+   {
+    "rpm": 3029,
+    "position": 1,
+    "_position": "position",
+    "target_speed_ratio": 1,
+    "_target_speed_ratio": "target_speed_ratio"
+   },
+   {
+    "rpm": 3059,
+    "position": 2,
+    "_position": "position",
+    "target_speed_ratio": 1,
+    "_target_speed_ratio": "target_speed_ratio"
+   },
+   {
+    "rpm": 3029,
+    "position": 3,
+    "_position": "position",
+    "target_speed_ratio": 1,
+    "_target_speed_ratio": "target_speed_ratio"
+   }
+  ],
+  "highest_temperature": {
+   "location": "SENSOR_LOCATION_CHIP",
+   "temperature": {
+    "degree_c": 65
+   }
+  }
+ },
+ "configuration": {
+  "pool_groups": [
+   {
+    "pools": [
+     {
+      "url": "stratum+tcp://192.168.1.243:23334",
+      "user": "bc1qlp3xkef7rn6mnvmd459sql46v2pk3yyptx6rxu.s19j4",
+      "uid": "1",
+      "_uid": "uid",
+      "password": "x",
+      "_password": "password"
+     },
+     {
+      "url": "stratum+tcp://mine.ocean.xyz:3334",
+      "user": "bc1qlp3xkef7rn6mnvmd459sql46v2pk3yyptx6rxu.s19j4",
+      "uid": "2",
+      "_uid": "uid",
+      "password": "x",
+      "_password": "password"
+     }
+    ],
+    "name": "Default",
+    "uid": "0",
+    "_uid": "uid"
+   }
+  ],
+  "temperature": {
+   "minimum_required_fans": 0,
+   "_minimum_required_fans": "minimum_required_fans",
+   "manual": {
+    "hot_temperature": {
+     "degree_c": 65
+    },
+    "dangerous_temperature": {
+     "degree_c": 70
+    },
+    "target_temperature": null,
+    "fan_speed_ratio": 0.2,
+    "_fan_speed_ratio": "fan_speed_ratio",
+    "minimum_required_fans": 0,
+    "_minimum_required_fans": "minimum_required_fans"
+   },
+   "mode": "manual"
+  },
+  "tuner": {
+   "power_target": {
+    "watt": "944"
+   },
+   "hashrate_target": null,
+   "enabled": true,
+   "_enabled": "enabled"
+  },
+  "dps": {
+   "power_step": {
+    "watt": "10"
+   },
+   "hashrate_step": null,
+   "min_power_target": null,
+   "min_hashrate_target": null,
+   "shutdown_duration": null,
+   "enabled": true,
+   "_enabled": "enabled",
+   "shutdown_enabled": false,
+   "_shutdown_enabled": "shutdown_enabled"
+  },
+  "hashboard_config": {
+   "hashboards": [
+    {
+     "id": "1",
+     "frequency": null,
+     "voltage": null,
+     "enabled": false,
+     "_enabled": "enabled"
+    },
+    {
+     "id": "3",
+     "frequency": null,
+     "voltage": null,
+     "enabled": false,
+     "_enabled": "enabled"
+    }
+   ],
+   "global_frequency": null,
+   "global_voltage": null
+  }
+ },
+ "constraints": {
+  "tuner_constraints": {
+   "power_target": {
+    "default": {
+     "watt": "3068"
+    },
+    "min": {
+     "watt": "944"
+    },
+    "max": {
+     "watt": "6435"
+    }
+   },
+   "hashrate_target": {
+    "default": {
+     "terahash_per_second": 104
+    },
+    "min": {
+     "terahash_per_second": 70.75
+    },
+    "max": {
+     "terahash_per_second": 252.57
+    }
+   },
+   "enabled": {
+    "default": false
+   },
+   "default_mode": "TUNER_MODE_POWER_TARGET"
+  },
+  "cooling_constraints": {
+   "default_cooling_mode": "COOLING_MODE_AUTO",
+   "target_temperature": {
+    "default": {
+     "degree_c": 60
+    },
+    "min": {
+     "degree_c": 0
+    },
+    "max": {
+     "degree_c": 200
+    }
+   },
+   "hot_temperature": {
+    "default": {
+     "degree_c": 80
+    },
+    "min": {
+     "degree_c": 0
+    },
+    "max": {
+     "degree_c": 200
+    }
+   },
+   "dangerous_temperature": {
+    "default": {
+     "degree_c": 90
+    },
+    "min": {
+     "degree_c": 0
+    },
+    "max": {
+     "degree_c": 200
+    }
+   },
+   "fan_speed_ratio": {
+    "default": 1,
+    "min": 0,
+    "max": 1
+   },
+   "minimum_required_fans": {
+    "default": 2,
+    "min": 0,
+    "max": 4
+   },
+   "min_fan_speed": {
+    "default": 0,
+    "min": 0,
+    "max": 100
+   },
+   "max_fan_speed": {
+    "default": 100,
+    "min": 0,
+    "max": 100
+   },
+   "pause_cooldown_fan_speed_ratio": {
+    "default": 0.2,
+    "min": 0,
+    "max": 1
+   },
+   "default_fan_pause_mode": "FAN_PAUSE_MODE_MANUAL",
+   "_default_fan_pause_mode": "default_fan_pause_mode"
+  },
+  "dps_constraints": {
+   "power_step": {
+    "default": {
+     "watt": "300"
+    },
+    "min": {
+     "watt": "1"
+    },
+    "max": {
+     "watt": "1000"
+    }
+   },
+   "hashrate_step": {
+    "default": {
+     "terahash_per_second": 11
+    },
+    "min": {
+     "terahash_per_second": 0.1
+    },
+    "max": {
+     "terahash_per_second": 100
+    }
+   },
+   "min_power_target": {
+    "default": {
+     "watt": "944"
+    },
+    "min": {
+     "watt": "944"
+    },
+    "max": {
+     "watt": "6435"
+    }
+   },
+   "min_hashrate_target": {
+    "default": {
+     "terahash_per_second": 70.75
+    },
+    "min": {
+     "terahash_per_second": 70.75
+    },
+    "max": {
+     "terahash_per_second": 252.57
+    }
+   },
+   "shutdown_enabled": {
+    "default": false
+   },
+   "shutdown_duration": {
+    "default": {
+     "hours": 3
+    },
+    "min": {
+     "hours": 0
+    },
+    "max": {
+     "hours": 999
+    }
+   },
+   "enabled": {
+    "default": false
+   },
+   "mode": "DPS_MODE_NORMAL",
+   "on_start_target_percent": null
+  },
+  "hashboards_constraints": {
+   "hashboard_ids": [
+    "1",
+    "2",
+    "3"
+   ],
+   "enabled": {
+    "default": true
+   },
+   "frequency": {
+    "default": {
+     "hertz": 545000000
+    },
+    "min": {
+     "hertz": 50000000
+    },
+    "max": {
+     "hertz": 1300000000
+    }
+   },
+   "voltage": {
+    "default": {
+     "volt": 13.8
+    },
+    "min": {
+     "volt": 11.96
+    },
+    "max": {
+     "volt": 15.2
+    }
+   },
+   "quick_ramping_time_s": {
+    "default": 30,
+    "min": 2,
+    "max": 600
+   }
+  }
+ },
+ "cgminer_summary": {
+  "STATUS": [
+   {
+    "STATUS": "S",
+    "When": 1783277850,
+    "Code": 11,
+    "Msg": "Summary",
+    "Description": "BOSer boser-buildroot 0.1.0-eb658dcd"
+   }
+  ],
+  "SUMMARY": [
+   {
+    "Accepted": 12206,
+    "Best Share": 4222763533,
+    "Device Hardware%": 0,
+    "Device Rejected%": 0.00040547604759415463,
+    "Difficulty Accepted": 1599520768,
+    "Difficulty Rejected": 3407872,
+    "Difficulty Stale": 0,
+    "Discarded": 0,
+    "Elapsed": 536237,
+    "Found Blocks": 0,
+    "Get Failures": 0,
+    "Getworks": 15332,
+    "Hardware Errors": 0,
+    "Last getwork": 1783277849,
+    "Local Work": 46855553024,
+    "MHS 15m": 13219126.228007015,
+    "MHS 1m": 12657690.809399838,
+    "MHS 24h": 13180945.907773843,
+    "MHS 5m": 13069810.92427122,
+    "MHS 5s": 11252781.000636844,
+    "MHS av": 13167016.395949008,
+    "Network Blocks": 0,
+    "Pool Rejected%": 0.21255722694571616,
+    "Pool Stale%": 0,
+    "Rejected": 26,
+    "Remote Failures": 0,
+    "Stale": 0,
+    "Total MH": 7060653555740.312,
+    "Utility": 1.3657394025402947,
+    "Work Utility": 183671.5254490087
+   }
+  ],
+  "id": 1
+ },
+ "cgminer_pools": {
+  "STATUS": [
+   {
+    "STATUS": "S",
+    "When": 1783277850,
+    "Code": 7,
+    "Msg": "2 Pool(s)",
+    "Description": "BOSer boser-buildroot 0.1.0-eb658dcd"
+   }
+  ],
+  "POOLS": [
+   {
+    "Accepted": 12206,
+    "AsicBoost": true,
+    "Bad Work": 0,
+    "Best Share": 4222763533,
+    "Current Block Height": 0,
+    "Current Block Version": 536870928,
+    "Diff1 Shares": 6251725,
+    "Difficulty Accepted": 1599520768,
+    "Difficulty Rejected": 3407872,
+    "Difficulty Stale": 0,
+    "Discarded": 0,
+    "Get Failures": 0,
+    "Getworks": 15183,
+    "Has GBT": false,
+    "Has Stratum": true,
+    "Has Vmask": true,
+    "Last Share Difficulty": 131072,
+    "Last Share Time": 1783277792,
+    "Long Poll": "N",
+    "POOL": 0,
+    "Pool Rejected%": 0.2126028517401748,
+    "Pool Stale%": 0,
+    "Priority": 0,
+    "Proxy": "",
+    "Proxy Type": "",
+    "Quota": 1,
+    "Rejected": 26,
+    "Remote Failures": 0,
+    "Stale": 0,
+    "Status": "Alive",
+    "Stratum Active": true,
+    "Stratum Difficulty": 131072,
+    "Stratum URL": "192.168.1.243:23334",
+    "URL": "stratum+tcp://192.168.1.243:23334",
+    "User": "bc1qlp3xkef7rn6mnvmd459sql46v2pk3yyptx6rxu.s19j4",
+    "Work Difficulty": 131072,
+    "Works": 45682524160
+   },
+   {
+    "Accepted": 0,
+    "AsicBoost": true,
+    "Bad Work": 0,
+    "Best Share": 0,
+    "Current Block Height": 0,
+    "Current Block Version": 536870912,
+    "Diff1 Shares": 110,
+    "Difficulty Accepted": 0,
+    "Difficulty Rejected": 0,
+    "Difficulty Stale": 0,
+    "Discarded": 0,
+    "Get Failures": 0,
+    "Getworks": 149,
+    "Has GBT": false,
+    "Has Stratum": true,
+    "Has Vmask": true,
+    "Last Share Difficulty": 0,
+    "Last Share Time": 0,
+    "Long Poll": "N",
+    "POOL": 1,
+    "Pool Rejected%": 0,
+    "Pool Stale%": 0,
+    "Priority": 1,
+    "Proxy": "",
+    "Proxy Type": "",
+    "Quota": 1,
+    "Rejected": 0,
+    "Remote Failures": 0,
+    "Stale": 0,
+    "Status": "Alive",
+    "Stratum Active": false,
+    "Stratum Difficulty": 262144,
+    "Stratum URL": "mine.ocean.xyz:3334",
+    "URL": "stratum+tcp://mine.ocean.xyz:3334",
+    "User": "bc1qlp3xkef7rn6mnvmd459sql46v2pk3yyptx6rxu.s19j4",
+    "Work Difficulty": 262144,
+    "Works": 786432
+   }
+  ],
+  "id": 1
+ },
+ "cgminer_temps": {
+  "STATUS": [
+   {
+    "STATUS": "S",
+    "When": 1783277850,
+    "Code": 201,
+    "Msg": "1 Temp(s)",
+    "Description": "BOSer boser-buildroot 0.1.0-eb658dcd"
+   }
+  ],
+  "TEMPS": [
+   {
+    "Board": 50,
+    "Chip": 65,
+    "ID": 2,
+    "TEMP": 0
+   }
+  ],
+  "id": 1
+ },
+ "cgminer_fans": {
+  "STATUS": [
+   {
+    "STATUS": "S",
+    "When": 1783277850,
+    "Code": 202,
+    "Msg": "4 Fan(s)",
+    "Description": "BOSer boser-buildroot 0.1.0-eb658dcd"
+   }
+  ],
+  "FANS": [
+   {
+    "FAN": 0,
+    "ID": 0,
+    "RPM": 3059,
+    "Speed": 100
+   },
+   {
+    "FAN": 1,
+    "ID": 1,
+    "RPM": 3029,
+    "Speed": 100
+   },
+   {
+    "FAN": 2,
+    "ID": 2,
+    "RPM": 3059,
+    "Speed": 100
+   },
+   {
+    "FAN": 3,
+    "ID": 3,
+    "RPM": 3029,
+    "Speed": 100
+   }
+  ],
+  "id": 1
+ },
+ "cgminer_devs": {
+  "STATUS": [
+   {
+    "STATUS": "S",
+    "When": 1783277850,
+    "Code": 9,
+    "Msg": "3 ASC(s)",
+    "Description": "BOSer boser-buildroot 0.1.0-eb658dcd"
+   }
+  ],
+  "DEVS": [
+   {
+    "ASC": 0,
+    "Accepted": 0,
+    "Device Elapsed": 536234,
+    "Device Hardware%": 0,
+    "Device Rejected%": 0,
+    "Diff1 Work": 0,
+    "Difficulty Accepted": 0,
+    "Difficulty Rejected": 0,
+    "Enabled": "Y",
+    "Hardware Error MHS 15m": 0,
+    "Hardware Errors": 0,
+    "ID": 1,
+    "Last Share Difficulty": 0,
+    "Last Share Pool": -1,
+    "Last Share Time": 0,
+    "Last Valid Work": 0,
+    "MHS 15m": 0,
+    "MHS 1m": 0,
+    "MHS 5m": 0,
+    "MHS 5s": 0,
+    "MHS av": 0,
+    "Name": "",
+    "Nominal MHS": 0,
+    "Rejected": 0,
+    "Status": "Alive",
+    "Temperature": 0,
+    "Total MH": 0,
+    "Utility": 0
+   },
+   {
+    "ASC": 1,
+    "Accepted": 0,
+    "Device Elapsed": 536233,
+    "Device Hardware%": 0,
+    "Device Rejected%": 0,
+    "Diff1 Work": 6412216,
+    "Difficulty Accepted": 0,
+    "Difficulty Rejected": 0,
+    "Enabled": "Y",
+    "Hardware Error MHS 15m": 0,
+    "Hardware Errors": 0,
+    "ID": 2,
+    "Last Share Difficulty": 1024,
+    "Last Share Pool": -1,
+    "Last Share Time": 1783277846,
+    "Last Valid Work": 1783277849,
+    "MHS 15m": 13217966.699374296,
+    "MHS 1m": 12640709.137848912,
+    "MHS 5m": 13066269.492377425,
+    "MHS 5s": 11031762.978763355,
+    "MHS av": 13167131.784537317,
+    "Name": "",
+    "Nominal MHS": 13197455.60381,
+    "Rejected": 0,
+    "Status": "Alive",
+    "Temperature": 0,
+    "Total MH": 7060653555740.312,
+    "Utility": 0
+   },
+   {
+    "ASC": 2,
+    "Accepted": 0,
+    "Device Elapsed": 536233,
+    "Device Hardware%": 0,
+    "Device Rejected%": 0,
+    "Diff1 Work": 0,
+    "Difficulty Accepted": 0,
+    "Difficulty Rejected": 0,
+    "Enabled": "Y",
+    "Hardware Error MHS 15m": 0,
+    "Hardware Errors": 0,
+    "ID": 3,
+    "Last Share Difficulty": 0,
+    "Last Share Pool": -1,
+    "Last Share Time": 0,
+    "Last Valid Work": 0,
+    "MHS 15m": 0,
+    "MHS 1m": 0,
+    "MHS 5m": 0,
+    "MHS 5s": 0,
+    "MHS av": 0,
+    "Name": "",
+    "Nominal MHS": 0,
+    "Rejected": 0,
+    "Status": "Alive",
+    "Temperature": 0,
+    "Total MH": 0,
+    "Utility": 0
+   }
+  ],
+  "id": 1
+ }
+}
