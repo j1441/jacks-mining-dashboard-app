@@ -506,3 +506,38 @@ test('alerts: test() sends to every configured channel and skips unconfigured on
   assert.equal(results.webhook.ok, true);
   assert.equal(results.telegram, undefined);
 });
+
+// --- regression: review round 2 fixes (2026-07-11) --------------------------
+
+test('alerts: credentialed ntfy/webhook URLs move userinfo to Authorization header', async () => {
+  const calls = [];
+  const alerts = new Alerts({
+    configStore: fakeConfigStore({
+      ntfy: { url: 'https://user:p@ss@ntfy.example.com/', topic: 'mine' },
+      webhook: { url: 'https://hook:key@hooks.example.com/x' },
+    }),
+    history: { appendEvent: async () => {} },
+    fetchImpl: captureFetch(calls),
+  });
+  await alerts.fire('offline', { severity: 'warn', title: 't', message: 'm', minerId: 'm1' });
+  const ntfy = calls.find((c) => c.url.includes('ntfy.example.com'));
+  assert.ok(!ntfy.url.includes('@'), 'no userinfo left in ntfy URL (undici would throw)');
+  assert.equal(ntfy.url, 'https://ntfy.example.com/mine');
+  assert.equal(ntfy.opts.headers.Authorization, `Basic ${Buffer.from('user:p@ss').toString('base64')}`);
+  const wh = calls.find((c) => c.url.includes('hooks.example.com'));
+  assert.ok(!wh.url.includes('@'));
+  assert.equal(wh.opts.headers.Authorization, `Basic ${Buffer.from('hook:key').toString('base64')}`);
+});
+
+test('config: telegram bot token without a chatId is rejected', async () => {
+  const dir = await tmpDir();
+  const store = new ConfigStore({ dataDir: dir });
+  await store.load();
+  await assert.rejects(
+    store.update({ alerts: { telegram: { botToken: '123:ABC', chatId: '' } } }),
+    /chatId is required/,
+  );
+  // a valid chatId (number or string) is accepted
+  const ok = await store.update({ alerts: { telegram: { botToken: '123:ABC', chatId: 42 } } });
+  assert.equal(ok.alerts.telegram.chatId, 42);
+});

@@ -485,6 +485,21 @@ test('setCoolingMode: verified via GetMinerConfiguration().temperature', async (
     hot_temperature: { degree_c: 80 },
     dangerous_temperature: { degree_c: 90 },
   });
+});
+
+test('setCoolingMode: a temperature value that does not take is a verify failure', async () => {
+  const client = newClient();
+  client._call = async (svc, method) => {
+    if (method === 'SetCoolingMode') return {};
+    // read-back still shows the fixture's manual hot=65/dangerous=70
+    if (method === 'GetMinerConfiguration') return fx.configuration;
+    throw new Error(`unexpected call: ${method}`);
+  };
+  // request manual but with a DIFFERENT hot temp than the miner reports back
+  await assert.rejects(
+    client.setCoolingMode({ mode: 'manual', fanSpeedRatio: 0.2, hotC: 55, dangerousC: 70 }),
+    (err) => err.verifyFailed === true && /cooling hotC/.test(err.message),
+  );
 
   await assert.rejects(client.setCoolingMode({ mode: 'hydro' }), /unsupported cooling mode/);
 });

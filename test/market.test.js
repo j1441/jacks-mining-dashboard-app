@@ -397,3 +397,19 @@ test('fetch failures never throw out of start(); they land in state().errors', a
   assert.equal(s.currentMarginal, null);
   market.stop();
 });
+
+test('fallback uses the CURRENT hour grid fee, not the trailing spike hour fee', async () => {
+  // Spike at 02:00 Oslo (night fee 0.30); current hour 11:00 Oslo (day fee 0.50).
+  const { market, clock } = makeMarket({
+    days: { '2026-01-04': () => 0.5, '2026-01-05': (i) => (i === 1 ? 3.0 : 0.5) },
+    start: '2026-01-04T10:00:00Z',
+  });
+  await market.refreshPrices();
+  clock.now = new Date('2026-01-05T10:00:00Z');
+  await market.refreshPrices();
+  clock.now = new Date('2026-01-06T10:00:00Z'); // 11:00 Oslo, weekday day, Jan 6 never fetched
+  const s = market.state();
+  assert.equal(s.horizonCoversNow, false);
+  // base at the 02:00 spike = 3.75 - 0.9*(3.75-0.9375) = 1.21875; + current day fee 0.50
+  approx(s.fallbackPrice, 1.21875 + 0.50);
+});
