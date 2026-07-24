@@ -60,13 +60,16 @@ test('parseHashboards: live fixture (3 boards, only board 2 hashing)', () => {
 
   const [b1, b2, b3] = boards;
   assert.deepEqual(b1, {
-    id: '1', enabled: false, hashing: false, boardTempC: null, chipTempC: null, hashrateThs: 0,
+    id: '1', enabled: false, hashing: false, boardTempC: null, chipTempC: null,
+    inletTempC: null, outletTempC: null, hashrateThs: 0,
   });
   assert.equal(b2.id, '2');
   assert.equal(b2.enabled, true);
   assert.equal(b2.hashing, true);
   assert.equal(b2.boardTempC, 50);
   assert.equal(b2.chipTempC, 65); // nested highest_chip_temp.temperature.degree_c
+  assert.equal(b2.inletTempC, 36); // lowest_inlet_temp ≈ room air entering the board
+  assert.equal(b2.outletTempC, 50);
   assert.ok(Math.abs(b2.hashrateThs - 12.67690119710455) < 1e-9); // last_1m GH/s → TH/s
   assert.equal(b3.enabled, false);
   assert.equal(b3.hashing, false);

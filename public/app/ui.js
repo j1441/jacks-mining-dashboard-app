@@ -87,6 +87,30 @@
     </div>
   );
 
+  // Segmented control: options [{value, label}], one always selected.
+  const Segmented = ({ value, onChange, options, small = false, disabled }) => (
+    <div className={`seg ${small ? 'small' : ''}`} role="tablist">
+      {options.map((o) => (
+        <button key={o.value} role="tab" aria-selected={value === o.value} disabled={disabled}
+          className={value === o.value ? 'on' : ''}
+          onClick={() => value !== o.value && onChange && onChange(o.value)}>{o.label}</button>
+      ))}
+    </div>
+  );
+
+  // Big +/- stepper for coarse numeric values (e.g. target temperature).
+  const Stepper = ({ value, onChange, step = 0.5, min, max, unit, fmt = (v) => v, disabled }) => {
+    const clamp = (v) => Math.min(max ?? Infinity, Math.max(min ?? -Infinity, v));
+    const bump = (d) => onChange && onChange(clamp(Math.round((Number(value || 0) + d) * 10) / 10));
+    return (
+      <div className="stepper">
+        <button aria-label="decrease" disabled={disabled || (min != null && value <= min)} onClick={() => bump(-step)}>−</button>
+        <span className="val">{fmt(value)}{unit && <span className="unit"> {unit}</span>}</span>
+        <button aria-label="increase" disabled={disabled || (max != null && value >= max)} onClick={() => bump(step)}>+</button>
+      </div>
+    );
+  };
+
   const Section = ({ title, collapsed = false, right, children }) => {
     const [open, setOpen] = useState(!collapsed);
     return (
@@ -273,6 +297,7 @@
 
   window.UI = {
     Card, Stat, Badge, Toggle, Button, NumberField, TextField, Select, Section, Modal,
+    Segmented, Stepper,
     Sparkline, BarStrip, LineChart, useApi, predictEnvelope,
     fmtNum, fmtNok, fmtW, fmtThs, fmtTime, fmtHour, fmtDay,
   };

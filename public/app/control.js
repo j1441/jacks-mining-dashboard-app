@@ -1,10 +1,10 @@
-// control.js — Control tab: mode selector (with confirm), heat-demand editor
-// (off / manual kW / paintable 7×24 weekly schedule with presets, copy-day and
-// weekday/weekend fill), manual panel (board toggles + envelope-predicted power
-// slider + Low/Med/High presets, pause/resume), and the dry-run toggle.
+// control.js — Control tab: one panel per miner (mode + dry-run + manual controls
+// in a single card, compact for offline miners) and the heat-demand editor
+// (off / manual kW / thermostat with live room temp / paintable 7×24 weekly
+// schedule with presets, copy-day and weekday/weekend fill).
 (() => {
   const { useState, useContext, useRef } = React;
-  const { Card, Badge, Button, Toggle, NumberField, Modal, useApi, predictEnvelope, fmtNum, fmtThs } = window.UI;
+  const { Card, Badge, Button, Toggle, NumberField, Modal, Segmented, Stepper, useApi, predictEnvelope, fmtNum, fmtThs } = window.UI;
 
   const DAYS = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun']; // schedule slot = day*24+hour, Monday first
   const POWER_PRESETS = [{ name: 'Low', w: 2000 }, { name: 'Med', w: 3250 }, { name: 'High', w: 3500 }];
@@ -14,8 +14,8 @@
     if (res && res.version != null) app.setConfig(res); else app.reloadConfig();
   };
 
-  // ---- mode selector ----
-  function ModeSelector({ app, cfgMiner, liveMiner }) {
+  // ---- mode selector (inline segmented, confirm via modal) ----
+  function ModeControl({ app, cfgMiner, liveMiner }) {
     const [pending, setPending] = useState(null);
     const [busy, setBusy] = useState(false);
     const [err, setErr] = useState(null);
@@ -33,14 +33,9 @@
       manual: 'you set boards and power target; the engine only enforces safety',
       off: 'the controller keeps the miner paused (safety still monitored)' };
     return (
-      <Card title={`Mode — ${cfgMiner.name}`}>
-        <div className="btn-row">
-          {['auto', 'manual', 'off'].map((m) => (
-            <Button key={m} tone={mode === m ? 'accent' : ''} onClick={() => m !== mode && setPending(m)}>
-              {m.charAt(0).toUpperCase() + m.slice(1)}
-            </Button>
-          ))}
-        </div>
+      <>
+        <Segmented value={mode} onChange={(m) => setPending(m)}
+          options={[{ value: 'auto', label: 'Auto' }, { value: 'manual', label: 'Manual' }, { value: 'off', label: 'Off' }]} />
         {err && <div className="err-text mt">{err}</div>}
         {pending && (
           <Modal title={`Switch to ${pending.toUpperCase()}?`} onClose={() => setPending(null)}
@@ -51,7 +46,7 @@
             <p>In <b>{pending}</b> mode, {desc[pending]}.</p>
           </Modal>
         )}
-      </Card>
+      </>
     );
   }
 
@@ -91,6 +86,7 @@
     const [draft, setDraft] = useState(() => ({
       demandSource: heating.demandSource || 'off',
       manualKW: heating.manualKW || 0,
+      thermostat: { targetC: 21, bandC: 2, maxKW: 3.5, idleOffsetC: 1.5, ...(heating.thermostat || {}) },
       schedule: Array.isArray(heating.schedule) && heating.schedule.length === 168 ? [...heating.schedule] : new Array(168).fill(0),
       presets: (heating.presets && heating.presets.length ? heating.presets : [{ name: 'Off', kw: 0 }, { name: 'Eco', kw: 1.0 }, { name: 'Comfort', kw: 2.5 }]).slice(0, 4).map((p) => ({ ...p })),
     }));
@@ -115,22 +111,74 @@
     const save = async () => {
       setBusy(true); setMsg(null);
       try {
-        await savePartial(app, { heating: { demandSource: draft.demandSource, manualKW: Number(draft.manualKW) || 0, schedule: draft.demandSource === 'schedule' ? draft.schedule : (heating.schedule || null), presets: draft.presets.map((p) => ({ name: p.name, kw: Number(p.kw) || 0 })) } });
+        await savePartial(app, { heating: {
+          demandSource: draft.demandSource,
+          manualKW: Number(draft.manualKW) || 0,
+          thermostat: {
+            targetC: Number(draft.thermostat.targetC) || 21,
+            bandC: Number(draft.thermostat.bandC) || 2,
+            maxKW: Number(draft.thermostat.maxKW) || 0,
+            idleOffsetC: Number(draft.thermostat.idleOffsetC) || 0,
+          },
+          schedule: draft.demandSource === 'schedule' ? draft.schedule : (heating.schedule || null),
+          presets: draft.presets.map((p) => ({ name: p.name, kw: Number(p.kw) || 0 })),
+        } });
         setMsg({ ok: true, text: 'Saved.' });
       } catch (e) { setMsg({ ok: false, text: e.message }); }
       setBusy(false);
     };
+    const liveHeating = (app.snapshot && app.snapshot.heating) || {};
+    const roomC = liveHeating.roomTempC;
+    const th = draft.thermostat;
+    const setTh = (patch) => set({ thermostat: { ...th, ...patch } });
+    // Same modulation formula as the server — preview what the saved settings would ask for.
+    const previewKW = roomC == null ? null
+      : Math.round(Math.min(1, Math.max(0, (Number(th.targetC) - roomC) / Math.max(0.5, Number(th.bandC)))) * (Number(th.maxKW) || 0) * 100) / 100;
     return (
       <Card className="wide" title="Heat demand" actions={<Button small tone="accent" disabled={busy} onClick={save}>{busy ? 'Saving…' : 'Save'}</Button>}>
-        <div className="btn-row mb">
-          {[['off', 'Off'], ['manual', 'Manual kW'], ['schedule', 'Weekly schedule']].map(([v, l]) => (
-            <Button key={v} small tone={draft.demandSource === v ? 'accent' : ''} onClick={() => set({ demandSource: v })}>{l}</Button>
-          ))}
+        <div className="mb">
+          <Segmented small value={draft.demandSource} onChange={(v) => set({ demandSource: v })}
+            options={[
+              { value: 'off', label: 'Off' },
+              { value: 'thermostat', label: 'Thermostat' },
+              { value: 'manual', label: 'Manual kW' },
+              { value: 'schedule', label: 'Weekly schedule' },
+            ]} />
         </div>
         {draft.demandSource === 'off' && <div className="muted">No heat demand — the engine mines only when profitable.</div>}
         {draft.demandSource === 'manual' && (
           <div style={{ maxWidth: 220 }}>
             <NumberField label="Constant heat demand" unit="kW" step={0.1} min={0} value={draft.manualKW} onChange={(v) => set({ manualKW: v })} />
+          </div>
+        )}
+        {draft.demandSource === 'thermostat' && (
+          <div>
+            <div className="thermo-now mb">
+              <Stepper value={Number(th.targetC)} step={0.5} min={5} max={35} unit="°C"
+                fmt={(v) => fmtNum(v, 1)} onChange={(v) => setTh({ targetC: v })} />
+              <div>
+                <div style={{ fontSize: 15 }}>
+                  Room now: <b className="mono">{roomC != null ? `${fmtNum(roomC, 1)} °C` : 'no reading'}</b>
+                  {previewKW != null && <span className="muted"> → would ask for <b>{fmtNum(previewKW, 1)} kW</b> of heat</span>}
+                </div>
+                <div className="muted" style={{ fontSize: 12 }}>
+                  measured by the miner's hashboard intake sensors{roomC == null ? ' — miner must be online' : ''}
+                </div>
+              </div>
+            </div>
+            <div className="frow" style={{ maxWidth: 560 }}>
+              <NumberField label="Full power when this far below target" unit="°C" step={0.5} min={0.5} max={10}
+                value={th.bandC} onChange={(v) => setTh({ bandC: v })} defaultHint={2} />
+              <NumberField label="Max heat demand" unit="kW" step={0.1} min={0}
+                value={th.maxKW} onChange={(v) => setTh({ maxKW: v })} defaultHint={3.5} />
+              <NumberField label="Idle sensor offset" unit="°C" step={0.5} min={0} max={10}
+                value={th.idleOffsetC} onChange={(v) => setTh({ idleOffsetC: v })} defaultHint={1.5} />
+            </div>
+            <p className="muted" style={{ fontSize: 12 }}>
+              Demand ramps from 0 at the target down to full power {fmtNum(th.bandC, 1)} °C below it.
+              The engine still weighs heat against electricity prices — with an alternative heat source configured,
+              it only runs the miner when that is the cheaper way to make the heat.
+            </p>
           </div>
         )}
         {draft.demandSource === 'schedule' && (
@@ -161,8 +209,8 @@
     );
   }
 
-  // ---- manual panel (per miner) ----
-  function ManualPanel({ cfgMiner, liveMiner }) {
+  // ---- manual controls (body of the per-miner panel) ----
+  function ManualControls({ cfgMiner, liveMiner }) {
     const id = cfgMiner.id;
     const env = useApi(`/api/miners/${id}/envelope`, [id]);
     const limits = cfgMiner.limits || {};
@@ -197,8 +245,7 @@
       act({ type: 'setBoards', enableIds, disableIds }, `Boards updated (${enableIds.length} on, ${disableIds.length} off).`);
     };
     return (
-      <Card title={`Manual control — ${cfgMiner.name}`}
-        actions={isAuto && <Badge tone="warn">auto mode</Badge>}>
+      <div className="mt">
         {isAuto && (
           <div className="mb">
             <Toggle checked={force} onChange={setForce} label="Force manual changes while in Auto (the engine may adjust again next tick)" />
@@ -234,12 +281,12 @@
           <Button small disabled={disabled || busy} onClick={() => act({ type: 'resume' }, 'Resume requested.')}>Resume</Button>
         </div>
         {msg && <div className={`mt ${msg.ok ? 'ok-text' : 'err-text'}`}>{msg.text}</div>}
-      </Card>
+      </div>
     );
   }
 
-  // ---- dry-run toggle ----
-  function DryRunCard({ cfgMiner, liveMiner }) {
+  // ---- dry-run toggle (inline) ----
+  function DryRunControl({ cfgMiner, liveMiner }) {
     const dryRun = liveMiner ? liveMiner.dryRun : cfgMiner.dryRun;
     const [confirming, setConfirming] = useState(false);
     const [busy, setBusy] = useState(false);
@@ -251,12 +298,11 @@
       setBusy(false);
     };
     return (
-      <Card title={`Dry run — ${cfgMiner.name}`} actions={dryRun ? <Badge tone="accent">observing only</Badge> : <Badge tone="ok">live</Badge>}>
-        <p className="muted mb" style={{ fontSize: 13 }}>
-          In dry run the controller logs every decision and what it <i>would have</i> done, but never touches the miner.
-        </p>
+      <div className="mt">
         <Toggle checked={!!dryRun} disabled={busy}
-          label={dryRun ? 'Dry run enabled — flip to go live (asks to confirm)' : 'Live — flip to re-enter dry run'}
+          label={dryRun
+            ? 'Dry run — planning only, never touches the miner. Flip to go live.'
+            : 'Live — the controller actuates the miner. Flip to re-enter dry run.'}
           onChange={(v) => { if (v) post({ type: 'dryRun', enabled: true }); else setConfirming(true); }} />
         {err && <div className="err-text mt">{err}</div>}
         {confirming && (
@@ -268,6 +314,38 @@
             <p>The controller will start actuating the miner according to its plan.</p>
           </Modal>
         )}
+      </div>
+    );
+  }
+
+  // ---- one panel per miner: status + mode + dry-run + manual controls ----
+  function MinerPanel({ app, cfgMiner, liveMiner }) {
+    const online = !!(liveMiner && liveMiner.online);
+    const dryRun = liveMiner ? liveMiner.dryRun : cfgMiner.dryRun;
+    const [showOffline, setShowOffline] = useState(false);
+    if (!online && !showOffline) {
+      return (
+        <Card title={<>{cfgMiner.name} <span className="muted mono" style={{ textTransform: 'none' }}>{cfgMiner.ip}</span></>}
+          actions={<>
+            <Badge tone="crit">offline</Badge>
+            {dryRun ? <Badge tone="accent">dry run</Badge> : <Badge tone="ok">live</Badge>}
+            <Button small tone="ghost" onClick={() => setShowOffline(true)}>Show controls</Button>
+          </>}>
+          <div className="muted" style={{ fontSize: 13 }}>Unreachable — controls hidden until it comes back (or expand them).</div>
+        </Card>
+      );
+    }
+    return (
+      <Card className="wide" title={<>{cfgMiner.name} <span className="muted mono" style={{ textTransform: 'none' }}>{cfgMiner.ip}</span></>}
+        actions={<>
+          {online ? <Badge tone="ok">online</Badge> : <Badge tone="crit">offline</Badge>}
+          {dryRun ? <Badge tone="accent">dry run</Badge> : <Badge tone="ok">live</Badge>}
+        </>}>
+        <div className="btn-row" style={{ justifyContent: 'space-between' }}>
+          <ModeControl app={app} cfgMiner={cfgMiner} liveMiner={liveMiner} />
+        </div>
+        <DryRunControl cfgMiner={cfgMiner} liveMiner={liveMiner} />
+        <ManualControls cfgMiner={cfgMiner} liveMiner={liveMiner} />
       </Card>
     );
   }
@@ -277,16 +355,14 @@
     if (!app.config) return <div className="muted" style={{ padding: 30, textAlign: 'center' }}>Loading config…</div>;
     const liveById = {};
     for (const m of (app.snapshot && app.snapshot.miners) || []) liveById[m.id] = m;
+    const cfgMiners = app.config.miners || [];
+    const online = cfgMiners.filter((m) => liveById[m.id] && liveById[m.id].online);
+    const offline = cfgMiners.filter((m) => !liveById[m.id] || !liveById[m.id].online);
     return (
       <div className="grid">
-        {(app.config.miners || []).map((cm) => (
-          <React.Fragment key={cm.id}>
-            <ModeSelector app={app} cfgMiner={cm} liveMiner={liveById[cm.id]} />
-            <DryRunCard cfgMiner={cm} liveMiner={liveById[cm.id]} />
-            <ManualPanel cfgMiner={cm} liveMiner={liveById[cm.id]} />
-          </React.Fragment>
-        ))}
         <HeatDemand app={app} />
+        {online.map((cm) => <MinerPanel key={cm.id} app={app} cfgMiner={cm} liveMiner={liveById[cm.id]} />)}
+        {offline.map((cm) => <MinerPanel key={cm.id} app={app} cfgMiner={cm} liveMiner={liveById[cm.id]} />)}
       </div>
     );
   }

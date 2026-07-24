@@ -202,13 +202,22 @@ Snapshot API object per miner:
 ```js
 { id, name, ip, online, mode, dryRun, statusLine, statusSeverity,
   hw: { model, boards, fans, chipTempMax, coolingMode, tunerState },
-  power: { targetW, wallW }, hashrate, pool: { url, user, failoverActive, rejectRatePct },
+  power: { targetW, wallW }, roomTempC, hashrate, pool: { url, user, failoverActive, rejectRatePct },
   economics: { revenueNokH, costNokH, heatValueNokH, netNokH, netNokDay, effJPerTh, effectiveScop },
   controller: { trace, wouldHave: string|null, dryRunActionCount, migrationNotice: bool },
   plan: [...] }
 ```
-Top-level: `{ ts, version, market: market.state()+{regime}, heating: {demandKW, altType, altPricePerKWh},
-miners: [...], alerts: recent, events: tail(20) }`
+Boards carry `inletTempC`/`outletTempC` (BOS `lowest_inlet_temp`/`highest_outlet_temp`);
+`roomTempC` = min inlet across reporting boards, minus `heating.thermostat.idleOffsetC`
+when every fan is stopped (see `estimateRoomTempC` in controller.js). Null when offline
+or no board reports an inlet temp.
+
+Top-level: `{ ts, version, market: market.state()+{regime},
+heating: {demandKW, altType, altPricePerKWh, roomTempC, demandSource, thermostat:{targetC,bandC,maxKW}|null},
+miners: [...], alerts: recent, events: tail(20) }` — top-level roomTempC is the min across
+online miners. With demandSource 'thermostat', demandKW = clamp(maxKW·(targetC−roomTempC)/bandC, 0, maxKW),
+and 0 whenever roomTempC is null (never heat blind; controller emits one
+`thermostat-sensor-unavailable` warn event per outage).
 
 ## server.js
 

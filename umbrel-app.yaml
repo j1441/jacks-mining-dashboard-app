@@ -4,7 +4,7 @@ name: Mining Dashboard
 tagline: Profit + heat autopilot for your Antminer home heater
 icon: https://raw.githubusercontent.com/j1441/jacks-mining-dashboard-app/main/icon.svg
 category: automation
-version: "2.0.0"
+version: "2.1.0"
 port: 3456
 description: >-
   Monitor your Antminer running Braiins OS with a clean, modern web interface.
@@ -48,16 +48,16 @@ gallery:
   - https://i.imgur.com/placeholder1.png
   - https://i.imgur.com/placeholder2.png
 releaseNotes: >-
-  v2.0.0 — full rebuild.
+  v2.1.0 — thermostat mode + UI polish.
 
-  • Autopilot: every tick picks the operating point (hashboard count × power target, or off)
-  that maximises mining revenue + useful-heat value − marginal electricity cost
-  • Hashboard on/off control extends the real power range; switches gated by a one-time cost test
-  • Norwegian marginal pricing incl. the monthly strømstøtte/Norgespris cap
-  • 48h plan from day-ahead prices; every decision explained in plain language
-  • Dry-run first: observes and logs what it would do until you press Go live
-  • Safety: chip-temp pause/derate with latched thermal ceiling, watchdog, verified actuation
-  • v1 configs migrate automatically (backup kept); starts in dry-run
+  • Thermostat: set a target room temperature — the room is measured by the miner's own
+  hashboard intake sensors (no extra hardware); heat demand modulates smoothly to hold it
+  • The engine still optimises against prices: with a heat pump configured it only runs
+  the miner when it is the cheaper way to make that heat
+  • Room temp tile on Overview; per-board intake temps shown on the miner card
+  • Control tab: one clean panel per miner (mode, dry run, manual controls together);
+  offline miners collapse to a compact card instead of full panels and banners
+  • Settings: clearer sections with inline explanations
 
 submitter: j1441
 submission: https://github.com/j1441/jacks-mining-dashboard-app

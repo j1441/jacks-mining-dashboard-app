@@ -444,6 +444,37 @@ test('resolveHeatDemand: off → 0, manual → manualKW, schedule → weekly gri
   );
 });
 
+test('resolveHeatDemand: thermostat modulates 0→maxKW across the band below target', () => {
+  const now = new Date().toISOString();
+  const cfg = { heating: { demandSource: 'thermostat', thermostat: { targetC: 21, bandC: 2, maxKW: 3.5, idleOffsetC: 1.5 } } };
+  assert.equal(resolveHeatDemand(cfg, now, 22), 0, 'above target → no demand');
+  assert.equal(resolveHeatDemand(cfg, now, 21), 0, 'at target → no demand');
+  assert.equal(resolveHeatDemand(cfg, now, 20), 1.75, 'halfway down the band → half of maxKW');
+  assert.equal(resolveHeatDemand(cfg, now, 19), 3.5, 'band exhausted → full demand');
+  assert.equal(resolveHeatDemand(cfg, now, 10), 3.5, 'far below target clamps at maxKW');
+  assert.equal(resolveHeatDemand(cfg, now, null), 0, 'no sensor reading → never heat blind');
+  assert.equal(resolveHeatDemand(cfg, now, undefined), 0);
+});
+
+test('estimateRoomTempC: min inlet across boards, idle offset only when fans are off', () => {
+  const { estimateRoomTempC } = require('../lib/controller');
+  const thermo = { idleOffsetC: 1.5 };
+  const snap = (boards, fans) => ({ online: true, boards, cooling: { fans } });
+  const fansOn = [{ rpm: 3000 }, { rpm: 3010 }];
+  const fansOff = [{ rpm: 0 }, { rpm: 0 }];
+
+  // mining: fans pull room air — min inlet used as-is (26.5 beats the hot board's 33.5)
+  assert.equal(estimateRoomTempC(snap([{ inletTempC: 33.5 }, { inletTempC: 26.5 }], fansOn), thermo), 26.5);
+  // paused: fans off → subtract idle offset
+  assert.equal(estimateRoomTempC(snap([{ inletTempC: 26.5 }, { inletTempC: 27 }], fansOff), thermo), 25);
+  // no inlet data at all → null
+  assert.equal(estimateRoomTempC(snap([{ inletTempC: null }, {}], fansOn), thermo), null);
+  // offline → null
+  assert.equal(estimateRoomTempC({ online: false, boards: [{ inletTempC: 25 }], cooling: { fans: fansOn } }, thermo), null);
+  // implausible reading → null
+  assert.equal(estimateRoomTempC(snap([{ inletTempC: 250 }], fansOn), thermo), null);
+});
+
 test('/health: 200 while every controller ticked recently, 503 once one goes stale', async () => {
   const configStore = fakeConfigStore(); // pollSeconds 10 → threshold max(60s, 50s) = 60s
   const ctrl = {

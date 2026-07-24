@@ -328,6 +328,7 @@ naturally pauses. No blanket forbid-start.
     "householdBaseKWhMonth": 1500, "subsidyCapKWhMonth": 5000},
   "heating": {"demandSource": "off", "manualKW": 0, "schedule": null,
     "presets": [{"name": "Off", "kw": 0}, {"name": "Eco", "kw": 1.0}, {"name": "Comfort", "kw": 2.5}],
+    "thermostat": {"targetC": 21, "bandC": 2, "maxKW": 3.5, "idleOffsetC": 1.5},
     "alt": {"type": "heatpump", "scop": 3.0}},
   "economics": {"poolFeePct": 0, "startMarginNokH": 0.5, "keepMarginNokH": 0.2,
                 "boardSwitch": {"retuneMin": 45, "wearNok": 2}},
@@ -411,11 +412,14 @@ GET  /health               ⚠ 200 only if every enabled controller ticked withi
    totals row); miner card with 3 board slots (green hashing / grey off / red fault),
    temps, fans, pool + failover badge; effective-SCOP stat (v1 feature kept: heat cost vs
    heat pump).
-2. **Control** — mode selector (Auto/Manual/Off, confirmation on change); heat demand
-   editor (off / manual kW / weekly schedule — ⚠ paint-based: user defines ≤ 4 named kW
-   presets, paints the 7×24 grid, copy-day + weekday/weekend shortcuts; persisted as the
-   plain 168-slot array); manual panel (board toggles + power slider with predicted
-   hashrate/heat readout + Low/Med/High presets); dry-run toggle.
+2. **Control** — one panel per miner (mode segmented control with confirmation, dry-run
+   toggle, manual board toggles + power slider with predicted hashrate/heat readout +
+   Low/Med/High presets; offline miners collapse to a compact card); heat demand editor
+   (off / thermostat / manual kW / weekly schedule). Thermostat: target-°C stepper with
+   live room-temp readout from the miner's hashboard inlet sensors and a demand preview;
+   demand modulates 0→maxKW over bandC degrees below target (see CONTRACTS /api/state).
+   Weekly schedule stays ⚠ paint-based: user defines ≤ 4 named kW presets, paints the
+   7×24 grid, copy-day + weekday/weekend shortcuts; persisted as the plain 168-slot array.
 3. **History** — range picker; charts (hashrate, power vs price, net NOK/h — inline SVG,
    no chart lib); events feed with severity filter.
 4. **Settings** — miner connection + test; electricity (zone/mode/fees/timezone/household

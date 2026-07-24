@@ -89,6 +89,7 @@
 
         {(draft.miners || []).map((m, i) => (
           <Section key={m.id || i} title={`Miner — ${m.name || m.ip || `#${i + 1}`}`}>
+            <p className="muted mb" style={{ fontSize: 12 }}>Connection details for the Braiins OS gRPC API. Mode, dry-run and heat settings live in the Control tab.</p>
             <div className="frow">
               <TextField label="Name" {...bind(['miners', i, 'name'])} />
               <TextField label="IP address" {...bind(['miners', i, 'ip'])} />
@@ -103,6 +104,7 @@
         ))}
 
         <Section title="Electricity">
+          <p className="muted mb" style={{ fontSize: 12 }}>Where your marginal price comes from: spot zone, subsidy scheme and grid fees. These feed every decision the engine makes.</p>
           <div className="frow">
             <Select label="Price zone" options={['NO1', 'NO2', 'NO3', 'NO4', 'NO5'].map((z) => ({ value: z, label: z }))} {...bind(['electricity', 'zone'])} />
             <Select label="Price mode" options={[
@@ -122,6 +124,7 @@
         </Section>
 
         <Section title="Alerts">
+          <p className="muted mb" style={{ fontSize: 12 }}>Push notifications via ntfy and/or Telegram — offline miners, safety events, action failures.</p>
           <div className="frow">
             <TextField label="ntfy URL" placeholder="https://ntfy.sh" {...bind(['alerts', 'ntfy', 'url'])} />
             <TextField label="ntfy topic" {...bind(['alerts', 'ntfy', 'topic'])} />
@@ -146,6 +149,7 @@
 
         <Section title="Advanced tuning" collapsed
           right={<Button small tone="ghost" onClick={(e) => { e.stopPropagation(); resetAdvanced(); }}>Reset to defaults</Button>}>
+          <p className="muted mb" style={{ fontSize: 12 }}>Margins, dwell times and safety limits. The defaults are sensible — each field shows its default so you can find your way back.</p>
           <h4 className="mb" style={{ fontSize: 13 }}>Economics</h4>
           <div className="frow">
             <NumberField label="Pool fee" unit="%" step={0.1} defaultHint={DEF.economics.poolFeePct} {...bind(['economics', 'poolFeePct'])} />

@@ -214,6 +214,23 @@ test('configStore: update validates types/ranges and rejects unknown top-level k
   assert.equal(store.get().pollSeconds, DEFAULT_CONFIG.pollSeconds);
 });
 
+test('configStore: thermostat demand source validates and defaults fill older configs', async () => {
+  const dir = await tmpDir();
+  const store = new ConfigStore({ dataDir: dir });
+  await store.load();
+
+  // defaults present on a fresh (and, via deepMerge on load, any pre-thermostat) config
+  assert.deepEqual(store.get().heating.thermostat, { targetC: 21, bandC: 2, maxKW: 3.5, idleOffsetC: 1.5 });
+
+  await store.update({ heating: { demandSource: 'thermostat', thermostat: { targetC: 22.5 } } });
+  assert.equal(store.get().heating.demandSource, 'thermostat');
+  assert.equal(store.get().heating.thermostat.targetC, 22.5);
+  assert.equal(store.get().heating.thermostat.bandC, 2); // partial update keeps the rest
+
+  await assert.rejects(store.update({ heating: { thermostat: { targetC: 45 } } }), /out of range/);
+  await assert.rejects(store.update({ heating: { demandSource: 'psychic' } }), /demandSource must be one of/);
+});
+
 // ---------------------------------------------------------------------------
 // stateStore
 // ---------------------------------------------------------------------------
