@@ -388,17 +388,48 @@ test('safety resume: cool cooling.highestTempC counts when board temps are gone'
 
 // ---- TUNING hold ---------------------------------------------------------------------
 
-test('TUNING hold: economic actuation deferred, hold timestamp set once', () => {
-  // p=6 would normally PAUSE — tuning hold defers it
-  const d = decide(mkInputs({ snap: { tuner: 'TUNING' }, market: { marginalPrice: 6 } }));
+test('TUNING hold: adjustments deferred while profitable, hold timestamp set once', () => {
+  // profitable (would normally optimise the operating point) — hold defers it
+  const d = decide(mkInputs({ snap: { tuner: 'TUNING', targetW: 2500, boardsOn: 3 }, market: { marginalPrice: 0.1 } }));
   assert.equal(d.action, null);
   assert.ok(d.trace.blockedBy.includes('tuner tuning'));
   assert.equal(d.stateUpdates.tuningHoldSince, NOW);
   assert.match(d.statusLine, /Tuner is optimising/);
 
-  const again = decide(mkInputs({ snap: { tuner: 'PREHEAT' }, market: { marginalPrice: 6 }, state: { tuningHoldSince: iso(-10) } }));
+  const again = decide(mkInputs({ snap: { tuner: 'PREHEAT', targetW: 2500, boardsOn: 3 }, market: { marginalPrice: 0.1 }, state: { tuningHoldSince: iso(-10) } }));
   assert.equal(again.action, null);
   assert.equal(again.stateUpdates.tuningHoldSince, undefined); // not overwritten
+});
+
+test('TUNING hold: shutdown passes through — no waiting out a re-tune with nothing to run for', () => {
+  // Live incident 2026-07-24 #2: thermostat satisfied (demand 0), mining deeply
+  // unprofitable, tuner mid-re-tune — the miner must stop, not idle at 850 W.
+  const d = decide(mkInputs({
+    snap: { tuner: 'TUNING', boardsOn: 3 },
+    market: { marginalPrice: 6 },
+    heat: { demandKW: 0, altType: 'none', altPricePerKWh: 0 },
+  }));
+  assert.ok(d.action, 'stop not deferred by tuning hold');
+  assert.equal(d.action.type, 'PAUSE');
+  assert.ok(d.trace.reasons.some((r) => /tuning hold/.test(r)));
+
+  // but heat-emergency keeps it on: demand present + no alt heat → hold, not stop
+  const heat = decide(mkInputs({
+    snap: { tuner: 'TUNING', boardsOn: 3 },
+    market: { marginalPrice: 6 },
+    heat: { demandKW: 1.5, altType: 'none', altPricePerKWh: 0 },
+  }));
+  assert.equal(heat.action, null);
+  assert.match(heat.statusLine, /Tuner is optimising/);
+
+  // and never START mid-tune, however profitable
+  const start = decide(mkInputs({
+    snap: { tuner: 'TUNING', boardsOn: 0, targetW: 0 },
+    market: { marginalPrice: 0.1 },
+    state: { lastOffAt: iso(-60) },
+  }));
+  assert.equal(start.action, null);
+  assert.ok(start.trace.blockedBy.includes('tuner tuning'));
 });
 
 test('TUNING hold skipped while paused: stale tuner state cannot deadlock auto control', () => {
