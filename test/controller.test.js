@@ -456,6 +456,31 @@ test('resolveHeatDemand: thermostat modulates 0→maxKW across the band below ta
   assert.equal(resolveHeatDemand(zone, now, undefined), 0);
 });
 
+test('classifyRoomReading: trusts fans-at-speed hashing and cooled idle; flags transitions', () => {
+  const { classifyRoomReading } = require('../lib/controller');
+  const thermo = { idleOffsetC: 1.5 };
+  const snap = ({ inlet = 22, chip = null, fanRpm = 0, hashing = 0 }) => ({
+    online: true,
+    boards: [{ inletTempC: inlet, chipTempC: chip }],
+    boardsHashingCount: hashing,
+    cooling: { fans: [{ rpm: fanRpm }] },
+  });
+  // hashing with fans at speed → reliable, no offset
+  assert.deepEqual(classifyRoomReading(snap({ inlet: 22.5, chip: 65, fanRpm: 3000, hashing: 1 }), thermo),
+    { tempC: 22.5, reliable: true });
+  // warm-up: hashing but fans crawling (the live 31°-at-900rpm case) → NOT reliable
+  assert.equal(classifyRoomReading(snap({ inlet: 31, chip: 55, fanRpm: 900, hashing: 1 }), thermo).reliable, false);
+  // just paused, boards still hot → offset applied but NOT reliable
+  const hot = classifyRoomReading(snap({ inlet: 27, chip: 60, fanRpm: 0, hashing: 0 }), thermo);
+  assert.equal(hot.reliable, false);
+  assert.equal(hot.tempC, 25.5);
+  // idle and cooled → reliable with idle offset
+  assert.deepEqual(classifyRoomReading(snap({ inlet: 24, chip: 40, fanRpm: 0, hashing: 0 }), thermo),
+    { tempC: 22.5, reliable: true });
+  // no sensor → null
+  assert.equal(classifyRoomReading({ online: true, boards: [{}], boardsHashingCount: 0, cooling: { fans: [] } }, thermo), null);
+});
+
 test('zones: zoneForMiner resolves by zoneId; zoneRoomTemp takes coolest fresh reading', () => {
   const { zoneForMiner, zoneRoomTemp } = require('../lib/controller');
   const cfg = {
