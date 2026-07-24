@@ -401,6 +401,30 @@ test('TUNING hold: economic actuation deferred, hold timestamp set once', () => 
   assert.equal(again.stateUpdates.tuningHoldSince, undefined); // not overwritten
 });
 
+test('TUNING hold skipped while paused: stale tuner state cannot deadlock auto control', () => {
+  // Live incident 2026-07-24: pause interrupted a re-tune, BOSer kept reporting
+  // TUNING forever, and the engine could never act again. While paused, the
+  // engine must fall through to economics.
+  const stuck = decide(mkInputs({
+    snap: { paused: true, tuner: 'TUNING', boardsOn: 3 },
+    market: { marginalPrice: 1 }, // profitable → should RESUME, not hold
+    state: { lastOffAt: iso(-60), tuningHoldSince: iso(-90) },
+  }));
+  assert.ok(!stuck.trace.blockedBy.includes('tuner tuning'), 'no tuning hold while paused');
+  assert.ok(stuck.action, 'engine acts despite stale TUNING');
+  assert.equal(stuck.action.type, 'RESUME');
+
+  // and when unprofitable it explains the economics instead of "tuner optimising"
+  const off = decide(mkInputs({
+    snap: { paused: true, tuner: 'TUNING', boardsOn: 3 },
+    market: { marginalPrice: 6, hashpriceNokPerThDay: 0.3 },
+    heat: { demandKW: 1.75, altType: 'heatpump', altPricePerKWh: 2 },
+    state: { lastOffAt: iso(-60) },
+  }));
+  assert.equal(off.action, null);
+  assert.match(off.statusLine, /heat pump covers the 1\.8 kW of heat more cheaply/);
+});
+
 test('TUNING hold clears when tuner is STABLE again; ERROR still defers economics', () => {
   const cleared = decide(mkInputs({ market: { marginalPrice: 1 }, state: { tuningHoldSince: iso(-20) } }));
   assert.equal(cleared.stateUpdates.tuningHoldSince, null);
