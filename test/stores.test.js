@@ -231,6 +231,57 @@ test('configStore: thermostat demand source validates and defaults fill older co
   await assert.rejects(store.update({ heating: { demandSource: 'psychic' } }), /demandSource must be one of/);
 });
 
+test('configStore: pre-zone config seeds default zone from legacy heating; miners assigned', async () => {
+  const dir = await tmpDir();
+  // Write a v2 config with thermostat settings but no zones (a 2.1.x file).
+  const store0 = new ConfigStore({ dataDir: dir });
+  await store0.load();
+  await store0.update({ heating: { demandSource: 'thermostat', thermostat: { targetC: 24 }, alt: { type: 'none' } } });
+  const raw = JSON.parse(JSON.stringify(store0.get()));
+  delete raw.heating.zones;
+  raw.miners.forEach((m) => delete m.zoneId);
+  await require('fs/promises').writeFile(`${dir}/config.json`, JSON.stringify(raw));
+
+  const store = new ConfigStore({ dataDir: dir });
+  await store.load();
+  const cfg = store.get();
+  assert.equal(cfg.heating.zones.length, 1);
+  assert.equal(cfg.heating.zones[0].id, 'home');
+  assert.equal(cfg.heating.zones[0].demandSource, 'thermostat', 'legacy demand source carried into the zone');
+  assert.equal(cfg.heating.zones[0].thermostat.targetC, 24);
+  assert.equal(cfg.heating.zones[0].alt.type, 'none');
+  for (const m of cfg.miners) assert.equal(m.zoneId, 'home');
+});
+
+test('configStore: zones validate; deleting a zone reassigns its miners to the first zone', async () => {
+  const dir = await tmpDir();
+  const store = new ConfigStore({ dataDir: dir });
+  await store.load();
+  const zone = (over) => ({
+    id: 'z', name: 'Z', demandSource: 'off', manualKW: 0, schedule: null,
+    presets: [], thermostat: { targetC: 21, bandC: 2, maxKW: 3.5, idleOffsetC: 1.5 },
+    alt: { type: 'none' }, ...over,
+  });
+  await store.update({ heating: { zones: [
+    zone({ id: 'upstairs', name: 'Upstairs' }),
+    zone({ id: 'garage', name: 'Garage', thermostat: { targetC: 8, bandC: 2, maxKW: 7, idleOffsetC: 1.5 } }),
+  ] } });
+  await store.update({ miners: [{ id: 's19j4', zoneId: 'garage' }] });
+  assert.equal(store.get().miners[0].zoneId, 'garage');
+
+  // deleting the garage zone reassigns its miner to the first remaining zone
+  await store.update({ heating: { zones: [zone({ id: 'upstairs', name: 'Upstairs' })] } });
+  assert.equal(store.get().miners[0].zoneId, 'upstairs');
+
+  await assert.rejects(
+    store.update({ heating: { zones: [zone({ id: 'a', name: 'A' }), zone({ id: 'a', name: 'B' })] } }),
+    /duplicate/);
+  // wiping zones entirely self-heals: a default zone is reseeded, never zero zones
+  await store.update({ heating: { zones: [] } });
+  assert.equal(store.get().heating.zones.length, 1);
+  assert.equal(store.get().miners[0].zoneId, store.get().heating.zones[0].id);
+});
+
 // ---------------------------------------------------------------------------
 // stateStore
 // ---------------------------------------------------------------------------

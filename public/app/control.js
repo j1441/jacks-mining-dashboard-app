@@ -4,7 +4,7 @@
 // schedule with presets, copy-day and weekday/weekend fill).
 (() => {
   const { useState, useContext, useRef } = React;
-  const { Card, Badge, Button, Toggle, NumberField, Modal, Segmented, Stepper, useApi, predictEnvelope, fmtNum, fmtThs } = window.UI;
+  const { Card, Badge, Button, Toggle, NumberField, TextField, Select, Modal, Segmented, Stepper, useApi, predictEnvelope, fmtNum, fmtThs } = window.UI;
 
   const DAYS = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun']; // schedule slot = day*24+hour, Monday first
   const POWER_PRESETS = [{ name: 'Low', w: 2000 }, { name: 'Med', w: 3250 }, { name: 'High', w: 3500 }];
@@ -80,13 +80,15 @@
     );
   }
 
-  // ---- heat demand editor ----
-  function HeatDemand({ app }) {
-    const heating = app.config.heating || {};
+  // ---- heat demand editor (one card per heating zone) ----
+  function HeatDemand({ app, zone, canDelete }) {
+    const heating = zone;
     const [draft, setDraft] = useState(() => ({
+      name: heating.name || heating.id,
       demandSource: heating.demandSource || 'off',
       manualKW: heating.manualKW || 0,
       thermostat: { targetC: 21, bandC: 2, maxKW: 3.5, idleOffsetC: 1.5, ...(heating.thermostat || {}) },
+      alt: { type: 'heatpump', scop: 3.0, ...(heating.alt || {}) },
       schedule: Array.isArray(heating.schedule) && heating.schedule.length === 168 ? [...heating.schedule] : new Array(168).fill(0),
       presets: (heating.presets && heating.presets.length ? heating.presets : [{ name: 'Off', kw: 0 }, { name: 'Eco', kw: 1.0 }, { name: 'Comfort', kw: 2.5 }]).slice(0, 4).map((p) => ({ ...p })),
     }));
@@ -108,35 +110,54 @@
       for (const d of days) for (let h = 0; h < 24; h++) schedule[d * 24 + h] = src[h];
       set({ schedule });
     };
+    const zonePatch = () => ({
+      id: heating.id,
+      name: (draft.name || '').trim() || heating.id,
+      demandSource: draft.demandSource,
+      manualKW: Number(draft.manualKW) || 0,
+      thermostat: {
+        targetC: Number(draft.thermostat.targetC) || 21,
+        bandC: Number(draft.thermostat.bandC) || 2,
+        maxKW: Number(draft.thermostat.maxKW) || 0,
+        idleOffsetC: Number(draft.thermostat.idleOffsetC) || 0,
+      },
+      alt: draft.alt.type === 'heatpump'
+        ? { type: 'heatpump', scop: Number(draft.alt.scop) || 3 }
+        : { type: draft.alt.type },
+      schedule: draft.demandSource === 'schedule' ? draft.schedule : (heating.schedule || null),
+      presets: draft.presets.map((p) => ({ name: p.name, kw: Number(p.kw) || 0 })),
+    });
     const save = async () => {
       setBusy(true); setMsg(null);
       try {
-        await savePartial(app, { heating: {
-          demandSource: draft.demandSource,
-          manualKW: Number(draft.manualKW) || 0,
-          thermostat: {
-            targetC: Number(draft.thermostat.targetC) || 21,
-            bandC: Number(draft.thermostat.bandC) || 2,
-            maxKW: Number(draft.thermostat.maxKW) || 0,
-            idleOffsetC: Number(draft.thermostat.idleOffsetC) || 0,
-          },
-          schedule: draft.demandSource === 'schedule' ? draft.schedule : (heating.schedule || null),
-          presets: draft.presets.map((p) => ({ name: p.name, kw: Number(p.kw) || 0 })),
-        } });
+        const zones = (app.config.heating.zones || []).map((z) => z.id === heating.id ? zonePatch() : z);
+        await savePartial(app, { heating: { zones } });
         setMsg({ ok: true, text: 'Saved.' });
       } catch (e) { setMsg({ ok: false, text: e.message }); }
       setBusy(false);
     };
-    const liveHeating = (app.snapshot && app.snapshot.heating) || {};
-    const roomC = liveHeating.roomTempC;
+    const remove = async () => {
+      setBusy(true); setMsg(null);
+      try {
+        const zones = (app.config.heating.zones || []).filter((z) => z.id !== heating.id);
+        await savePartial(app, { heating: { zones } });
+      } catch (e) { setMsg({ ok: false, text: e.message }); setBusy(false); }
+    };
+    const liveZone = (((app.snapshot || {}).heating || {}).zones || []).find((z) => z.id === heating.id) || {};
+    const roomC = liveZone.roomTempC;
+    const memberNames = (app.config.miners || []).filter((m) => m.zoneId === heating.id).map((m) => m.name || m.id);
     const th = draft.thermostat;
     const setTh = (patch) => set({ thermostat: { ...th, ...patch } });
     // Same modulation formula as the server — preview what the saved settings would ask for.
     const previewKW = roomC == null ? null
       : Math.round(Math.min(1, Math.max(0, (Number(th.targetC) - roomC) / Math.max(0.5, Number(th.bandC)))) * (Number(th.maxKW) || 0) * 100) / 100;
     return (
-      <Card className="wide" title="Heat demand" actions={<Button small tone="accent" disabled={busy} onClick={save}>{busy ? 'Saving…' : 'Save'}</Button>}>
-        <div className="mb">
+      <Card className="wide" title={`Heat — ${heating.name || heating.id}`}
+        actions={<>
+          {canDelete && <Button small tone="ghost" disabled={busy} onClick={remove} title="Remove this zone (its miners move to the first zone)">Delete</Button>}
+          <Button small tone="accent" disabled={busy} onClick={save}>{busy ? 'Saving…' : 'Save'}</Button>
+        </>}>
+        <div className="btn-row mb" style={{ justifyContent: 'space-between' }}>
           <Segmented small value={draft.demandSource} onChange={(v) => set({ demandSource: v })}
             options={[
               { value: 'off', label: 'Off' },
@@ -144,7 +165,29 @@
               { value: 'manual', label: 'Manual kW' },
               { value: 'schedule', label: 'Weekly schedule' },
             ]} />
+          <span className="muted" style={{ fontSize: 12 }}>
+            {memberNames.length ? <>miners here: <b>{memberNames.join(', ')}</b></> : 'no miners assigned — pick this zone on a miner panel below'}
+          </span>
         </div>
+        <div className="frow mb" style={{ maxWidth: 560 }}>
+          <TextField label="Zone name" value={draft.name} onChange={(v) => set({ name: v })} />
+          <Select label="Other heat source in this area" value={draft.alt.type}
+            onChange={(v) => set({ alt: { ...draft.alt, type: v } })}
+            options={[
+              { value: 'none', label: 'None — miners are the only heat' },
+              { value: 'heatpump', label: 'Heat pump' },
+              { value: 'resistive', label: 'Panel oven / resistive' },
+            ]} />
+          {draft.alt.type === 'heatpump' &&
+            <NumberField label="Heat pump SCOP" step={0.1} min={0.5} max={10} value={draft.alt.scop}
+              onChange={(v) => set({ alt: { ...draft.alt, scop: v } })} defaultHint={3} />}
+        </div>
+        {draft.alt.type === 'none' && draft.demandSource !== 'off' && (
+          <p className="muted mb" style={{ fontSize: 12 }}>
+            No other heat source: heat demand is a <b>hard requirement</b> — the zone's miners will run to
+            deliver it even when mining loses money (the warmth is the point).
+          </p>
+        )}
         {draft.demandSource === 'off' && <div className="muted">No heat demand — the engine mines only when profitable.</div>}
         {draft.demandSource === 'manual' && (
           <div style={{ maxWidth: 220 }}>
@@ -318,6 +361,27 @@
     );
   }
 
+  // ---- zone picker on each miner panel ----
+  function ZonePicker({ app, cfgMiner }) {
+    const zones = (app.config.heating && app.config.heating.zones) || [];
+    const [busy, setBusy] = useState(false);
+    if (zones.length < 2) return null;
+    const assign = async (zoneId) => {
+      setBusy(true);
+      try {
+        const miners = app.config.miners.map((m) => m.id === cfgMiner.id ? { ...m, zoneId } : m);
+        await savePartial(app, { miners });
+      } catch (_e) { /* surfaced by config reload */ }
+      setBusy(false);
+    };
+    return (
+      <div style={{ maxWidth: 220 }}>
+        <Select label="Heating zone" value={cfgMiner.zoneId || (zones[0] && zones[0].id)} disabled={busy}
+          onChange={assign} options={zones.map((z) => ({ value: z.id, label: z.name || z.id }))} />
+      </div>
+    );
+  }
+
   // ---- one panel per miner: status + mode + dry-run + manual controls ----
   function MinerPanel({ app, cfgMiner, liveMiner }) {
     const online = !!(liveMiner && liveMiner.online);
@@ -343,10 +407,40 @@
         </>}>
         <div className="btn-row" style={{ justifyContent: 'space-between' }}>
           <ModeControl app={app} cfgMiner={cfgMiner} liveMiner={liveMiner} />
+          <ZonePicker app={app} cfgMiner={cfgMiner} />
         </div>
         <DryRunControl cfgMiner={cfgMiner} liveMiner={liveMiner} />
         <ManualControls cfgMiner={cfgMiner} liveMiner={liveMiner} />
       </Card>
+    );
+  }
+
+  // ---- zones wrapper: one editor per zone + add-zone ----
+  function Zones({ app }) {
+    const zones = (app.config.heating && app.config.heating.zones) || [];
+    const [busy, setBusy] = useState(false);
+    const addZone = async () => {
+      setBusy(true);
+      try {
+        const base = zones[0] || {};
+        const id = `zone-${Date.now().toString(36)}`;
+        const fresh = {
+          id, name: 'New zone', demandSource: 'off', manualKW: 0, schedule: null,
+          presets: JSON.parse(JSON.stringify(base.presets || [{ name: 'Off', kw: 0 }, { name: 'Eco', kw: 1.0 }, { name: 'Comfort', kw: 2.5 }])),
+          thermostat: { targetC: 21, bandC: 2, maxKW: 3.5, idleOffsetC: 1.5 },
+          alt: { type: 'none' },
+        };
+        await savePartial(app, { heating: { zones: [...zones, fresh] } });
+      } catch (_e) { /* config reload surfaces errors */ }
+      setBusy(false);
+    };
+    return (
+      <>
+        {zones.map((z) => <HeatDemand key={z.id} app={app} zone={z} canDelete={zones.length > 1} />)}
+        <div className="wide btn-row" style={{ justifyContent: 'flex-end' }}>
+          <Button small tone="ghost" disabled={busy} onClick={addZone}>+ Add heating zone</Button>
+        </div>
+      </>
     );
   }
 
@@ -360,7 +454,7 @@
     const offline = cfgMiners.filter((m) => !liveById[m.id] || !liveById[m.id].online);
     return (
       <div className="grid">
-        <HeatDemand app={app} />
+        <Zones app={app} />
         {online.map((cm) => <MinerPanel key={cm.id} app={app} cfgMiner={cm} liveMiner={liveById[cm.id]} />)}
         {offline.map((cm) => <MinerPanel key={cm.id} app={app} cfgMiner={cm} liveMiner={liveById[cm.id]} />)}
       </div>

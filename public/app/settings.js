@@ -158,15 +158,7 @@
             <NumberField label="Board switch: retune time" unit="min" defaultHint={DEF.economics.boardSwitch.retuneMin} {...bind(['economics', 'boardSwitch', 'retuneMin'])} />
             <NumberField label="Board switch: wear cost" unit="kr" step={0.5} defaultHint={DEF.economics.boardSwitch.wearNok} {...bind(['economics', 'boardSwitch', 'wearNok'])} />
           </div>
-          <h4 className="mb mt" style={{ fontSize: 13 }}>Alternative heat source</h4>
-          <div className="frow">
-            <Select label="Type" defaultHint={DEF.alt.type} options={[
-              { value: 'heatpump', label: 'Heat pump' }, { value: 'resistive', label: 'Resistive (panel oven)' },
-              { value: 'none', label: 'None — miner is the only heater' },
-            ]} {...bind(['heating', 'alt', 'type'])} />
-            {getIn(draft, ['heating', 'alt', 'type']) === 'heatpump' &&
-              <NumberField label="SCOP" step={0.1} defaultHint={fmtNum(DEF.alt.scop, 1)} {...bind(['heating', 'alt', 'scop'])} />}
-          </div>
+          <p className="muted mb mt" style={{ fontSize: 12 }}>Alternative heat source moved: it is set per heating zone on the Control tab.</p>
           {(draft.miners || []).map((m, i) => (
             <div key={m.id || i}>
               <h4 className="mb mt" style={{ fontSize: 13 }}>{m.name || m.ip} — limits, dwell, safety, cooling</h4>

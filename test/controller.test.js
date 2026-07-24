@@ -431,29 +431,50 @@ test('userAction: manual power/board changes rejected in auto mode without force
 
 test('resolveHeatDemand: off → 0, manual → manualKW, schedule → weekly grid slot', () => {
   const now = new Date().toISOString();
-  assert.equal(resolveHeatDemand({ heating: { demandSource: 'off', manualKW: 5 } }, now), 0);
-  assert.equal(resolveHeatDemand({ heating: { demandSource: 'manual', manualKW: 2.5 } }, now), 2.5);
+  assert.equal(resolveHeatDemand({ demandSource: 'off', manualKW: 5 }, now), 0);
+  assert.equal(resolveHeatDemand({ demandSource: 'manual', manualKW: 2.5 }, now), 2.5);
   const sched = new Array(168).fill(1.5);
   assert.equal(
-    resolveHeatDemand({ heating: { demandSource: 'schedule', schedule: sched }, electricity: { timezone: 'Europe/Oslo' } }, now),
+    resolveHeatDemand({ demandSource: 'schedule', schedule: sched }, now, null, 'Europe/Oslo'),
     1.5
   );
   assert.equal(
-    resolveHeatDemand({ heating: { demandSource: 'schedule', schedule: [1, 2, 3] } }, now),
+    resolveHeatDemand({ demandSource: 'schedule', schedule: [1, 2, 3] }, now),
     0, 'malformed schedule falls back to 0'
   );
 });
 
 test('resolveHeatDemand: thermostat modulates 0→maxKW across the band below target', () => {
   const now = new Date().toISOString();
-  const cfg = { heating: { demandSource: 'thermostat', thermostat: { targetC: 21, bandC: 2, maxKW: 3.5, idleOffsetC: 1.5 } } };
-  assert.equal(resolveHeatDemand(cfg, now, 22), 0, 'above target → no demand');
-  assert.equal(resolveHeatDemand(cfg, now, 21), 0, 'at target → no demand');
-  assert.equal(resolveHeatDemand(cfg, now, 20), 1.75, 'halfway down the band → half of maxKW');
-  assert.equal(resolveHeatDemand(cfg, now, 19), 3.5, 'band exhausted → full demand');
-  assert.equal(resolveHeatDemand(cfg, now, 10), 3.5, 'far below target clamps at maxKW');
-  assert.equal(resolveHeatDemand(cfg, now, null), 0, 'no sensor reading → never heat blind');
-  assert.equal(resolveHeatDemand(cfg, now, undefined), 0);
+  const zone = { demandSource: 'thermostat', thermostat: { targetC: 21, bandC: 2, maxKW: 3.5, idleOffsetC: 1.5 } };
+  assert.equal(resolveHeatDemand(zone, now, 22), 0, 'above target → no demand');
+  assert.equal(resolveHeatDemand(zone, now, 21), 0, 'at target → no demand');
+  assert.equal(resolveHeatDemand(zone, now, 20), 1.75, 'halfway down the band → half of maxKW');
+  assert.equal(resolveHeatDemand(zone, now, 19), 3.5, 'band exhausted → full demand');
+  assert.equal(resolveHeatDemand(zone, now, 10), 3.5, 'far below target clamps at maxKW');
+  assert.equal(resolveHeatDemand(zone, now, null), 0, 'no sensor reading → never heat blind');
+  assert.equal(resolveHeatDemand(zone, now, undefined), 0);
+});
+
+test('zones: zoneForMiner resolves by zoneId; zoneRoomTemp takes coolest fresh reading', () => {
+  const { zoneForMiner, zoneRoomTemp } = require('../lib/controller');
+  const cfg = {
+    heating: { zones: [{ id: 'up', name: 'Upstairs' }, { id: 'garage', name: 'Garage' }] },
+    miners: [{ id: 'a', zoneId: 'garage' }, { id: 'b', zoneId: 'up' }],
+  };
+  assert.equal(zoneForMiner(cfg, 'a').id, 'garage');
+  assert.equal(zoneForMiner(cfg, 'b').id, 'up');
+  assert.equal(zoneForMiner(cfg, 'missing').id, 'up', 'unknown miner falls back to first zone');
+
+  const reg = new Map([
+    ['a', { zoneId: 'garage', tempC: 9, ts: Date.now() }],
+    ['b', { zoneId: 'garage', tempC: 7.5, ts: Date.now() }],
+    ['c', { zoneId: 'garage', tempC: 2, ts: Date.now() - 10 * 60 * 1000 }], // stale
+    ['d', { zoneId: 'up', tempC: 22, ts: Date.now() }],                     // other zone
+  ]);
+  assert.equal(zoneRoomTemp(reg, 'garage', 9), 7.5, 'coolest fresh reading in the zone');
+  assert.equal(zoneRoomTemp(reg, 'up', null), 22, 'own reading may be null');
+  assert.equal(zoneRoomTemp(new Map(), 'x', null), null);
 });
 
 test('estimateRoomTempC: min inlet across boards, idle offset only when fans are off', () => {
@@ -516,7 +537,10 @@ test('/health: 200 while every controller ticked recently, 503 once one goes sta
     assert.equal(state.version, '2.0.0-test');
     assert.equal(state.miners.length, 1);
     assert.equal(state.miners[0].id, 'm1');
-    assert.equal(state.heating.demandKW, 2);
+    // zone-less legacy config synthesizes one pseudo-zone from the top-level heating fields
+    assert.equal(state.heating.zones.length, 1);
+    assert.equal(state.heating.zones[0].demandKW, 2);
+    assert.equal(state.heating.zones[0].miners[0], configStore.get().miners[0].id);
   } finally {
     await new Promise((r) => server.close(r));
   }

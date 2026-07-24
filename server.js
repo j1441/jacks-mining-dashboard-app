@@ -59,6 +59,9 @@ async function main() {
 
   const controllers = [];
   const clients = [];
+  // Shared per-tick room-temp readings so multi-miner zones can use the coolest
+  // fresh reading across the zone (Map minerId -> {zoneId, tempC, ts}).
+  const roomTemps = new Map();
   for (const minerCfg of cfg.miners || []) {
     const client = new MinerClient({
       id: minerCfg.id,
@@ -71,7 +74,7 @@ async function main() {
     await envelope.load();
     controllers.push(new Controller({
       minerCfg, client, envelope, market, engine,
-      stateStore, history, alerts, wsHub: hubProxy, configStore,
+      stateStore, history, alerts, wsHub: hubProxy, configStore, roomTemps,
     }));
   }
   for (const c of controllers) await c.start();

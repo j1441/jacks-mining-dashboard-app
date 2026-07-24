@@ -178,18 +178,19 @@
     const totalW = miners.reduce((a, m) => a + ((m.power && m.power.wallW) || 0), 0);
     const totalNetDay = miners.reduce((a, m) => a + ((m.economics && m.economics.netNokDay) || 0), 0);
     const scop = miners.length ? miners[0].economics && miners[0].economics.effectiveScop : null;
-    const thermoOn = heating.demandSource === 'thermostat';
+    const thermoZones = (heating.zones || []).filter((z) => z.demandSource === 'thermostat');
     return (
       <div>
         {online.map((m) => <StatusBanner key={m.id} miner={m} />)}
         <div className="stats mb">
           <Stat label="Hashrate" value={fmtThs(totalThs)} sub="15 min avg" />
           <Stat label="Heat output" value={fmtW(totalW)} sub="wall power = heat into the room" />
-          {thermoOn && (
-            <Stat label="Room temp" value={heating.roomTempC != null ? `${fmtNum(heating.roomTempC, 1)} °C` : '–'}
-              tone={heating.roomTempC != null && heating.thermostat && heating.roomTempC < heating.thermostat.targetC ? 'warn' : null}
-              sub={heating.thermostat ? `target ${fmtNum(heating.thermostat.targetC, 1)} °C · asking ${fmtNum(heating.demandKW, 1)} kW` : null} />
-          )}
+          {thermoZones.map((z) => (
+            <Stat key={z.id} label={`${z.name} — room`}
+              value={z.roomTempC != null ? `${fmtNum(z.roomTempC, 1)} °C` : '–'}
+              tone={z.roomTempC != null && z.thermostat && z.roomTempC < z.thermostat.targetC ? 'warn' : null}
+              sub={z.thermostat ? `target ${fmtNum(z.thermostat.targetC, 1)} °C · asking ${fmtNum(z.demandKW, 1)} kW` : null} />
+          ))}
           <Stat label="Net" value={fmtNok(totalNetDay, 0) + '/day'} tone={totalNetDay >= 0 ? 'ok' : 'crit'}
             sub={miners[0] && miners[0].economics ? `${fmtNum(miners[0].economics.netNokH, 2)} kr/h now` : null} />
           <Stat label="Price now" value={fmtNum(market.currentMarginal, 2) + ' kr'}
