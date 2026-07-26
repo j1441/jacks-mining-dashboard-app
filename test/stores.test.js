@@ -220,7 +220,7 @@ test('configStore: thermostat demand source validates and defaults fill older co
   await store.load();
 
   // defaults present on a fresh (and, via deepMerge on load, any pre-thermostat) config
-  assert.deepEqual(store.get().heating.thermostat, { targetC: 21, bandC: 2, maxKW: 3.5, idleOffsetC: 1.5 });
+  assert.deepEqual(store.get().heating.thermostat, { targetC: 21, bandC: 2, maxKW: 3.5, idleOffsetC: 1.5, runningOffsetC: 0 });
 
   await store.update({ heating: { demandSource: 'thermostat', thermostat: { targetC: 22.5 } } });
   assert.equal(store.get().heating.demandSource, 'thermostat');

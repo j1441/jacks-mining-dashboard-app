@@ -465,20 +465,28 @@ test('classifyRoomReading: trusts fans-at-speed hashing and cooled idle; flags t
     boardsHashingCount: hashing,
     cooling: { fans: [{ rpm: fanRpm }] },
   });
-  // hashing with fans at speed → reliable, no offset
-  assert.deepEqual(classifyRoomReading(snap({ inlet: 22.5, chip: 65, fanRpm: 3000, hashing: 1 }), thermo),
+  // hashing with fans at speed → reliable, no offset by default
+  assert.deepEqual(classifyRoomReading(snap({ inlet: 22.5, chip: 65, fanRpm: 3000, hashing: 1 }), thermo, null),
     { tempC: 22.5, reliable: true });
+  // runningOffsetC compensates exhaust recirculation into the intake
+  assert.deepEqual(
+    classifyRoomReading(snap({ inlet: 23.9, chip: 65, fanRpm: 3000, hashing: 1 }), { ...thermo, runningOffsetC: 4 }, null),
+    { tempC: 19.9, reliable: true });
   // warm-up: hashing but fans crawling (the live 31°-at-900rpm case) → NOT reliable
-  assert.equal(classifyRoomReading(snap({ inlet: 31, chip: 55, fanRpm: 900, hashing: 1 }), thermo).reliable, false);
+  assert.equal(classifyRoomReading(snap({ inlet: 31, chip: 55, fanRpm: 900, hashing: 1 }), thermo, null).reliable, false);
   // just paused, boards still hot → offset applied but NOT reliable
-  const hot = classifyRoomReading(snap({ inlet: 27, chip: 60, fanRpm: 0, hashing: 0 }), thermo);
+  const hot = classifyRoomReading(snap({ inlet: 27, chip: 60, fanRpm: 0, hashing: 0 }), thermo, 5);
   assert.equal(hot.reliable, false);
   assert.equal(hot.tempC, 25.5);
-  // idle and cooled → reliable with idle offset
-  assert.deepEqual(classifyRoomReading(snap({ inlet: 24, chip: 40, fanRpm: 0, hashing: 0 }), thermo),
+  // chips under 45° but stopped only 10 min ago (the live 29.5° poisoning case) → NOT reliable
+  assert.equal(classifyRoomReading(snap({ inlet: 36, chip: 45, fanRpm: 0, hashing: 0 }), thermo, 10).reliable, false);
+  // idle, cooled AND ≥45 min since stop → reliable with idle offset
+  assert.deepEqual(classifyRoomReading(snap({ inlet: 24, chip: 40, fanRpm: 0, hashing: 0 }), thermo, 90),
     { tempC: 22.5, reliable: true });
+  // never ran since boot (idleMinutes unknown) behaves like a long-idle miner
+  assert.equal(classifyRoomReading(snap({ inlet: 24, chip: 40, fanRpm: 0, hashing: 0 }), thermo, null).reliable, true);
   // no sensor → null
-  assert.equal(classifyRoomReading({ online: true, boards: [{}], boardsHashingCount: 0, cooling: { fans: [] } }, thermo), null);
+  assert.equal(classifyRoomReading({ online: true, boards: [{}], boardsHashingCount: 0, cooling: { fans: [] } }, thermo, null), null);
 });
 
 test('zones: zoneForMiner resolves by zoneId; zoneRoomTemp takes coolest fresh reading', () => {

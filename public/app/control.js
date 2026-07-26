@@ -120,6 +120,7 @@
         bandC: Number(draft.thermostat.bandC) || 2,
         maxKW: Number(draft.thermostat.maxKW) || 0,
         idleOffsetC: Number(draft.thermostat.idleOffsetC) || 0,
+        runningOffsetC: Number(draft.thermostat.runningOffsetC) || 0,
       },
       alt: draft.alt.type === 'heatpump'
         ? { type: 'heatpump', scop: Number(draft.alt.scop) || 3 }
@@ -216,6 +217,8 @@
                 value={th.maxKW} onChange={(v) => setTh({ maxKW: v })} defaultHint={3.5} />
               <NumberField label="Idle sensor offset" unit="°C" step={0.5} min={0} max={10}
                 value={th.idleOffsetC} onChange={(v) => setTh({ idleOffsetC: v })} defaultHint={1.5} />
+              <NumberField label="Running sensor offset" unit="°C" step={0.5} min={0} max={10}
+                value={th.runningOffsetC ?? 0} onChange={(v) => setTh({ runningOffsetC: v })} defaultHint={0} />
             </div>
             <p className="muted" style={{ fontSize: 12 }}>
               Demand ramps from 0 at the target down to full power {fmtNum(th.bandC, 1)} °C below it.
