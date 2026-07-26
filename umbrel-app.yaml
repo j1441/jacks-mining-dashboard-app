@@ -4,7 +4,7 @@ name: Mining Dashboard
 tagline: Profit + heat autopilot for your Antminer home heater
 icon: https://raw.githubusercontent.com/j1441/jacks-mining-dashboard-app/main/icon.svg
 category: automation
-version: "2.3.3"
+version: "2.4.0"
 port: 3456
 description: >-
   Monitor your Antminer running Braiins OS with a clean, modern web interface.
@@ -48,12 +48,12 @@ gallery:
   - https://i.imgur.com/placeholder1.png
   - https://i.imgur.com/placeholder2.png
 releaseNotes: >-
-  v2.3.0 — sats premium.
+  v2.4.0 — comfort ceiling for profit mining.
 
-  • New economics setting: value mined sats above exchange spot (e.g. 6% for
-  non-KYC coins with no purchase fees) — revenue in every decision, plan and
-  profitability readout is scaled accordingly
-  • Settings → Advanced tuning → Economics → "Sats premium over spot"
+  • New per-zone "max room temp": when mining is profitable the miner runs as
+  hard as the economics allow, but pauses when the zone's room temperature
+  reaches the limit and resumes once it cools (0.5° hysteresis)
+  • Heat-demand heating still stops at the thermostat target as before
 
 submitter: j1441
 submission: https://github.com/j1441/jacks-mining-dashboard-app

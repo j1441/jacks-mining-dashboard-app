@@ -396,6 +396,47 @@ test('safety resume: cool cooling.highestTempC counts when board temps are gone'
   assert.equal(d.stateUpdates.safetyPauseClearSince, NOW);
 });
 
+// ---- comfort ceiling -----------------------------------------------------------------
+
+test('comfort limit: profitable mining stops at maxRoomC and will not restart until cooler', () => {
+  // profitable (p=0.1) but room at the limit → running miner pauses
+  const stop = decide(mkInputs({
+    snap: { boardsOn: 3 },
+    market: { marginalPrice: 0.1 },
+    heat: { demandKW: 0, altType: 'none', altPricePerKWh: 0, roomTempC: 28, maxRoomC: 28 },
+  }));
+  assert.equal(stop.action && stop.action.type, 'PAUSE');
+  assert.match(stop.statusLine, /comfort limit/);
+
+  // paused, profitable, room just under the limit (hysteresis band) → no restart
+  const hold = decide(mkInputs({
+    snap: { paused: true, boardsOn: 3 },
+    market: { marginalPrice: 0.1 },
+    heat: { demandKW: 0, altType: 'none', altPricePerKWh: 0, roomTempC: 27.7, maxRoomC: 28 },
+    state: { lastOffAt: iso(-60) },
+  }));
+  assert.equal(hold.action, null);
+  assert.match(hold.statusLine, /comfort limit/);
+
+  // cooled below the band → restarts
+  const start = decide(mkInputs({
+    snap: { paused: true, boardsOn: 3 },
+    market: { marginalPrice: 0.1 },
+    heat: { demandKW: 0, altType: 'none', altPricePerKWh: 0, roomTempC: 27.2, maxRoomC: 28 },
+    state: { lastOffAt: iso(-60) },
+  }));
+  assert.equal(start.action && start.action.type, 'RESUME');
+
+  // no room reading → comfort limit cannot act; profitable mining proceeds
+  const blind = decide(mkInputs({
+    snap: { paused: true, boardsOn: 3 },
+    market: { marginalPrice: 0.1 },
+    heat: { demandKW: 0, altType: 'none', altPricePerKWh: 0, roomTempC: null, maxRoomC: 28 },
+    state: { lastOffAt: iso(-60) },
+  }));
+  assert.equal(blind.action && blind.action.type, 'RESUME');
+});
+
 // ---- TUNING hold ---------------------------------------------------------------------
 
 test('TUNING hold: adjustments deferred while profitable, hold timestamp set once', () => {

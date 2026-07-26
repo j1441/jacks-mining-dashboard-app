@@ -89,6 +89,7 @@
       manualKW: heating.manualKW || 0,
       thermostat: { targetC: 21, bandC: 2, maxKW: 3.5, idleOffsetC: 1.5, ...(heating.thermostat || {}) },
       alt: { type: 'heatpump', scop: 3.0, ...(heating.alt || {}) },
+      maxRoomC: heating.maxRoomC != null ? heating.maxRoomC : 27,
       schedule: Array.isArray(heating.schedule) && heating.schedule.length === 168 ? [...heating.schedule] : new Array(168).fill(0),
       presets: (heating.presets && heating.presets.length ? heating.presets : [{ name: 'Off', kw: 0 }, { name: 'Eco', kw: 1.0 }, { name: 'Comfort', kw: 2.5 }]).slice(0, 4).map((p) => ({ ...p })),
     }));
@@ -125,6 +126,7 @@
       alt: draft.alt.type === 'heatpump'
         ? { type: 'heatpump', scop: Number(draft.alt.scop) || 3 }
         : { type: draft.alt.type },
+      maxRoomC: Number(draft.maxRoomC) || 27,
       schedule: draft.demandSource === 'schedule' ? draft.schedule : (heating.schedule || null),
       presets: draft.presets.map((p) => ({ name: p.name, kw: Number(p.kw) || 0 })),
     });
@@ -182,6 +184,8 @@
           {draft.alt.type === 'heatpump' &&
             <NumberField label="Heat pump SCOP" step={0.1} min={0.5} max={10} value={draft.alt.scop}
               onChange={(v) => set({ alt: { ...draft.alt, scop: v } })} defaultHint={3} />}
+          <NumberField label="Max room temp (profit mining pauses above)" unit="°C" step={0.5} min={10} max={40}
+            value={draft.maxRoomC ?? 27} onChange={(v) => set({ maxRoomC: v })} defaultHint={27} />
         </div>
         {draft.alt.type === 'none' && draft.demandSource !== 'off' && (
           <p className="muted mb" style={{ fontSize: 12 }}>
