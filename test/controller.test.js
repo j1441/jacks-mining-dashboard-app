@@ -482,6 +482,8 @@ test('classifyRoomReading: trusts fans-at-speed hashing and cooled idle; flags t
   assert.equal(hot.tempC, 25.5);
   // chips under 45° but stopped only 10 min ago (the live 29.5° poisoning case) → NOT reliable
   assert.equal(classifyRoomReading(snap({ inlet: 36, chip: 45, fanRpm: 0, hashing: 0 }), thermo, 10).reliable, false);
+  // missing chip temps (boards re-initialising mid-restart, the live 28.0° case) → NOT reliable
+  assert.equal(classifyRoomReading(snap({ inlet: 34.6, chip: null, fanRpm: 0, hashing: 0 }), thermo, 75).reliable, false);
   // idle, cooled AND ≥45 min since stop → reliable with idle offset
   assert.deepEqual(classifyRoomReading(snap({ inlet: 24, chip: 40, fanRpm: 0, hashing: 0 }), thermo, 90),
     { tempC: 22.5, reliable: true });
@@ -489,6 +491,32 @@ test('classifyRoomReading: trusts fans-at-speed hashing and cooled idle; flags t
   assert.equal(classifyRoomReading(snap({ inlet: 24, chip: 40, fanRpm: 0, hashing: 0 }), thermo, null).reliable, true);
   // no sensor → null
   assert.equal(classifyRoomReading({ online: true, boards: [{}], boardsHashingCount: 0, cooling: { fans: [] } }, thermo, null), null);
+});
+
+test('maybeApplyCooling: applies configured mode once when miner disagrees, throttled', async () => {
+  const calls = [];
+  const events = [];
+  const fake = {
+    minerCfg: { cooling: { manage: true, mode: 'auto', targetC: 60 } },
+    client: { async setCoolingMode(cfg) { calls.push(cfg); } },
+    async appendEvent(type, sev, msg) { events.push(type); },
+  };
+  const snap = { online: true, cooling: { mode: 'manual' } };
+  await Controller.prototype.maybeApplyCooling.call(fake, snap);
+  assert.equal(calls.length, 1);
+  assert.deepEqual(calls[0], { mode: 'auto', targetC: 60 });
+  assert.deepEqual(events, ['cooling-config']);
+
+  // throttled: a second disagreeing tick within 5 min does not re-apply
+  await Controller.prototype.maybeApplyCooling.call(fake, snap);
+  assert.equal(calls.length, 1);
+
+  // agreement or manage=false → no calls
+  fake._lastCoolingApplyMs = 0;
+  await Controller.prototype.maybeApplyCooling.call(fake, { online: true, cooling: { mode: 'auto' } });
+  fake.minerCfg.cooling.manage = false;
+  await Controller.prototype.maybeApplyCooling.call(fake, snap);
+  assert.equal(calls.length, 1);
 });
 
 test('zones: zoneForMiner resolves by zoneId; zoneRoomTemp takes coolest fresh reading', () => {

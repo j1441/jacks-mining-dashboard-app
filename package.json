@@ -1,6 +1,6 @@
 {
   "name": "jacks-mining-dashboard-app",
-  "version": "2.3.2",
+  "version": "2.3.3",
   "description": "Miner-as-heater controller: profit + heat optimizing autopilot for Braiins OS Antminers on Umbrel",
   "main": "server.js",
   "scripts": {
