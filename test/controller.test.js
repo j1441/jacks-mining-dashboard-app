@@ -465,12 +465,14 @@ test('classifyRoomReading: trusts fans-at-speed hashing and cooled idle; flags t
     boardsHashingCount: hashing,
     cooling: { fans: [{ rpm: fanRpm }] },
   });
-  // hashing with fans at speed → reliable, no offset by default
-  assert.deepEqual(classifyRoomReading(snap({ inlet: 22.5, chip: 65, fanRpm: 3000, hashing: 1 }), thermo, null),
+  // hashing with fans at sustained speed → reliable, no offset by default
+  assert.deepEqual(classifyRoomReading(snap({ inlet: 22.5, chip: 65, fanRpm: 3000, hashing: 1 }), thermo, null, 15),
     { tempC: 22.5, reliable: true });
+  // a fan burst over a hot chassis (fans fast but not yet sustained) → NOT reliable
+  assert.equal(classifyRoomReading(snap({ inlet: 30, chip: 55, fanRpm: 3000, hashing: 1 }), thermo, null, 2).reliable, false);
   // runningOffsetC compensates exhaust recirculation into the intake
   assert.deepEqual(
-    classifyRoomReading(snap({ inlet: 23.9, chip: 65, fanRpm: 3000, hashing: 1 }), { ...thermo, runningOffsetC: 4 }, null),
+    classifyRoomReading(snap({ inlet: 23.9, chip: 65, fanRpm: 3000, hashing: 1 }), { ...thermo, runningOffsetC: 4 }, null, 15),
     { tempC: 19.9, reliable: true });
   // warm-up: hashing but fans crawling (the live 31°-at-900rpm case) → NOT reliable
   assert.equal(classifyRoomReading(snap({ inlet: 31, chip: 55, fanRpm: 900, hashing: 1 }), thermo, null).reliable, false);
