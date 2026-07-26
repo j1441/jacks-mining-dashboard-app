@@ -301,6 +301,79 @@ test('live action: intent event is appended BEFORE actuation, stateUpdates persi
   }
 });
 
+test('RESUME with board reconciliation: setBoards applied BEFORE resume, follow-up power after', async () => {
+  const t = makeController({
+    decisions: [cannedDecision({
+      action: { type: 'RESUME', boards: 3, enableIds: ['3'], disableIds: [], targetW: 3068, reason: 'start after config drift', severity: 'info' },
+      stateUpdates: { pausedBy: null },
+    })],
+  });
+  await t.controller.start();
+  try {
+    const sb = t.seq.indexOf('client:setBoards');
+    const rs = t.seq.indexOf('client:resume');
+    assert.ok(sb !== -1, 'setBoards called');
+    assert.ok(rs !== -1, 'resume called');
+    assert.ok(sb < rs, `setBoards (${sb}) must precede resume (${rs}) — one hashchain bring-up`);
+    assert.deepEqual(t.client.calls.find(([m]) => m === 'setBoards').slice(1), [['3'], []]);
+    assert.ok(t.client.calls.some(([m, w]) => m === 'setPowerTarget' && w === 3068), 'follow-up power applied');
+    assert.ok(t.seq.includes('event:action-applied'));
+  } finally {
+    await t.controller.stop();
+  }
+});
+
+test('RESUME without board ids never touches boards', async () => {
+  const t = makeController({
+    decisions: [cannedDecision({
+      action: { type: 'RESUME', targetW: 3068, reason: 'start', severity: 'info' },
+    })],
+  });
+  await t.controller.start();
+  try {
+    assert.ok(!t.client.calls.some(([m]) => m === 'setBoards'), 'no setBoards call');
+    assert.ok(t.client.calls.some(([m]) => m === 'resume'));
+  } finally {
+    await t.controller.stop();
+  }
+});
+
+test('RESUME reconcile: a resume failure after setBoards still records the board dwell', async () => {
+  const marker = '2020-01-01T00:00:00.000Z';
+  const t = makeController({
+    statePreset: { lastBoardsChangeAt: marker },
+    decisions: [cannedDecision({
+      action: { type: 'RESUME', boards: 3, enableIds: ['3'], disableIds: [], targetW: 3068, reason: 'start after config drift', severity: 'info' },
+      stateUpdates: { pausedBy: null },
+    })],
+  });
+  t.client.failures.add('resume');
+  await t.controller.start();
+  try {
+    assert.ok(t.seq.includes('event:action-failed'), 'action reported failed');
+    assert.notEqual(t.stateStore.current.lastBoardsChangeAt, marker,
+      'boards DID change — dwell must be recorded despite the resume failure');
+  } finally {
+    await t.controller.stop();
+  }
+});
+
+test('partial snapshot holds a reconcile RESUME — board changes computed from incomplete reads never actuate', async () => {
+  const t = makeController({
+    clientOver: { errors: ['GetHashboards: deadline exceeded'] },
+    decisions: [cannedDecision({
+      action: { type: 'RESUME', boards: 3, enableIds: ['3'], disableIds: [], targetW: 3068, reason: 'start after config drift', severity: 'info' },
+    })],
+  });
+  await t.controller.start();
+  try {
+    assert.equal(actuationCalls(t.client).length, 0, 'no actuation on a partial snapshot');
+    assert.ok(t.seq.includes('event:partial-snapshot-hold'));
+  } finally {
+    await t.controller.stop();
+  }
+});
+
 test('dry run: no actuation ever, dryRunActionCount persisted, wouldHave derived', async () => {
   const t = makeController({
     minerOver: { dryRun: true },
