@@ -101,6 +101,16 @@ test('scoreCandidate: revenue/cost/heatValue/score per DESIGN §3.2', () => {
   assert.ok(Math.abs(s.scoreNokH - (7.8 + 0.4 - 2.25)) < 1e-9);
 });
 
+test('scoreCandidate: btcPremiumPct values mined sats above spot (non-KYC premium)', () => {
+  const base = scoreCandidate(C3, { marginalPrice: 1, hashpriceNokPerThDay: 4.8, poolFeePct: 0, heat: { demandKW: 0, altPricePerKWh: 0 } });
+  const prem = scoreCandidate(C3, { marginalPrice: 1, hashpriceNokPerThDay: 4.8, poolFeePct: 0, btcPremiumPct: 6, heat: { demandKW: 0, altPricePerKWh: 0 } });
+  assert.ok(Math.abs(prem.revenueNokH - base.revenueNokH * 1.06) < 1e-9);
+  assert.ok(Math.abs(prem.scoreNokH - (base.scoreNokH + base.revenueNokH * 0.06)) < 1e-9, 'cost unaffected');
+  // premium composes with the pool fee
+  const both = scoreCandidate(C3, { marginalPrice: 1, hashpriceNokPerThDay: 4.8, poolFeePct: 0.02, btcPremiumPct: 6, heat: { demandKW: 0, altPricePerKWh: 0 } });
+  assert.ok(Math.abs(both.revenueNokH - 7.8 * 0.98 * 1.06) < 1e-9);
+});
+
 test('scoreCandidate: pool fee reduces revenue; OFF scores exactly zero', () => {
   const s = scoreCandidate(C3, { marginalPrice: 1, hashpriceNokPerThDay: 4.8, poolFeePct: 0.02, heat: { demandKW: 0, altPricePerKWh: 0 } });
   assert.ok(Math.abs(s.revenueNokH - 7.8 * 0.98) < 1e-9);

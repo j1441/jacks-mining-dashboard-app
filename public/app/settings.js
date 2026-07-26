@@ -9,7 +9,7 @@
   const SENTINEL = '•••';
   // Defaults mirror DESIGN §4.3 / configStore.defaults() — shown as hints and used by reset.
   const DEF = {
-    economics: { poolFeePct: 0, startMarginNokH: 0.5, keepMarginNokH: 0.2, boardSwitch: { retuneMin: 45, wearNok: 2 } },
+    economics: { poolFeePct: 0, btcPremiumPct: 0, startMarginNokH: 0.5, keepMarginNokH: 0.2, boardSwitch: { retuneMin: 45, wearNok: 2 } },
     alt: { type: 'heatpump', scop: 3.0 },
     gridFee: { dayWeekday: 0.50, nightWeekend: 0.30, dayStartHour: 6, nightStartHour: 22 },
     electricity: { householdBaseKWhMonth: 1500, subsidyCapKWhMonth: 5000, timezone: 'Europe/Oslo' },
@@ -153,6 +153,7 @@
           <h4 className="mb" style={{ fontSize: 13 }}>Economics</h4>
           <div className="frow">
             <NumberField label="Pool fee" unit="%" step={0.1} defaultHint={DEF.economics.poolFeePct} {...bind(['economics', 'poolFeePct'])} />
+            <NumberField label="Sats premium over spot" unit="%" step={0.5} defaultHint={DEF.economics.btcPremiumPct} {...bind(['economics', 'btcPremiumPct'])} />
             <NumberField label="Start margin" unit="kr/h" step={0.05} defaultHint={DEF.economics.startMarginNokH} {...bind(['economics', 'startMarginNokH'])} />
             <NumberField label="Keep margin" unit="kr/h" step={0.05} defaultHint={DEF.economics.keepMarginNokH} {...bind(['economics', 'keepMarginNokH'])} />
             <NumberField label="Board switch: retune time" unit="min" defaultHint={DEF.economics.boardSwitch.retuneMin} {...bind(['economics', 'boardSwitch', 'retuneMin'])} />
