@@ -131,6 +131,36 @@ test('decide: negative price -> start at full throttle', () => {
   assert.deepEqual(d.trace.chosen, { boards: 3, targetW: 3000 });
 });
 
+// Board config drifted while paused (e.g. a disable that reported failure but
+// persisted — live incident 2026-07-26): RESUME must carry the reconciliation.
+test('decide: resume reconciles board config drift — enables boards disabled while paused', () => {
+  const d = decide(mkInputs({ snap: { paused: true, boardsOn: 2 } }));
+  assert.equal(d.action.type, 'RESUME');
+  assert.equal(d.action.boards, 3);
+  assert.deepEqual(d.action.enableIds, ['3']);
+  assert.deepEqual(d.action.disableIds, []);
+  assert.equal(d.action.targetW, 3000);
+  assert.equal(d.stateUpdates.lastBoardsChangeAt, NOW);
+  assert.deepEqual(d.trace.chosen, { boards: 3, targetW: 3000 });
+});
+
+test('decide: resume with a matching board config carries no board reconciliation', () => {
+  const d = decide(mkInputs({ snap: { paused: true, boardsOn: 3 } }));
+  assert.equal(d.action.type, 'RESUME');
+  assert.equal(d.action.enableIds, undefined);
+  assert.equal(d.action.disableIds, undefined);
+  assert.ok(!('lastBoardsChangeAt' in d.stateUpdates));
+});
+
+test('decide: resume reconciles the other way — disables boards the pick does not want', () => {
+  const d = decide(mkInputs({ snap: { paused: true, boardsOn: 3 }, candidates: [C1, C2] }));
+  assert.equal(d.action.type, 'RESUME');
+  assert.equal(d.action.boards, 2);
+  assert.deepEqual(d.action.enableIds, []);
+  assert.deepEqual(d.action.disableIds, ['3']);
+  assert.equal(d.stateUpdates.lastBoardsChangeAt, NOW);
+});
+
 test('decide: engine adds the OFF candidate itself (inputs contain none)', () => {
   const d = decide(mkInputs({ snap: { paused: true }, market: { marginalPrice: 6 }, state: { lastOffAt: iso(-60) } }));
   assert.ok(d.trace.candidatesTop.some((c) => c.off));

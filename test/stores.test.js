@@ -556,6 +556,35 @@ test('alerts: evaluate implements offline / dead-board / failover / horizon rule
   assert.deepEqual(fired, ['price-horizon']);
 });
 
+test('alerts: paused miner never counts as dead boards (enabled-but-idle is legitimate)', async () => {
+  const calls = [];
+  const alerts = new Alerts({
+    configStore: fakeConfigStore({ ntfy: { url: 'https://ntfy.sh', topic: 't' } }),
+    history: null,
+    fetchImpl: captureFetch(calls),
+  });
+  const t0 = Date.parse('2026-07-26T13:00:00.000Z');
+  const snap = (paused) => ({
+    online: true, paused,
+    boards: [{ id: '1', enabled: true, hashing: false }, { id: '2', enabled: true, hashing: false }],
+    pools: [], hashrate: {},
+  });
+  const ctx = (over) => ({ minerId: 'm1', tuningHold: false, market: { horizonCoversNow: true }, engineState: {}, ...over });
+
+  // paused far beyond the persistence window: no dead-board alerts (false
+  // criticals seen live 2026-07-26 while the engine had paused for price)
+  let fired = await alerts.evaluate(ctx({ now: new Date(t0).toISOString(), snapshot: snap(true) }));
+  assert.deepEqual(fired, []);
+  fired = await alerts.evaluate(ctx({ now: new Date(t0 + 20 * 60000).toISOString(), snapshot: snap(true) }));
+  assert.deepEqual(fired, [], 'paused: enabled-but-idle boards are not dead');
+
+  // the pause cleared the trackers: a genuinely dead board needs a fresh 10 min unpaused
+  fired = await alerts.evaluate(ctx({ now: new Date(t0 + 21 * 60000).toISOString(), snapshot: snap(false) }));
+  assert.deepEqual(fired, []);
+  fired = await alerts.evaluate(ctx({ now: new Date(t0 + 32 * 60000).toISOString(), snapshot: snap(false) }));
+  assert.deepEqual(fired.sort(), ['dead-board-1', 'dead-board-2']);
+});
+
 test('alerts: test() sends to every configured channel and skips unconfigured ones', async () => {
   const calls = [];
   const alerts = new Alerts({
