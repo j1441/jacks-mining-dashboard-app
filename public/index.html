@@ -142,6 +142,13 @@
     .board-slot { flex: 1; border-radius: 6px; padding: 8px; text-align: center; border: 1px solid var(--border); background: var(--bg); font-size: 12px; }
     .board-slot .bid { font-weight: 700; font-size: 13px; }
     .board-slot.hashing { border-color: rgba(74,222,128,.6); background: rgba(74,222,128,.08); }
+    /* Paused is a deliberate state, not a problem — keep it calm and unstyled
+       apart from dimming, so a price/thermostat pause never reads as a failure. */
+    .board-slot.paused { opacity: .7; border-style: dashed; }
+    .board-slot.tuning { border-color: rgba(251,191,36,.5); background: rgba(251,191,36,.06); }
+    /* Enabled but not hashing with no explanation — amber, not red. The red
+       "dead board" verdict belongs to the alert, which waits 10 min first. */
+    .board-slot.idle { border-color: var(--warn); background: rgba(251,191,36,.1); }
     .board-slot.fault { border-color: var(--crit); background: rgba(248,113,113,.1); }
     .board-slot.off { opacity: .55; }
     .kv { display: flex; justify-content: space-between; font-size: 13px; padding: 3px 0; gap: 10px; }

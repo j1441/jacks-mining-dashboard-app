@@ -114,6 +114,22 @@
     const tuner = (hw.tunerState || 'UNKNOWN').toUpperCase();
     const tuning = tuner === 'TUNING' || tuner === 'PREHEAT';
     const pool = miner.pool || {};
+
+    // Board state, mirroring the dead-board rule in lib/alerts.js: a board is
+    // only suspect when it is enabled AND not hashing AND the miner is neither
+    // paused nor mid-tune. Previously any enabled non-hashing board rendered
+    // "FAULT" in red, so every deliberate pause — setpoint reached, price too
+    // high — looked like hardware failure.
+    // Even the unexplained case says "idle", not "fault": the authoritative
+    // signal is the dead-board alert, which also requires 10 minutes of it.
+    const boardState = (b) => {
+      if (!b.enabled) return { cls: 'off', label: 'off' };
+      if (b.hashing) return { cls: 'hashing', label: fmtThs(b.hashrateThs) };
+      if (miner.paused) return { cls: 'paused', label: 'paused' };
+      if (tuning) return { cls: 'tuning', label: 'tuning' };
+      if (!miner.online) return { cls: 'off', label: '–' };
+      return { cls: 'idle', label: 'idle' };
+    };
     return (
       <Card title={<>{miner.name} <span className="muted mono" style={{ textTransform: 'none' }}>{miner.ip}</span></>}
         actions={<>
@@ -123,11 +139,11 @@
         </>}>
         <div className="boards mb">
           {slots.map((b) => {
-            const cls = !b.enabled ? 'off' : b.hashing ? 'hashing' : 'fault';
+            const st = boardState(b);
             return (
-              <div key={b.id} className={`board-slot ${cls}`}>
+              <div key={b.id} className={`board-slot ${st.cls}`}>
                 <div className="bid">Board {b.id}</div>
-                <div>{!b.enabled ? 'off' : b.hashing ? fmtThs(b.hashrateThs) : 'FAULT'}</div>
+                <div>{st.label}</div>
                 <div className="muted">chip {b.chipTempC != null ? `${fmtNum(b.chipTempC, 0)}°` : '–'} · pcb {b.boardTempC != null ? `${fmtNum(b.boardTempC, 0)}°` : '–'}{b.inletTempC != null ? ` · in ${fmtNum(b.inletTempC, 0)}°` : ''}</div>
               </div>
             );

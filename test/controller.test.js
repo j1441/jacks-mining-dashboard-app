@@ -301,6 +301,27 @@ test('live action: intent event is appended BEFORE actuation, stateUpdates persi
   }
 });
 
+test('snapshotForApi exposes paused — a pause is not a dead board', () => {
+  const t = makeController();
+  // A paused miner keeps its boards ENABLED; they simply stop hashing. Without
+  // this flag that state is indistinguishable from a dead hashboard, and the
+  // overview rendered every price/thermostat pause as a red "FAULT".
+  const base = fixtureSnapshot();
+  t.controller.lastSnapshot = fixtureSnapshot({
+    paused: true,
+    minerStatus: 'PAUSED',
+    boards: base.boards.map((b) => ({ ...b, enabled: true, hashing: false })),
+    boardsHashingCount: 0,
+  });
+  const paused = t.controller.snapshotForApi();
+  assert.equal(paused.paused, true);
+  assert.ok(paused.hw.boards.every((b) => b.enabled && !b.hashing),
+    'the very shape that used to render as FAULT');
+
+  t.controller.lastSnapshot = fixtureSnapshot();
+  assert.equal(t.controller.snapshotForApi().paused, false);
+});
+
 test('RESUME with board reconciliation: setBoards applied BEFORE resume, follow-up power after', async () => {
   const t = makeController({
     decisions: [cannedDecision({

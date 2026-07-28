@@ -200,13 +200,20 @@ createWsHub(httpServer) -> { broadcast(obj), clientCount() }   // path /ws
 
 Snapshot API object per miner:
 ```js
-{ id, name, ip, online, mode, dryRun, statusLine, statusSeverity,
+{ id, name, ip, online, paused, mode, dryRun, statusLine, statusSeverity,
   hw: { model, boards, fans, chipTempMax, coolingMode, tunerState },
   power: { targetW, wallW }, roomTempC, hashrate, pool: { url, user, failoverActive, rejectRatePct },
   economics: { revenueNokH, costNokH, heatValueNokH, netNokH, netNokDay, effJPerTh, effectiveScop },
   controller: { trace, wouldHave: string|null, dryRunActionCount, migrationNotice: bool },
   plan: [...] }
 ```
+`paused` mirrors the miner's `MINER_STATUS_PAUSED`. It exists because a paused miner's
+boards stay **enabled but stop hashing** — identical in shape to a dead board. Any
+consumer deciding whether a board is faulty must apply the same four-part test as the
+dead-board alert in `alerts.js`: enabled AND not hashing AND not paused AND not mid-tune
+(the alert additionally requires it to persist 10 min). The overview board grid renders
+off / hashing / paused / tuning / idle and reserves red for the alert itself.
+
 Boards carry `inletTempC`/`outletTempC` (BOS `lowest_inlet_temp`/`highest_outlet_temp`);
 `roomTempC` = min inlet across reporting boards, minus `heating.thermostat.idleOffsetC`
 when every fan is stopped (see `estimateRoomTempC` in controller.js). Null when offline
