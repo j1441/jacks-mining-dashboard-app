@@ -9,13 +9,27 @@ updates the community store's `docker-compose.yml` + `umbrel-app.yml` (repo
 `j1441/Jack-s-Community-Store`, folder `jacks-mining-dashboard`) with the new image+digest.
 The Umbrel then shows an update for the app.
 
-## Recommended: PR → merge → dispatch 2.0.0
-1. Get the `v2` branch onto `j1441/jacks-mining-dashboard-app` (PR or direct push).
-2. Merge to `main`. (This auto-triggers a build tagged as the store's next patch,
-   e.g. 1.2.88 — harmless; it's the v2 code, just mislabeled. Don't install it.)
-3. Run the **Build, Push and Update App Store** workflow via *Run workflow* with
-   `version = 2.0.0` (the auto-increment can't jump 1.2.x → 2.0.0 on its own).
-4. On the Umbrel, open the Mining Dashboard app → **Update** (or reinstall).
+## Deploying now: merge to main, that's it
+1. Get the branch onto `j1441/jacks-mining-dashboard-app` (PR or direct push).
+2. Merge to `main`. The push auto-triggers the build, which runs the tests, pushes
+   the image and updates the store at the next patch version.
+3. On the Umbrel, open the Mining Dashboard app → **Update** (or reinstall).
+
+**Do NOT dispatch `version = 2.0.0`.** That instruction was for the one-off 1.2.x → 2.0.0
+transition and is now a *downgrade* — the store passed 2.0.0 long ago (2.4.1 as of
+2026-07-28). Auto-increment handles 2.x correctly on its own; only pass an explicit
+`version` to jump a major, and check the store's current version first:
+```
+gh api repos/j1441/Jack-s-Community-Store/contents/jacks-mining-dashboard/umbrel-app.yml \
+  --jq '.content' | base64 -d | grep '^version'
+```
+
+**Gotcha — `APP_STORE_PAT` expiry.** The workflow's first real step checks out the
+community store using `secrets.APP_STORE_PAT`. When that token expires the run fails at
+that step with `Bad credentials`, and *every* later step — tests, Docker build, store
+update — is skipped. The run looks like a deploy but produces nothing. This silently
+broke deploys between 2026-07-26 and 2026-07-28. If a run fails fast (~30 s), check the
+token first: `gh secret list --repo j1441/jacks-mining-dashboard-app`.
 
 ## What happens on update
 - The existing app is replaced in place; the app id is unchanged so its data volume
