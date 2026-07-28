@@ -1,6 +1,6 @@
 # Deploying v2 to the Umbrel
 
-v2 lives on branch `v2` (this repo). 165 tests pass; the CI runs them before building.
+v2 lives on branch `v2` (this repo). 201 tests pass; the CI runs them before building.
 
 ## The pipeline (unchanged from v1)
 `.github/workflows/docker-build-push.yml`: on push to `main` (or manual dispatch) →
@@ -25,6 +25,22 @@ The Umbrel then shows an update for the app.
   you press **Go live**.
 - Verify: app loads, miner shows online at 192.168.1.89, the 48h plan and decision look
   right, `/health` is green. Watch its "would-have" decisions for a bit, then Go live.
+
+## Enabling the room temperature sensor (after the update)
+The `upstairs` zone has a Sonoff TH10 running Tasmota 15.5.0 at `192.168.1.59`
+(SI7021 probe on GPIO14). Add to that zone in `config.json`:
+```json
+"tempSensor": { "type": "tasmota", "host": "192.168.1.59", "name": "Upstairs TH10" }
+```
+While the reading is fresh (≤5 min) it supersedes the hashboard-inlet estimate for
+that zone; if the sensor goes unreachable the zone falls back to the inlet estimate
+automatically (one `temp-sensor-unavailable` warn event per outage). Zones without a
+`tempSensor` — currently `garage` — are unaffected and keep using the inlet estimate.
+
+Note: this device serves `/?m=1` but its `/cm` JSON endpoint drops the connection
+(reproducible, survives a restart). The poller negotiates transports and falls back to
+parsing `/?m=1`, so both work; `tempSensor.transport` in the zone summary shows which
+one is in use.
 
 ## Notes
 - Node bumped to 22 (Dockerfile `node:22-alpine`); all runtime deps are pure-JS
