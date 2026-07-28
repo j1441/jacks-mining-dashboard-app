@@ -137,6 +137,17 @@
     .modal h4 { margin-bottom: 10px; font-size: 16px; }
     .modal .actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 16px; }
 
+    /* ---- chart hover tooltip ---- */
+    .chart-wrap { position: relative; }
+    .chart-wrap svg { display: block; }
+    .chart-tip { position: absolute; top: 6px; z-index: 5; pointer-events: none;
+      background: var(--card2); border: 1px solid var(--border); border-radius: 6px;
+      padding: 7px 9px; font-size: 12px; min-width: 132px; box-shadow: 0 4px 14px rgba(0,0,0,.45); }
+    .chart-tip .tt-h { font-weight: 700; margin-bottom: 4px; }
+    .chart-tip > div { display: flex; justify-content: space-between; gap: 12px; line-height: 1.5; }
+    .chart-tip .tt-k { color: var(--muted); }
+    .chart-tip .tt-v { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+
     /* ---- domain widgets ---- */
     .boards { display: flex; gap: 8px; }
     .board-slot { flex: 1; border-radius: 6px; padding: 8px; text-align: center; border: 1px solid var(--border); background: var(--bg); font-size: 12px; }

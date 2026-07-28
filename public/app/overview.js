@@ -112,7 +112,12 @@
     const boards = hw.boards || [];
     const slots = [...boards].sort((a, b) => String(a.id).localeCompare(String(b.id)));
     const tuner = (hw.tunerState || 'UNKNOWN').toUpperCase();
-    const tuning = tuner === 'TUNING' || tuner === 'PREHEAT';
+    // BOSer keeps reporting a stale TUNING/PREHEAT indefinitely when a pause
+    // interrupts a re-tune (see the tuning-hold note in lib/engine.js, seen live
+    // 2026-07-24), so a paused miner showed a spinning "tuning" badge forever.
+    // The engine already ignores the tuner state while paused; so does this.
+    const staleTune = miner.paused && (tuner === 'TUNING' || tuner === 'PREHEAT');
+    const tuning = !miner.paused && (tuner === 'TUNING' || tuner === 'PREHEAT');
     const pool = miner.pool || {};
 
     // Board state, mirroring the dead-board rule in lib/alerts.js: a board is
@@ -134,8 +139,11 @@
       <Card title={<>{miner.name} <span className="muted mono" style={{ textTransform: 'none' }}>{miner.ip}</span></>}
         actions={<>
           {miner.online ? <Badge tone="ok">online</Badge> : <Badge tone="crit">offline</Badge>}
+          {miner.paused && <Badge>paused</Badge>}
           <Badge>{(miner.mode || '').toUpperCase()}</Badge>
-          <Badge tone={tuning ? 'warn' : tuner === 'ERROR' ? 'crit' : ''} spin={tuning}>{tuner.toLowerCase()}</Badge>
+          {!staleTune && (
+            <Badge tone={tuning ? 'warn' : tuner === 'ERROR' ? 'crit' : ''} spin={tuning}>{tuner.toLowerCase()}</Badge>
+          )}
         </>}>
         <div className="boards mb">
           {slots.map((b) => {
@@ -150,7 +158,14 @@
           })}
           {!slots.length && <div className="muted">no board data</div>}
         </div>
-        <div className="kv"><span className="k">Power target / wall</span><span className="v mono">{fmtW(miner.power && miner.power.targetW)} / {fmtW(miner.power && miner.power.wallW)}</span></div>
+        {/* While paused the miner draws nothing, so the effective target is 0 —
+            showing the tuner's configured 944 W beside a 0 W wall reading looked
+            like a fault. The configured value is kept as a muted hint. */}
+        <div className="kv"><span className="k">Power target / wall</span><span className="v mono">
+          {miner.paused
+            ? <>0 W / {fmtW(miner.power && miner.power.wallW)} <span className="muted">(tuner set {fmtW(miner.power && miner.power.targetW)})</span></>
+            : <>{fmtW(miner.power && miner.power.targetW)} / {fmtW(miner.power && miner.power.wallW)}</>}
+        </span></div>
         <div className="kv"><span className="k">Fans</span><span className="v mono">{(hw.fans || []).map((f) => `${f.rpm} rpm`).join(' · ') || '–'} <span className="muted">({hw.coolingMode || '?'})</span></span></div>
         <div className="kv"><span className="k">Hottest chip</span><span className="v mono">{hw.chipTempMax != null ? `${fmtNum(hw.chipTempMax, 0)} °C` : '–'}</span></div>
         <div className="kv"><span className="k">Pool</span>
