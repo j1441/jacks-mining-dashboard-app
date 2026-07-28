@@ -212,6 +212,16 @@ Boards carry `inletTempC`/`outletTempC` (BOS `lowest_inlet_temp`/`highest_outlet
 when every fan is stopped (see `estimateRoomTempC` in controller.js). Null when offline
 or no board reports an inlet temp.
 
+A zone may instead carry an external ambient sensor, `heating.zones[].tempSensor =
+{type: 'none'|'tasmota', host, name}`. When present and its reading is fresh (≤5 min),
+it **supersedes** the inlet estimate for that zone — `zoneRoomTemp` returns it directly
+rather than min-ing it with the miner-derived values, because a thermometer in the room
+is the better measurement and mixing the two would let a contaminated inlet reading win.
+A stale or unreachable sensor falls back to the inlet estimate (one `temp-sensor-unavailable`
+warn event per outage, `temp-sensor-online` on recovery); only when both are absent is
+`roomTempC` null. Zone summaries expose `roomTempSource: 'sensor'|'inlet'|'none'`,
+`inletTempC` (the estimate, always), `humidityPct`, and `tempSensor` status.
+
 Top-level: `{ ts, version, market: market.state()+{regime},
 heating: {demandKW, altType, altPricePerKWh, roomTempC, demandSource, thermostat:{targetC,bandC,maxKW}|null},
 miners: [...], alerts: recent, events: tail(20) }` — top-level roomTempC is the min across
@@ -221,7 +231,8 @@ and 0 whenever roomTempC is null (never heat blind; controller emits one
 
 ## server.js
 
-Wire order: configStore.load → history → market.start → per-miner (client, envelope.load,
+Wire order: configStore.load → history → market.start → tempSensors.start → per-miner
+(client, envelope.load,
 stateStore.load, controller.start) → api + static + wsHub → watchdog (60s: any controller
 lastTickAt older than 5min → CRITICAL event + direct alert + process.exit(1)) → SIGTERM
 graceful stop. PORT env (default 3456), DATA_DIR env (default /data).

@@ -14,6 +14,7 @@ const { Alerts } = require('./lib/alerts');
 const { Market } = require('./lib/market');
 const { Envelope } = require('./lib/envelope');
 const { MinerClient } = require('./lib/minerClient');
+const { TempSensors } = require('./lib/tempSensor');
 const { Controller } = require('./lib/controller');
 const { createApi, buildStateSnapshot } = require('./lib/api');
 const { createWsHub } = require('./lib/wsHub');
@@ -47,6 +48,18 @@ async function main() {
   const market = new Market({ configStore, history });
   await market.start();
 
+  // 2b. External room-temperature sensors (Tasmota over HTTP). Started before
+  //     the controllers so the first tick already has a real ambient reading
+  //     rather than falling back to the hashboard inlet estimate.
+  const tempSensors = new TempSensors({
+    configStore,
+    onEvent: ({ type, severity, message }) => {
+      history.appendEvent({ ts: new Date().toISOString(), id: 'tempSensor', type, severity, message })
+        .catch((e) => log('temp sensor event append failed:', e.message));
+    },
+  });
+  await tempSensors.start();
+
   // 3. Per-miner wiring. Controllers get a lazy WS proxy: any per-tick broadcast
   //    triggers a full /api/state snapshot broadcast once the hub is attached below.
   const stateStore = new StateStore({ dataDir: DATA_DIR });
@@ -74,20 +87,20 @@ async function main() {
     await envelope.load();
     controllers.push(new Controller({
       minerCfg, client, envelope, market, engine,
-      stateStore, history, alerts, wsHub: hubProxy, configStore, roomTemps,
+      stateStore, history, alerts, wsHub: hubProxy, configStore, roomTemps, tempSensors,
     }));
   }
   for (const c of controllers) await c.start();
 
   // 4. HTTP API + static UI + WS hub
   const app = express();
-  app.use(createApi({ configStore, controllers, market, history, alerts, version: VERSION }));
+  app.use(createApi({ configStore, controllers, market, history, alerts, version: VERSION, tempSensors }));
   app.use(express.static(path.join(__dirname, 'public')));
 
   const server = http.createServer(app);
   wsHub = createWsHub(server);
 
-  const snapCtx = { configStore, controllers, market, history, alerts, version: VERSION };
+  const snapCtx = { configStore, controllers, market, history, alerts, version: VERSION, tempSensors };
   let broadcasting = false;
   broadcastState = () => {
     if (broadcasting || wsHub.clientCount() === 0) return;
@@ -137,6 +150,7 @@ async function main() {
     log(`${signal} received — shutting down`);
     clearInterval(watchdog);
     try { await Promise.all(controllers.map((c) => c.stop())); } catch (e) { log('controller stop failed:', e.message); }
+    try { await tempSensors.stop(); } catch (e) { log('temp sensor stop failed:', e.message); }
     try { await market.stop(); } catch (e) { log('market stop failed:', e.message); }
     try { if (typeof stateStore.flush === 'function') await stateStore.flush(); } catch (e) { log('state flush failed:', e.message); }
     for (const client of clients) {
