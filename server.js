@@ -27,7 +27,13 @@ const log = (...a) => console.log('[server]', ...a);
 
 const PORT = parseInt(process.env.PORT, 10) || 3456;
 const DATA_DIR = process.env.DATA_DIR || '/data';
-const VERSION = require('./package.json').version;
+// The released version is decided by CI (it increments the store's
+// umbrel-app.yml) and baked into the image as APP_VERSION, so package.json is
+// only the local-development fallback. It used to be the sole source, which is
+// why the footer read "v2.4.0" on every release from 2.4.0 onward — CI never
+// writes package.json, so the number was frozen and told you nothing about
+// which build you were running.
+const VERSION = process.env.APP_VERSION || require('./package.json').version;
 
 const WATCHDOG_INTERVAL_MS = 60 * 1000;
 // Stall threshold scales with the configured poll cadence (validator allows up

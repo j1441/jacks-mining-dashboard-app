@@ -95,6 +95,10 @@ jobs:
           context: .
           platforms: linux/amd64
           push: true
+          # Bakes the published version into the image so the app can report the
+          # build it is actually running; package.json is never bumped by CI.
+          build-args: |
+            APP_VERSION=${{ steps.version.outputs.version }}
           tags: |
             ${{ env.DOCKER_HUB_USERNAME }}/${{ env.IMAGE_NAME }}:latest
             ${{ env.DOCKER_HUB_USERNAME }}/${{ env.IMAGE_NAME }}:${{ steps.version.outputs.version }}
