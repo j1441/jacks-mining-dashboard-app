@@ -214,10 +214,16 @@ dead-board alert in `alerts.js`: enabled AND not hashing AND not paused AND not 
 (the alert additionally requires it to persist 10 min). The overview board grid renders
 off / hashing / paused / tuning / idle and reserves red for the alert itself.
 
-Boards carry `inletTempC`/`outletTempC` (BOS `lowest_inlet_temp`/`highest_outlet_temp`);
-`roomTempC` = min inlet across reporting boards, minus `heating.thermostat.idleOffsetC`
-when every fan is stopped (see `estimateRoomTempC` in controller.js). Null when offline
-or no board reports an inlet temp.
+Boards carry `inletTempC`/`outletTempC` (BOS `lowest_inlet_temp`/`highest_outlet_temp`)
+and `boardTempC` (`board_temp`). **BOS only publishes inlet/outlet for a board that is
+hashing** — a paused miner returns null for both on every board, and a disabled board
+returns null for all four. The miner-derived room estimate therefore uses an *ambient
+proxy* per board (`ambientProxyTempsC` in controller.js): the inlet where present, else
+the PCB temp when the miner is not hashing. A stopped board's PCB settles to ambient plus
+a degree or two; a hashing board's does not, so it is never substituted.
+`roomTempC` = min ambient proxy across reporting boards, minus
+`heating.thermostat.idleOffsetC` whenever the miner is not hashing (see
+`estimateRoomTempC`). Null when offline or when no board offers a usable proxy.
 
 A zone may instead carry an external ambient sensor, `heating.zones[].tempSensor =
 {type: 'none'|'tasmota', host, name}`. When present and its reading is fresh (≤5 min),
@@ -227,7 +233,9 @@ is the better measurement and mixing the two would let a contaminated inlet read
 A stale or unreachable sensor falls back to the inlet estimate (one `temp-sensor-unavailable`
 warn event per outage, `temp-sensor-online` on recovery); only when both are absent is
 `roomTempC` null. Zone summaries expose `roomTempSource: 'sensor'|'inlet'|'none'`,
-`inletTempC` (the estimate, always), `humidityPct`, and `tempSensor` status.
+`inletTempC` (the estimate, always), `humidityPct`, and `tempSensor` status. `'inlet'` and
+`inletTempC` are historical names for the miner-derived estimate as a whole — since the
+ambient-proxy change above the underlying sensor may be the PCB rather than the inlet.
 
 Top-level: `{ ts, version, market: market.state()+{regime},
 heating: {demandKW, altType, altPricePerKWh, roomTempC, demandSource, thermostat:{targetC,bandC,maxKW}|null},
