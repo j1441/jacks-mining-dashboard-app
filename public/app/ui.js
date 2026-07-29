@@ -157,10 +157,27 @@
     );
   };
 
+  // Keep the hover tooltip inside the plot: centred normally, but anchored left
+  // or right within ~15% of either edge so it never clips off the card.
+  const hv2pct = (p) => Math.max(0, Math.min(100, p));
+  const tipShift = (p) => (p < 15 ? 'translateX(0)' : p > 85 ? 'translateX(-100%)' : 'translateX(-50%)');
+
   // BarStrip: hourly price bars (colored by regime) + translucent planned-W overlay + now marker.
+  // Hovering anywhere over the plot reads out that hour's values. The pointer is
+  // tracked across the whole plot area rather than per-bar, because the bars are
+  // only 76% of their slot — with per-rect hover the gaps between them would keep
+  // dropping the tooltip as the pointer moved along the chart.
   const BarStrip = ({ hours, height = 110, onBarClick }) => {
+    const [hover, setHover] = useState(null); // {i, xPct}
     if (!hours || !hours.length) return <div className="muted">no price data</div>;
     const n = hours.length, bw = 100 / n;
+    const onMove = (e) => {
+      const r = e.currentTarget.getBoundingClientRect();
+      if (!r.width) return;
+      const i = Math.max(0, Math.min(n - 1, Math.floor(((e.clientX - r.left) / r.width) * n)));
+      setHover({ i, xPct: ((i + 0.5) / n) * 100 });
+    };
+    const hv = hover ? hours[hover.i] : null;
     const maxP = Math.max(0.01, ...hours.map((h) => h.price ?? 0));
     const minP = Math.min(0, ...hours.map((h) => h.price ?? 0)); // negative prices are legal
     const spanP = Math.max(1e-9, maxP - minP);
@@ -175,22 +192,40 @@
     const labelEvery = n > 30 ? 6 : 3;
     return (
       <div>
-        <svg width="100%" height={height} viewBox="0 0 100 100" preserveAspectRatio="none">
-          <line x1="0" x2="100" y1={y(0)} y2={y(0)} stroke="var(--border)" strokeWidth="1" vectorEffect="non-scaling-stroke" />
-          {hours.map((h, i) => (
-            <rect key={i} x={(i * bw + bw * 0.12).toFixed(2)} width={(bw * 0.76).toFixed(2)}
-              y={Math.min(y(h.price ?? 0), y(0)).toFixed(2)} height={Math.abs(y(h.price ?? 0) - y(0)).toFixed(2)}
-              fill={h.regime === 'over-cap' ? 'var(--crit)' : 'var(--accent)'} opacity={h.isNow ? 1 : 0.55}
-              style={onBarClick ? { cursor: 'pointer' } : null} onClick={onBarClick ? () => onBarClick(h, i) : null}>
-              <title>{`${h.label} — ${fmtNum(h.price, 2)} kr/kWh${h.plannedW != null ? ` · plan ${h.off ? 'off' : Math.round(h.plannedW) + ' W'}` : ''}`}</title>
-            </rect>
-          ))}
-          {wOverlay && <polygon points={area} fill="rgba(74,222,128,.16)" stroke="var(--ok)" strokeWidth="1.5" vectorEffect="non-scaling-stroke" />}
-          {hours.map((h, i) => h.isNow ? (
-            <line key={`now${i}`} x1={(i * bw + bw / 2).toFixed(2)} x2={(i * bw + bw / 2).toFixed(2)} y1="0" y2="100"
-              stroke="var(--text)" strokeWidth="1" strokeDasharray="3,3" vectorEffect="non-scaling-stroke" />
-          ) : null)}
-        </svg>
+        <div className="chart-wrap" onMouseMove={onMove} onMouseLeave={() => setHover(null)}>
+          <svg width="100%" height={height} viewBox="0 0 100 100" preserveAspectRatio="none">
+            <line x1="0" x2="100" y1={y(0)} y2={y(0)} stroke="var(--border)" strokeWidth="1" vectorEffect="non-scaling-stroke" />
+            {hover && <rect x={(hover.i * bw).toFixed(2)} width={bw.toFixed(2)} y="0" height="100" fill="rgba(255,255,255,.07)" />}
+            {hours.map((h, i) => (
+              <rect key={i} x={(i * bw + bw * 0.12).toFixed(2)} width={(bw * 0.76).toFixed(2)}
+                y={Math.min(y(h.price ?? 0), y(0)).toFixed(2)} height={Math.abs(y(h.price ?? 0) - y(0)).toFixed(2)}
+                fill={h.regime === 'over-cap' ? 'var(--crit)' : 'var(--accent)'}
+                opacity={hover && hover.i === i ? 1 : h.isNow ? 1 : 0.55}
+                style={onBarClick ? { cursor: 'pointer' } : null} onClick={onBarClick ? () => onBarClick(h, i) : null} />
+            ))}
+            {wOverlay && <polygon points={area} fill="rgba(74,222,128,.16)" stroke="var(--ok)" strokeWidth="1.5" vectorEffect="non-scaling-stroke" />}
+            {hours.map((h, i) => h.isNow ? (
+              <line key={`now${i}`} x1={(i * bw + bw / 2).toFixed(2)} x2={(i * bw + bw / 2).toFixed(2)} y1="0" y2="100"
+                stroke="var(--text)" strokeWidth="1" strokeDasharray="3,3" vectorEffect="non-scaling-stroke" />
+            ) : null)}
+          </svg>
+          {hv && (
+            <div className="chart-tip" style={{ left: `${hv2pct(hover.xPct)}%`, transform: tipShift(hover.xPct) }}>
+              <div className="tt-h">{hv.label}{hv.isNow ? ' · now' : ''}</div>
+              <div><span className="tt-k">price</span><span className="tt-v">{fmtNum(hv.price, 2)} kr/kWh</span></div>
+              {hv.regime && <div><span className="tt-k">regime</span><span className="tt-v">{hv.regime}</span></div>}
+              {hv.plannedW != null && (
+                <div><span className="tt-k">plan</span><span className="tt-v">{hv.off ? 'off' : `${Math.round(hv.plannedW)} W`}</span></div>
+              )}
+              {hv.row && hv.row.expNetNokH != null && (
+                <div><span className="tt-k">net</span><span className="tt-v">{fmtNum(hv.row.expNetNokH, 2)} kr/h</span></div>
+              )}
+              {hv.row && hv.row.expHeatKW != null && (
+                <div><span className="tt-k">heat</span><span className="tt-v">{fmtNum(hv.row.expHeatKW, 2)} kW</span></div>
+              )}
+            </div>
+          )}
+        </div>
         <div className="xlabs">{hours.map((h, i) => i % labelEvery === 0 ? <span key={i}>{h.label}</span> : null)}</div>
         <div className="legend">
           <span><i style={{ background: 'var(--accent)' }} />price kr/kWh</span>

@@ -587,6 +587,72 @@ test('classifyRoomReading: trusts fans-at-speed hashing and cooled idle; flags t
   assert.equal(classifyRoomReading({ online: true, boards: [{}], boardsHashingCount: 0, cooling: { fans: [] } }, thermo, null), null);
 });
 
+test('ambientProxyTempsC: a stopped board falls back to its PCB temp, a hashing one never does', () => {
+  const { ambientProxyTempsC } = require('../lib/controller');
+  // Live 2026-07-29, paused garage S19j Pro: inlet/outlet null on every board,
+  // board_temp and chip_temp present. The PCB temps are the only ambient proxy.
+  const pausedGarage = {
+    boards: [
+      { boardTempC: 24, chipTempC: 39, inletTempC: null, outletTempC: null },
+      { boardTempC: 24.5, chipTempC: 39.5, inletTempC: null, outletTempC: null },
+      { boardTempC: 24, chipTempC: 39, inletTempC: null, outletTempC: null },
+    ],
+  };
+  assert.deepEqual(ambientProxyTempsC(pausedGarage, false), [24, 24.5, 24]);
+  // The same boards while hashing: the PCB is self-heated, so no proxy at all.
+  assert.deepEqual(ambientProxyTempsC(pausedGarage, true), []);
+  // Live 2026-07-29, hashing S19J4: one live board with an inlet, two disabled
+  // boards reporting nothing. The inlet wins and the empty boards drop out.
+  const hashingHome = {
+    boards: [
+      { boardTempC: null, chipTempC: null, inletTempC: null, outletTempC: null },
+      { boardTempC: 47.5, chipTempC: 62.5, inletTempC: 35, outletTempC: 47.5 },
+      { boardTempC: null, chipTempC: null, inletTempC: null, outletTempC: null },
+    ],
+  };
+  assert.deepEqual(ambientProxyTempsC(hashingHome, true), [35]);
+  // An inlet, where present, is preferred over the PCB even when stopped.
+  assert.deepEqual(ambientProxyTempsC({ boards: [{ boardTempC: 30, inletTempC: 21 }] }, false), [21]);
+  assert.deepEqual(ambientProxyTempsC({ boards: [] }, false), []);
+  assert.deepEqual(ambientProxyTempsC({}, false), []);
+});
+
+test('classifyRoomReading: a paused miner reads the room from its PCB temps', () => {
+  const { classifyRoomReading } = require('../lib/controller');
+  const thermo = { idleOffsetC: 1.5 };
+  // Paused miners publish no inlet temp at all — only board_temp survives.
+  const paused = ({ board = 24, chip = 39, fanRpm = 1020 }) => ({
+    online: true,
+    boards: [{ inletTempC: null, boardTempC: board, chipTempC: chip }],
+    boardsHashingCount: 0,
+    cooling: { fans: [{ rpm: fanRpm }] },
+  });
+  // The live garage case (2026-07-29): zero hashrate, fans idling at ~1000 rpm,
+  // chips settled at 39°, PCB at 24°. Before this fix the zone got no reading:
+  // no inlet temp existed, and the fans were too fast for the old idle gate.
+  assert.deepEqual(classifyRoomReading(paused({ board: 24, chip: 39, fanRpm: 1020 }), thermo, 60),
+    { tempC: 22.5, reliable: true });
+  // Just paused with hot boards and the fans blowing them down — the chip
+  // ceiling still rejects it, fans running or not.
+  assert.equal(classifyRoomReading(paused({ board: 30, chip: 68, fanRpm: 3000 }), thermo, 2).reliable, false);
+  // Stopped only 5 min ago: chips look cool but the enclosure has not settled yet.
+  assert.equal(classifyRoomReading(paused({ board: 28, chip: 44, fanRpm: 1020 }), thermo, 5).reliable, false);
+  // Boards re-initialising (no chip temps) with fans up → still not trusted.
+  assert.equal(classifyRoomReading(paused({ board: 28, chip: null, fanRpm: 3000 }), thermo, 75).reliable, false);
+  // Fans moving air settle the chassis sooner than a passive cooldown: 20 min
+  // qualifies at 1020 rpm, the same 20 min with the fans parked does not.
+  assert.equal(classifyRoomReading(paused({ fanRpm: 1020 }), thermo, 20).reliable, true);
+  assert.equal(classifyRoomReading(paused({ fanRpm: 0 }), thermo, 20).reliable, false);
+  // A hashing miner never falls back to the PCB: the live S19J4 read PCB 47.5°
+  // against inlet 35°, and 47.5° is nobody's living room.
+  assert.equal(classifyRoomReading({
+    online: true,
+    boards: [{ inletTempC: null, boardTempC: 47.5, chipTempC: 62.5 }],
+    boardsHashingCount: 1,
+    cooling: { fans: [{ rpm: 3000 }] },
+  }, thermo, null, 30), null);
+});
+
 test('maybeApplyCooling: applies configured mode once when miner disagrees, throttled', async () => {
   const calls = [];
   const events = [];
@@ -634,23 +700,34 @@ test('zones: zoneForMiner resolves by zoneId; zoneRoomTemp takes coolest fresh r
   assert.equal(zoneRoomTemp(new Map(), 'x', null), null);
 });
 
-test('estimateRoomTempC: min inlet across boards, idle offset only when fans are off', () => {
+test('estimateRoomTempC: min ambient proxy across boards, idle offset while stopped', () => {
   const { estimateRoomTempC } = require('../lib/controller');
   const thermo = { idleOffsetC: 1.5 };
-  const snap = (boards, fans) => ({ online: true, boards, cooling: { fans } });
+  const snap = (boards, fans, hashing = 0) => ({
+    online: true, boards, boardsHashingCount: hashing, cooling: { fans },
+  });
   const fansOn = [{ rpm: 3000 }, { rpm: 3010 }];
   const fansOff = [{ rpm: 0 }, { rpm: 0 }];
+  const fansIdling = [{ rpm: 1020 }, { rpm: 1050 }];
 
   // mining: fans pull room air — min inlet used as-is (26.5 beats the hot board's 33.5)
-  assert.equal(estimateRoomTempC(snap([{ inletTempC: 33.5 }, { inletTempC: 26.5 }], fansOn), thermo), 26.5);
+  assert.equal(estimateRoomTempC(snap([{ inletTempC: 33.5 }, { inletTempC: 26.5 }], fansOn, 1), thermo), 26.5);
   // paused: fans off → subtract idle offset
   assert.equal(estimateRoomTempC(snap([{ inletTempC: 26.5 }, { inletTempC: 27 }], fansOff), thermo), 25);
-  // no inlet data at all → null
-  assert.equal(estimateRoomTempC(snap([{ inletTempC: null }, {}], fansOn), thermo), null);
+  // paused with the fans still idling — the offset keys off hashing, not fan rpm
+  assert.equal(estimateRoomTempC(snap([{ inletTempC: 26.5 }, { inletTempC: 27 }], fansIdling), thermo), 25);
+  // paused: no inlet published at all, so the PCB temps stand in (live garage case)
+  assert.equal(estimateRoomTempC(snap([
+    { inletTempC: null, boardTempC: 24 }, { inletTempC: null, boardTempC: 23.5 },
+  ], fansIdling), thermo), 22);
+  // hashing with no inlet: the PCB is self-heated, so there is no usable proxy
+  assert.equal(estimateRoomTempC(snap([{ inletTempC: null, boardTempC: 47.5 }], fansOn, 1), thermo), null);
+  // no usable sensor at all → null
+  assert.equal(estimateRoomTempC(snap([{ inletTempC: null }, {}], fansOn, 1), thermo), null);
   // offline → null
   assert.equal(estimateRoomTempC({ online: false, boards: [{ inletTempC: 25 }], cooling: { fans: fansOn } }, thermo), null);
   // implausible reading → null
-  assert.equal(estimateRoomTempC(snap([{ inletTempC: 250 }], fansOn), thermo), null);
+  assert.equal(estimateRoomTempC(snap([{ inletTempC: 250 }], fansOn, 1), thermo), null);
 });
 
 test('/health: 200 while every controller ticked recently, 503 once one goes stale', async () => {
