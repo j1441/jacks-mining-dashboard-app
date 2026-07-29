@@ -1,5 +1,12 @@
 FROM node:22-alpine
 
+# The version CI is publishing this image as. It is the store/umbrel-app.yml
+# version, which package.json does not track, so it has to come in from the
+# build rather than out of the source tree. server.js falls back to
+# package.json when this is unset (local `docker build`, `node server.js`).
+ARG APP_VERSION=dev
+ENV APP_VERSION=$APP_VERSION
+
 WORKDIR /app
 
 # Install production dependencies only
